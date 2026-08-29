@@ -44,11 +44,23 @@ function isReady(spec: PuzzleSpec, solution: Solution, constraint: ClueConstrain
 }
 
 function permutations(values: string[]): string[][] {
-  if (values.length < 2) return [values];
-  const result: string[][] = [];
-  for (let index = 0; index < values.length; index += 1) {
-    const rest = [...values.slice(0, index), ...values.slice(index + 1)];
-    for (const tail of permutations(rest)) result.push([values[index], ...tail]);
+  // Iterative Heap's algorithm keeps the call stack constant even if the MVP's
+  // row limit is increased in a future template version.
+  const current = [...values];
+  const result = [[...current]];
+  const counters = new Array<number>(current.length).fill(0);
+  let index = 1;
+  while (index < current.length) {
+    if (counters[index] < index) {
+      const swapIndex = index % 2 === 0 ? 0 : counters[index];
+      [current[swapIndex], current[index]] = [current[index], current[swapIndex]];
+      result.push([...current]);
+      counters[index] += 1;
+      index = 1;
+    } else {
+      counters[index] = 0;
+      index += 1;
+    }
   }
   return result;
 }
