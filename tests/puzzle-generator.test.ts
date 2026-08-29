@@ -52,12 +52,15 @@ test("quality reports clue diversity, readability, and no-guess human trace", ()
 });
 
 test("OpenAPI documents every public REST endpoint", async () => {
-  const specification = await readFile(new URL("../openapi/v1.yaml", import.meta.url), "utf8");
-  for (const path of ["/healthz", "/v1/scenarios", "/v1/version", "/v1/puzzles/generate"]) {
+  const specification = await readFile(new URL("../public/openapi/v1.yaml", import.meta.url), "utf8");
+  for (const path of ["/healthz", "/docs", "/openapi/v1.yaml", "/v1/scenarios", "/v1/version", "/v1/puzzles/generate"]) {
     assert.match(specification, new RegExp(`^  ${path.replace(/[/.]/g, "\\$&")}:`, "m"));
   }
   assert.match(specification, /GeneratedPuzzle:/);
   assert.match(specification, /Error:/);
+  assert.match(specification, /X-Request-Id:/);
+  assert.match(specification, /Access-Control-Allow-Origin:/);
+  assert.match(specification, /'304':/);
 });
 
 test("REST generation redacts the hidden solution and includes reproducibility metadata", async () => {
@@ -81,7 +84,7 @@ test("REST supports cacheable deterministic GET generation", async () => {
   const response = await route(new Request("https://yokaiba.test/v1/puzzles/generate?templateId=tournament-order-v1&seed=api-seed"));
 
   assert.equal(response.status, 200);
-  assert.equal(response.headers.get("cache-control"), "public, max-age=3600, s-maxage=86400, immutable");
+  assert.equal(response.headers.get("cache-control"), "public, max-age=300, s-maxage=300, must-revalidate");
   const body = await response.json() as Record<string, unknown>;
   assert.equal(body.seed, "api-seed");
   assert.equal("solution" in body, false);
@@ -212,7 +215,30 @@ test("worker returns an ETag and honors conditional public GETs", async () => {
   const first = await worker.fetch(new Request(url, { headers: { origin: "https://game.example", "cf-connecting-ip": "192.0.2.89" } }), env, {} as ExecutionContext);
   assert.equal(first.status, 200);
   const etag = first.headers.get("etag");
-  assert.ok(etag);
+  assert.match(etag ?? "", /^"yokaiba-v1-[a-f0-9]{64}"$/);
   const second = await worker.fetch(new Request(url, { headers: { origin: "https://game.example", "if-none-match": etag!, "cf-connecting-ip": "192.0.2.89" } }), env, {} as ExecutionContext);
   assert.equal(second.status, 304);
+});
+
+test("worker serves a hardened Swagger UI and canonical OpenAPI specification", async () => {
+  const assets = {
+    fetch: async () => new Response("openapi: 3.1.0\n", { headers: { "content-type": "application/yaml" } }),
+  };
+  const env = { ASSETS: assets };
+
+  const docs = await worker.fetch(new Request("https://yokaiba.test/docs"), env, {} as ExecutionContext);
+  assert.equal(docs.status, 200);
+  assert.match(docs.headers.get("content-security-policy") ?? "", /connect-src 'self'/);
+  assert.equal(docs.headers.get("x-content-type-options"), "nosniff");
+  assert.ok(docs.headers.get("x-request-id"));
+  assert.match(await docs.text(), /swagger-ui-bundle\.js/);
+
+  const docsWithSlash = await worker.fetch(new Request("https://yokaiba.test/docs/"), env, {} as ExecutionContext);
+  assert.equal(docsWithSlash.status, 200);
+  assert.match(docsWithSlash.headers.get("content-security-policy") ?? "", /connect-src 'self'/);
+
+  const specification = await worker.fetch(new Request("https://yokaiba.test/openapi/v1.yaml"), env, {} as ExecutionContext);
+  assert.equal(specification.status, 200);
+  assert.match(specification.headers.get("content-type") ?? "", /application\/yaml/);
+  assert.match(await specification.text(), /openapi: 3.1.0/);
 });

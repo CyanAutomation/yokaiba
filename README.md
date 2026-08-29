@@ -22,14 +22,14 @@ npm run dev
 
 ## REST API
 
-The complete contract is [openapi/v1.yaml](openapi/v1.yaml). Public endpoints are:
+The complete contract is published at [`/openapi/v1.yaml`](https://yokaiba.scheimann.workers.dev/openapi/v1.yaml), with an interactive [Swagger UI](https://yokaiba.scheimann.workers.dev/docs). The repository source is [public/openapi/v1.yaml](public/openapi/v1.yaml). Public endpoints are:
 
 - `GET /healthz`
 - `GET /v1/scenarios`
 - `GET /v1/version`
 - `GET` or `POST /v1/puzzles/generate`
 
-For browser games, use the cacheable GET form. Deterministic responses include `Cache-Control: public, max-age=3600, s-maxage=86400, immutable`.
+For browser games, use the cacheable GET form. Deterministic responses are cached for five minutes and then revalidated, so a generator release cannot be held indefinitely by a stale browser or edge cache.
 
 ```js
 const baseUrl = "https://your-worker.workers.dev";

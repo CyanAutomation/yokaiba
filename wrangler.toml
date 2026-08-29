@@ -2,6 +2,11 @@ name = "yokaiba"
 main = "worker/index.ts"
 compatibility_date = "2026-08-29"
 
+[assets]
+directory = "./public"
+binding = "ASSETS"
+run_worker_first = ["/docs", "/docs/", "/openapi/*"]
+
 # Set these as Worker secrets before deployment:
 #   npx wrangler secret put API_KEY
 #   npx wrangler secret put MCP_ALLOWED_HOSTNAMES
