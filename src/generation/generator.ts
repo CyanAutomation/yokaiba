@@ -6,7 +6,7 @@ export const SOLVER_VERSION = "yokaiba-exhaustive-v1";
 
 function hash(seed: string): number {
   let value = 2166136261;
-  for (const character of seed) { value ^= character.codePointAt(0)!; value = Math.imul(value, 16777619); }
+  for (const character of seed) { const code = character.codePointAt(0); if (code !== undefined) { value ^= code; value = Math.imul(value, 16777619); } }
   return value >>> 0;
 }
 
