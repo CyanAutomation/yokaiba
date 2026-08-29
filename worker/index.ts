@@ -101,7 +101,8 @@ function cachePublicGet(response: Response, request: Request): Response {
 async function restRateLimited(request: Request, env: Env): Promise<boolean> {
   if (env.REST_RATE_LIMITER) {
     try {
-      const path = new URL(request.url).pathname;
+      const url = new URL(request.url);
+      const path = url.pathname;
       const client = request.headers.get("cf-connecting-ip") ?? "anonymous";
       return !(await env.REST_RATE_LIMITER.limit({ key: `${client}:${path}` })).success;
     } catch {
