@@ -16,6 +16,8 @@ interface Env {
   REST_RATE_LIMIT?: string;
   /** Optional Cloudflare Rate Limiting binding for production-wide REST enforcement. */
   REST_RATE_LIMITER?: { limit(options: { key: string }): Promise<{ success: boolean }> };
+  /** Static public assets, including Swagger UI and the canonical OpenAPI document. */
+  ASSETS?: { fetch(request: Request): Promise<Response> };
 }
 
 const templates = [tournamentOrderTemplate];
@@ -27,6 +29,14 @@ function json(value: unknown, status = 200) {
 }
 
 const encoder = new TextEncoder();
+
+const swaggerUiDocument = `<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Yokaiba API reference</title><link rel="stylesheet" href="https://unpkg.com/swagger-ui-dist@5.17.14/swagger-ui.css"></head>
+<body><main id="swagger-ui" aria-label="Yokaiba API reference"></main>
+<script src="https://unpkg.com/swagger-ui-dist@5.17.14/swagger-ui-bundle.js"></script>
+<script>window.ui = SwaggerUIBundle({url:"/openapi/v1.yaml",dom_id:"#swagger-ui",deepLinking:true,presets:[SwaggerUIBundle.presets.apis],layout:"BaseLayout"});</script>
+</body></html>`;
 
 function constantTimeEqual(expected: string, candidate: string): boolean {
   const expectedBytes = encoder.encode(expected);
@@ -88,14 +98,41 @@ function weaklyMatchesEtag(ifNoneMatch: string | null, etag: string): boolean {
   return ifNoneMatch.split(",").map(value => value.trim()).some(value => value === "*" || value.replace(/^W\//, "") === etag);
 }
 
-function cachePublicGet(response: Response, request: Request): Response {
+async function contentEtag(response: Response): Promise<string> {
+  const digest = await crypto.subtle.digest("SHA-256", await response.clone().arrayBuffer());
+  return `"yokaiba-v1-${[...new Uint8Array(digest)].map(byte => byte.toString(16).padStart(2, "0")).join("")}"`;
+}
+
+async function cachePublicGet(response: Response, request: Request): Promise<Response> {
   if (request.method !== "GET" || response.status !== 200) return response;
-  const url = new URL(request.url);
-  const etag = `"yokaiba-v1-${encodeURIComponent(`${url.pathname}${url.search}`)}"`;
+  const etag = await contentEtag(response);
   const headers = new Headers(response.headers);
   headers.set("etag", etag);
   if (weaklyMatchesEtag(request.headers.get("if-none-match"), etag)) return new Response(null, { status: 304, headers });
   return new Response(response.body, { status: response.status, statusText: response.statusText, headers });
+}
+
+function swaggerUiResponse(): Response {
+  return new Response(swaggerUiDocument, {
+    headers: {
+      "content-type": "text/html; charset=utf-8",
+      "cache-control": "no-store",
+      "content-security-policy": "default-src 'none'; script-src 'self' 'unsafe-inline' https://unpkg.com; style-src 'self' 'unsafe-inline' https://unpkg.com; img-src 'self' data: https:; connect-src 'self'; base-uri 'none'; frame-ancestors 'none'",
+      "referrer-policy": "no-referrer",
+      "x-content-type-options": "nosniff",
+    },
+  });
+}
+
+async function staticAsset(request: Request, env: Env, assetPath: string): Promise<Response> {
+  if (!env.ASSETS) return json({ error: { code: "not_configured", message: "static assets are not configured" } }, 503);
+  const url = new URL(request.url);
+  url.pathname = assetPath;
+  url.search = "";
+  const asset = await env.ASSETS.fetch(new Request(url, request));
+  const headers = new Headers(asset.headers);
+  headers.set("x-content-type-options", "nosniff");
+  return new Response(asset.body, { status: asset.status, statusText: asset.statusText, headers });
 }
 
 async function restRateLimited(request: Request, env: Env): Promise<boolean> {
@@ -140,6 +177,8 @@ export default {
       return response;
     };
     if (path === "/healthz") return finish(json({ status: "ok" }));
+    if (path === "/docs" || path === "/docs/") return finish(swaggerUiResponse());
+    if (path === "/openapi/v1.yaml") return finish(await staticAsset(request, env, "/openapi/v1.yaml"));
     if (restRequest && request.method === "OPTIONS") {
       const requestedMethod = request.headers.get("access-control-request-method");
       const requestedHeaders = request.headers.get("access-control-request-headers")?.split(",").map(value => value.trim().toLowerCase()).filter(Boolean) ?? [];
@@ -152,7 +191,7 @@ export default {
         headers: { "content-type": "application/json; charset=utf-8", "retry-after": "60" },
       }));
     }
-    if (path !== "/mcp") return finish(cachePublicGet(await rest(request), request));
+    if (path !== "/mcp") return finish(await cachePublicGet(await rest(request), request));
     if (rateLimited(request, env.MCP_RATE_LIMIT, "mcp")) {
       return finish(new Response(JSON.stringify({ error: { code: "rate_limited", message: "Too many requests" } }), {
         status: 429,

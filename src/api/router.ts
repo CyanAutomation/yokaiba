@@ -3,7 +3,9 @@ import type { GeneratedPuzzle, PuzzleTemplate } from "../domain/types.js";
 
 const MAX_GENERATION_FIELD_LENGTH = 128;
 const MAX_GENERATION_BODY_BYTES = 16 * 1024;
-const GENERATED_PUZZLE_CACHE_CONTROL = "public, max-age=3600, s-maxage=86400, immutable";
+// Generator releases can change a puzzle's representation. Keep browser and edge
+// caches short-lived, and require revalidation instead of promising immutability.
+const GENERATED_PUZZLE_CACHE_CONTROL = "public, max-age=300, s-maxage=300, must-revalidate";
 
 const json = (body: unknown, status = 200, headers?: HeadersInit) => new Response(JSON.stringify(body), {
   status,
