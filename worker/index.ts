@@ -20,7 +20,7 @@ function json(value: unknown, status: number) {
 function authorized(request: Request, key: string | undefined) {
   if (!key) return false;
   const candidate = request.headers.get("authorization")?.replace(/^Bearer\s+/i, "") ?? request.headers.get("x-api-key");
-  return candidate === key;
+  return candidate !== undefined && key.length === candidate.length && crypto.subtle.timingSafeEqual(new TextEncoder().encode(key), new TextEncoder().encode(candidate));
 }
 
 function allowedOrigin(request: Request, hostnames: string[]) {
