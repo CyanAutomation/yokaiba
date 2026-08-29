@@ -32,9 +32,9 @@ const encoder = new TextEncoder();
 
 const swaggerUiDocument = `<!doctype html>
 <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Yokaiba API reference</title><link rel="stylesheet" href="https://unpkg.com/swagger-ui-dist@5.17.14/swagger-ui.css"></head>
+<title>Yokaiba API reference</title><link rel="stylesheet" href="https://unpkg.com/swagger-ui-dist@5.17.14/swagger-ui.css" integrity="sha384-WzpiqCnM12eQ0mh8EGuHyoK3PSgxSJpogk4wwxv4aCqth5f4o4tvbcz0jjJ6rWRJ" crossorigin="anonymous"></head>
 <body><main id="swagger-ui" aria-label="Yokaiba API reference"></main>
-<script src="https://unpkg.com/swagger-ui-dist@5.17.14/swagger-ui-bundle.js"></script>
+<script src="https://unpkg.com/swagger-ui-dist@5.17.14/swagger-ui-bundle.js" integrity="sha384-9HghXWVerMyVRtzQWNLGApK/7WA4uHc/hHlj01ctwrK/tDC3iwu7N/BV5Jrhn7OR" crossorigin="anonymous"></script>
 <script>window.ui = SwaggerUIBundle({url:"/openapi/v1.yaml",dom_id:"#swagger-ui",deepLinking:true,presets:[SwaggerUIBundle.presets.apis],layout:"BaseLayout"});</script>
 </body></html>`;
 
