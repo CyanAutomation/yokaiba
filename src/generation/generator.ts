@@ -11,7 +11,8 @@ function hash(seed: string): number {
 }
 
 function random(seed: string) {
-  let state = hash(seed) || 1;
+  let state = hash(seed);
+  if (state === 0) state = 2166136261;
   return () => { state ^= state << 13; state ^= state >>> 17; state ^= state << 5; return (state >>> 0) / 2 ** 32; };
 }
 
