@@ -231,7 +231,9 @@ test("worker serves a hardened Swagger UI and canonical OpenAPI specification", 
   assert.match(docs.headers.get("content-security-policy") ?? "", /connect-src 'self'/);
   assert.equal(docs.headers.get("x-content-type-options"), "nosniff");
   assert.ok(docs.headers.get("x-request-id"));
-  assert.match(await docs.text(), /swagger-ui-bundle\.js/);
+  const docsDocument = await docs.text();
+  assert.match(docsDocument, /swagger-ui\.css" integrity="sha384-[A-Za-z0-9+/]{64}" crossorigin="anonymous"/);
+  assert.match(docsDocument, /swagger-ui-bundle\.js" integrity="sha384-[A-Za-z0-9+/]{64}" crossorigin="anonymous"/);
 
   const docsWithSlash = await worker.fetch(new Request("https://yokaiba.test/docs/"), env, {} as ExecutionContext);
   assert.equal(docsWithSlash.status, 200);
