@@ -10,13 +10,19 @@ interface Env {
   MCP_ALLOWED_HOSTNAMES?: string;
   /** Optional requests-per-minute override. Defaults to 30. */
   MCP_RATE_LIMIT?: string;
+  /** Comma-separated browser origins permitted to call the public REST API. */
+  REST_ALLOWED_ORIGINS?: string;
+  /** Optional best-effort, per-isolate REST requests-per-minute override. Defaults to 60. */
+  REST_RATE_LIMIT?: string;
+  /** Optional Cloudflare Rate Limiting binding for production-wide REST enforcement. */
+  REST_RATE_LIMITER?: { limit(options: { key: string }): Promise<{ success: boolean }> };
 }
 
 const templates = [tournamentOrderTemplate];
 const rest = createRestRouter(templates);
 const mcp = createYokaibaMcpHandler(templates);
 
-function json(value: unknown, status: number) {
+function json(value: unknown, status = 200) {
   return new Response(JSON.stringify(value), { status, headers: { "content-type": "application/json; charset=utf-8" } });
 }
 
@@ -43,10 +49,10 @@ const rateLimits = new Map<string, { count: number; resetAt: number }>();
 const RATE_WINDOW_MS = 60_000;
 const MAX_RATE_LIMIT_KEYS = 10_000;
 
-function rateLimited(request: Request, rawLimit: string | undefined, now = Date.now()): boolean {
+function rateLimited(request: Request, rawLimit: string | undefined, scope: string, now = Date.now()): boolean {
   const configured = Number(rawLimit ?? 30);
   const limit = Number.isSafeInteger(configured) && configured > 0 ? configured : 30;
-  const key = request.headers.get("cf-connecting-ip") ?? "unknown";
+  const key = `${scope}:${request.headers.get("cf-connecting-ip") ?? "unknown"}`;
   const current = rateLimits.get(key);
   if (!current || current.resetAt <= now) {
     if (rateLimits.size >= MAX_RATE_LIMIT_KEYS) {
@@ -62,6 +68,50 @@ function rateLimited(request: Request, rawLimit: string | undefined, now = Date.
   return current.count > limit;
 }
 
+function configuredOrigins(rawOrigins: string | undefined) {
+  return (rawOrigins ?? "").split(",").map(value => value.trim()).filter(Boolean);
+}
+
+function corsHeaders(origin: string | null, allowedOrigins: string[]) {
+  if (!origin || !allowedOrigins.includes(origin)) return undefined;
+  return {
+    "access-control-allow-origin": origin,
+    "access-control-allow-methods": "GET, POST, OPTIONS",
+    "access-control-allow-headers": "content-type",
+    "access-control-max-age": "86400",
+    "vary": "Origin",
+  };
+}
+
+function weaklyMatchesEtag(ifNoneMatch: string | null, etag: string): boolean {
+  if (ifNoneMatch === null) return false;
+  return ifNoneMatch.split(",").map(value => value.trim()).some(value => value === "*" || value.replace(/^W\//, "") === etag);
+}
+
+function cachePublicGet(response: Response, request: Request): Response {
+  if (request.method !== "GET" || response.status !== 200) return response;
+  const url = new URL(request.url);
+  const etag = `"yokaiba-v1-${encodeURIComponent(`${url.pathname}${url.search}`)}"`;
+  const headers = new Headers(response.headers);
+  headers.set("etag", etag);
+  if (weaklyMatchesEtag(request.headers.get("if-none-match"), etag)) return new Response(null, { status: 304, headers });
+  return new Response(response.body, { status: response.status, statusText: response.statusText, headers });
+}
+
+async function restRateLimited(request: Request, env: Env): Promise<boolean> {
+  if (env.REST_RATE_LIMITER) {
+    try {
+      const url = new URL(request.url);
+      const path = url.pathname;
+      const client = request.headers.get("cf-connecting-ip") ?? "anonymous";
+      return !(await env.REST_RATE_LIMITER.limit({ key: `${client}:${path}` })).success;
+    } catch {
+      // Retain the local fallback if a provider binding is temporarily unavailable.
+    }
+  }
+  return rateLimited(request, env.REST_RATE_LIMIT ?? "60", "rest");
+}
+
 function allowedOrigin(request: Request, hostnames: string[]) {
   const origin = request.headers.get("origin");
   if (!origin) return true;
@@ -70,25 +120,51 @@ function allowedOrigin(request: Request, hostnames: string[]) {
 
 export default {
   async fetch(request: Request, env: Env, ctx: ExecutionContext): Promise<Response> {
+    const startedAt = Date.now();
+    const requestId = crypto.randomUUID();
     let path: string;
     try {
       path = new URL(request.url).pathname;
     } catch {
-      return json({ error: { code: "bad_request", message: "Invalid URL" } }, 400);
+      const response = json({ error: { code: "bad_request", message: "Invalid URL" } }, 400);
+      response.headers.set("x-request-id", requestId);
+      console.log(JSON.stringify({ event: "request", requestId, method: request.method, path: "invalid", status: response.status, durationMs: Date.now() - startedAt }));
+      return response;
     }
-    if (path !== "/mcp") return rest(request);
-    if (rateLimited(request, env.MCP_RATE_LIMIT)) {
-      return new Response(JSON.stringify({ error: { code: "rate_limited", message: "Too many requests" } }), {
+    const restRequest = path.startsWith("/v1/");
+    const responseCorsHeaders = restRequest ? corsHeaders(request.headers.get("origin"), configuredOrigins(env.REST_ALLOWED_ORIGINS)) : undefined;
+    const finish = (response: Response) => {
+      response.headers.set("x-request-id", requestId);
+      if (responseCorsHeaders) for (const [name, value] of Object.entries(responseCorsHeaders)) response.headers.set(name, value);
+      console.log(JSON.stringify({ event: "request", requestId, method: request.method, path, status: response.status, durationMs: Date.now() - startedAt }));
+      return response;
+    };
+    if (path === "/healthz") return finish(json({ status: "ok" }));
+    if (restRequest && request.method === "OPTIONS") {
+      const requestedMethod = request.headers.get("access-control-request-method");
+      const requestedHeaders = request.headers.get("access-control-request-headers")?.split(",").map(value => value.trim().toLowerCase()).filter(Boolean) ?? [];
+      if (!responseCorsHeaders || !["GET", "POST"].includes(requestedMethod?.toUpperCase() ?? "") || requestedHeaders.some(header => header !== "content-type")) return finish(json({ error: { code: "forbidden", message: "Origin is not allowed" } }, 403));
+      return finish(new Response(null, { status: 204 }));
+    }
+    if (restRequest && await restRateLimited(request, env)) {
+      return finish(new Response(JSON.stringify({ error: { code: "rate_limited", message: "Too many requests" } }), {
         status: 429,
         headers: { "content-type": "application/json; charset=utf-8", "retry-after": "60" },
-      });
+      }));
     }
-    if (!env.API_KEY || !env.MCP_ALLOWED_HOSTNAMES) return json({ error: { code: "not_configured", message: "MCP credentials and allowed hosts are required" } }, 503);
-    if (!authorized(request, env.API_KEY)) return json({ error: { code: "unauthorized", message: "A valid API key is required" } }, 401);
+    if (path !== "/mcp") return finish(cachePublicGet(await rest(request), request));
+    if (rateLimited(request, env.MCP_RATE_LIMIT, "mcp")) {
+      return finish(new Response(JSON.stringify({ error: { code: "rate_limited", message: "Too many requests" } }), {
+        status: 429,
+        headers: { "content-type": "application/json; charset=utf-8", "retry-after": "60" },
+      }));
+    }
+    if (!env.API_KEY || !env.MCP_ALLOWED_HOSTNAMES) return finish(json({ error: { code: "not_configured", message: "MCP credentials and allowed hosts are required" } }, 503));
+    if (!authorized(request, env.API_KEY)) return finish(json({ error: { code: "unauthorized", message: "A valid API key is required" } }, 401));
     const hostnames = env.MCP_ALLOWED_HOSTNAMES.split(",").map(value => value.trim()).filter(Boolean);
     const rejectedHost = hostHeaderValidationResponse(request, hostnames);
-    if (rejectedHost) return rejectedHost;
-    if (!allowedOrigin(request, hostnames)) return json({ error: { code: "forbidden", message: "Origin is not allowed" } }, 403);
-    return mcp.fetch(request);
+    if (rejectedHost) return finish(rejectedHost);
+    if (!allowedOrigin(request, hostnames)) return finish(json({ error: { code: "forbidden", message: "Origin is not allowed" } }, 403));
+    return finish(await mcp.fetch(request));
   },
 } satisfies ExportedHandler<Env>;

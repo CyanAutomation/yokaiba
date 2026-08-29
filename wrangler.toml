@@ -5,6 +5,17 @@ compatibility_date = "2026-08-29"
 # Set these as Worker secrets before deployment:
 #   npx wrangler secret put API_KEY
 #   npx wrangler secret put MCP_ALLOWED_HOSTNAMES
+#   npx wrangler secret put REST_ALLOWED_ORIGINS
 # API_KEY matches the Budokon Worker convention. It is required for /mcp only.
 # MCP_ALLOWED_HOSTNAMES is a comma-separated hostname allowlist; it is required
 # for the MCP handler's Origin and Host validation.
+# REST_ALLOWED_ORIGINS is a comma-separated list of exact browser origins that
+# may call the public REST API. It is intentionally unset by default.
+
+[[ratelimits]]
+name = "REST_RATE_LIMITER"
+namespace_id = "870282"
+
+  [ratelimits.simple]
+  limit = 60
+  period = 60

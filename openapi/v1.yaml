@@ -2,24 +2,177 @@ openapi: 3.1.0
 info:
   title: Yokaiba API
   version: 0.1.0
+  description: Deterministic, uniquely-solvable judo logic-grid puzzles. REST is public; MCP uses a separate API key.
+servers:
+  - url: https://{worker}.workers.dev
+    variables:
+      worker:
+        default: yokaiba
+        description: Your deployed Cloudflare Worker hostname.
 paths:
+  /healthz:
+    get:
+      summary: Liveness check
+      responses:
+        '200':
+          description: Service is available
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Health' }
   /v1/scenarios:
     get:
+      summary: List available puzzle scenarios
       responses:
-        '200': { description: Curated puzzle scenarios }
+        '200':
+          description: Curated puzzle scenarios
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ScenarioList' }
+  /v1/version:
+    get:
+      summary: Return service and reproducibility versions
+      responses:
+        '200':
+          description: Current versions
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Version' }
   /v1/puzzles/generate:
+    get:
+      summary: Generate a cacheable deterministic puzzle
+      parameters:
+        - $ref: '#/components/parameters/TemplateId'
+        - $ref: '#/components/parameters/Seed'
+      responses:
+        '200':
+          description: A reproducible puzzle without its hidden solution
+          headers:
+            Cache-Control:
+              schema: { type: string }
+              description: Long-lived cache policy for deterministic GET responses.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/GeneratedPuzzle' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '429': { $ref: '#/components/responses/RateLimited' }
     post:
+      summary: Generate a deterministic puzzle
       requestBody:
         required: true
         content:
           application/json:
-            schema:
-              type: object
-              required: [templateId, seed]
-              properties:
-                templateId: { type: string }
-                seed: { type: string }
+            schema: { $ref: '#/components/schemas/GenerationRequest' }
       responses:
-        '200': { description: A reproducible puzzle without its hidden solution }
-        '400': { description: Invalid input }
-        '404': { description: Unknown template }
+        '200':
+          description: A reproducible puzzle without its hidden solution
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/GeneratedPuzzle' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '429': { $ref: '#/components/responses/RateLimited' }
+components:
+  parameters:
+    TemplateId:
+      name: templateId
+      in: query
+      required: true
+      schema: { type: string, minLength: 1, maxLength: 128 }
+    Seed:
+      name: seed
+      in: query
+      required: true
+      schema: { type: string, minLength: 1, maxLength: 128 }
+  responses:
+    BadRequest:
+      description: Invalid request input
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/Error' }
+    NotFound:
+      description: Unknown route or template
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/Error' }
+    RateLimited:
+      description: Too many requests
+      headers:
+        Retry-After:
+          schema: { type: integer, minimum: 1 }
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/Error' }
+  schemas:
+    Health:
+      type: object
+      required: [status]
+      properties:
+        status: { type: string, const: ok }
+    Version:
+      type: object
+      required: [serviceVersion, generatorVersion, solverVersion]
+      properties:
+        serviceVersion: { type: string }
+        generatorVersion: { type: string }
+        solverVersion: { type: string }
+    Scenario:
+      type: object
+      required: [id, title]
+      properties:
+        id: { type: string }
+        title: { type: string }
+    ScenarioList:
+      type: object
+      required: [scenarios]
+      properties:
+        scenarios:
+          type: array
+          items: { $ref: '#/components/schemas/Scenario' }
+    GenerationRequest:
+      type: object
+      required: [templateId, seed]
+      additionalProperties: false
+      properties:
+        templateId: { type: string, minLength: 1, maxLength: 128 }
+        seed: { type: string, minLength: 1, maxLength: 128 }
+    Clue:
+      type: object
+      required: [id, constraint, text]
+      properties:
+        id: { type: string }
+        constraint: { type: object, description: A logic constraint represented as JSON. }
+        text: { type: string }
+    PuzzleSpec:
+      type: object
+      required: [id, title, baseCategory, categories]
+      properties:
+        id: { type: string }
+        title: { type: string }
+        baseCategory: { type: string }
+        categories: { type: array, items: { type: object } }
+    GeneratedPuzzle:
+      type: object
+      required: [id, seed, templateId, generatorVersion, solverVersion, spec, clues]
+      properties:
+        id: { type: string }
+        seed: { type: string }
+        templateId: { type: string }
+        generatorVersion: { type: string }
+        solverVersion: { type: string }
+        spec: { $ref: '#/components/schemas/PuzzleSpec' }
+        clues:
+          type: array
+          items: { $ref: '#/components/schemas/Clue' }
+      not:
+        required: [solution]
+    Error:
+      type: object
+      required: [error]
+      properties:
+        error:
+          type: object
+          required: [code, message]
+          properties:
+            code: { type: string }
+            message: { type: string }

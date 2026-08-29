@@ -60,16 +60,61 @@ function directCandidates(template: PuzzleTemplate, solution: Solution, next: ()
 }
 
 /**
+ * Create true relational and negative statements from the hidden assignment.
+ * The wording deliberately references the tournament lineup, rather than
+ * exposing implementation terms such as row indexes or permutations.
+ */
+function relationalCandidates(template: PuzzleTemplate, solution: Solution, next: () => number): Clue[] {
+  const base = template.categories.find(category => category.id === template.baseCategory)!;
+  const candidates: Clue[] = [];
+  for (const category of template.categories) {
+    if (category.id === template.baseCategory) continue;
+    const assignment = solution.assignments[category.id];
+    for (const [row, actualValue] of assignment.entries()) {
+      const alternatives = category.values.filter(value => value !== actualValue);
+      const value = alternatives[Math.floor(next() * alternatives.length)];
+      candidates.push({
+        id: `not-matches-${category.id}-${row}`,
+        constraint: { kind: "notMatches", subject: base.values[row], category: category.id, value },
+        text: `${base.values[row]} was not associated with ${value}.`,
+      });
+    }
+    if (!category.ordered) continue;
+    for (let leftRow = 0; leftRow < assignment.length; leftRow += 1) {
+      for (let rightRow = leftRow + 1; rightRow < assignment.length; rightRow += 1) {
+        const left = { category: category.id, value: assignment[leftRow] };
+        const right = { category: category.id, value: assignment[rightRow] };
+        candidates.push({
+          id: `before-${category.id}-${leftRow}-${rightRow}`,
+          constraint: { kind: "before", left, right },
+          text: `In the ${template.title.toLowerCase()} lineup, the judoka associated with ${left.value} appeared before the judoka associated with ${right.value}.`,
+        });
+        if (rightRow === leftRow + 1) {
+          candidates.push({
+            id: `adjacent-${category.id}-${leftRow}-${rightRow}`,
+            constraint: { kind: "adjacent", left, right },
+            text: `In the ${template.title.toLowerCase()} lineup, the judoka associated with ${left.value} stood next to the judoka associated with ${right.value}.`,
+          });
+        }
+      }
+    }
+  }
+  return shuffled(candidates, next);
+}
+
+/**
  * Select a clue subset that establishes uniqueness, then remove every
- * individually redundant clue. The candidate pool is intentionally direct in
- * v1; the solver already supports relational constraints for template v2.
+ * individually redundant clue. The candidate pool combines direct, negative,
+ * ordering, and adjacency clues so template prose can create genuine logic
+ * deductions instead of presenting the full answer as facts.
  */
 export function generatePuzzle(template: PuzzleTemplate, seed: string): GeneratedPuzzle {
   validateTemplate(template);
   const next = random(`${template.id}:${seed}`);
   const solution = makeSolution(template, next);
   const selected: Clue[] = [];
-  for (const clue of directCandidates(template, solution, next)) {
+  const candidates = shuffled([...directCandidates(template, solution, next), ...relationalCandidates(template, solution, next)], next);
+  for (const clue of candidates) {
     if (countSolutions(template, selected, 2) === 1) break;
     selected.push(clue);
   }
