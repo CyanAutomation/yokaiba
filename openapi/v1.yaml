@@ -1,0 +1,25 @@
+openapi: 3.1.0
+info:
+  title: Yokaiba API
+  version: 0.1.0
+paths:
+  /v1/scenarios:
+    get:
+      responses:
+        '200': { description: Curated puzzle scenarios }
+  /v1/puzzles/generate:
+    post:
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [templateId, seed]
+              properties:
+                templateId: { type: string }
+                seed: { type: string }
+      responses:
+        '200': { description: A reproducible puzzle without its hidden solution }
+        '400': { description: Invalid input }
+        '404': { description: Unknown template }

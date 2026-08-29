@@ -1,0 +1,9 @@
+name = "yokaiba"
+main = "worker/index.ts"
+compatibility_date = "2026-08-29"
+
+# Set these as Worker secrets before deployment:
+#   npx wrangler secret put MCP_API_KEY
+#   npx wrangler secret put MCP_ALLOWED_HOSTNAMES
+# MCP_ALLOWED_HOSTNAMES is a comma-separated hostname allowlist; it is required
+# for the MCP handler's Origin and Host validation.
