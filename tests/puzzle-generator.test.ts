@@ -140,8 +140,27 @@ test("MCP rate limiting runs before authentication", async () => {
 
 test("worker rejects malformed URLs without throwing", async () => {
   const request = { method: "GET", url: "invalid" } as Request;
-  const response = await worker.fetch(request, {}, {} as ExecutionContext);
+  const response = await worker.fetch(request, {
+    REST_RATE_LIMITER: {
+      limit: async () => { throw new Error("rate limiter should not receive an invalid URL"); },
+    },
+  }, {} as ExecutionContext);
   assert.equal(response.status, 400);
+});
+
+test("worker falls back to local REST rate limiting when the provider fails", async () => {
+  const env = {
+    REST_RATE_LIMIT: "1",
+    REST_RATE_LIMITER: {
+      limit: async () => { throw new Error("provider unavailable"); },
+    },
+  };
+  const makeRequest = () => new Request("https://yokaiba.test/v1/scenarios", {
+    headers: { "cf-connecting-ip": "192.0.2.90" },
+  });
+
+  assert.equal((await worker.fetch(makeRequest(), env, {} as ExecutionContext)).status, 200);
+  assert.equal((await worker.fetch(makeRequest(), env, {} as ExecutionContext)).status, 429);
 });
 
 test("worker provides health, browser CORS, and REST rate limiting", async () => {
