@@ -7,8 +7,9 @@
     "declaration": true,
     "outDir": "build",
     "rootDir": ".",
+    "types": ["@cloudflare/workers-types", "node"],
     "verbatimModuleSyntax": true,
     "skipLibCheck": true
   },
-  "include": ["src/**/*.ts", "tests/**/*.ts"]
+  "include": ["src/**/*.ts", "tests/**/*.ts", "worker/**/*.ts"]
 }

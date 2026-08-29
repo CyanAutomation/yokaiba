@@ -7,6 +7,7 @@ import {
   type PuzzleTemplate,
 } from "../src/index.js";
 import { createRestRouter, tournamentOrderTemplate } from "../src/index.js";
+import worker from "../worker/index.js";
 
 const template: PuzzleTemplate = {
   id: "test-tournament",
@@ -63,4 +64,49 @@ test("REST generation redacts the hidden solution and includes reproducibility m
   assert.equal(body.seed, "api-seed");
   assert.equal("solution" in body, false);
   assert.ok(Array.isArray(body.clues));
+});
+
+test("REST router returns a bad request for an invalid URL", async () => {
+  const route = createRestRouter([tournamentOrderTemplate]);
+  const response = await route({ method: "GET", url: "not a URL" } as Request);
+
+  assert.equal(response.status, 400);
+  assert.deepEqual(await response.json(), { error: { code: "bad_request", message: "Invalid URL" } });
+});
+
+test("solver handles the maximum supported row count", () => {
+  const fiveRows: PuzzleTemplate = {
+    id: "five-rows",
+    title: "Five rows",
+    baseCategory: "person",
+    categories: [
+      { id: "person", label: "Person", values: ["A", "B", "C", "D", "E"] },
+      { id: "place", label: "Place", values: ["1", "2", "3", "4", "5"] },
+    ],
+  };
+
+  assert.equal(countSolutions(fiveRows, [], 200), 120);
+});
+
+test("MCP rate limiting runs before authentication", async () => {
+  const env = {
+    MCP_API_KEY: "secret",
+    MCP_ALLOWED_HOSTNAMES: "yokaiba.test",
+    MCP_RATE_LIMIT: "2",
+  };
+  const makeRequest = () => new Request("https://yokaiba.test/mcp", {
+    headers: { "cf-connecting-ip": "192.0.2.10" },
+  });
+
+  assert.equal((await worker.fetch(makeRequest(), env, {} as ExecutionContext)).status, 401);
+  assert.equal((await worker.fetch(makeRequest(), env, {} as ExecutionContext)).status, 401);
+  const limited = await worker.fetch(makeRequest(), env, {} as ExecutionContext);
+  assert.equal(limited.status, 429);
+  assert.equal(limited.headers.get("retry-after"), "60");
+});
+
+test("worker rejects malformed URLs without throwing", async () => {
+  const request = { method: "GET", url: "invalid" } as Request;
+  const response = await worker.fetch(request, {}, {} as ExecutionContext);
+  assert.equal(response.status, 400);
 });
