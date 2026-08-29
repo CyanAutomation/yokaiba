@@ -90,7 +90,7 @@ test("solver handles the maximum supported row count", () => {
 
 test("MCP rate limiting runs before authentication", async () => {
   const env = {
-    MCP_API_KEY: "secret",
+    API_KEY: "secret",
     MCP_ALLOWED_HOSTNAMES: "yokaiba.test",
     MCP_RATE_LIMIT: "2",
   };

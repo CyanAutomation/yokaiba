@@ -41,10 +41,10 @@ The response never includes the hidden solution. The seed, template ID, generato
 
 ## MCP and deployment
 
-The MCP server exposes `list_scenarios` and `generate_puzzle` at `/mcp`. It uses Cloudflare's stateless Streamable HTTP handler and requires both `MCP_API_KEY` and `MCP_ALLOWED_HOSTNAMES` as Worker secrets before it will serve requests:
+The MCP server exposes `list_scenarios` and `generate_puzzle` at `/mcp`. It uses Cloudflare's stateless Streamable HTTP handler and requires both `API_KEY` and `MCP_ALLOWED_HOSTNAMES` as Worker secrets before it will serve requests. `API_KEY` matches the Budokon Worker convention, and clients may supply it as `Authorization: Bearer <key>` or `X-API-Key: <key>`:
 
 ```sh
-npx wrangler secret put MCP_API_KEY
+npx wrangler secret put API_KEY
 npx wrangler secret put MCP_ALLOWED_HOSTNAMES
 npm run deploy
 ```
