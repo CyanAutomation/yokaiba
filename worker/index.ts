@@ -31,7 +31,12 @@ function allowedOrigin(request: Request, hostnames: string[]) {
 
 export default {
   async fetch(request: Request, env: Env, ctx: ExecutionContext): Promise<Response> {
-    const path = new URL(request.url).pathname;
+    let path: string;
+    try {
+      path = new URL(request.url).pathname;
+    } catch {
+      return json({ error: { code: "bad_request", message: "Invalid URL" } }, 400);
+    }
     if (path !== "/mcp") return rest(request);
     if (!env.MCP_API_KEY || !env.MCP_ALLOWED_HOSTNAMES) return json({ error: { code: "not_configured", message: "MCP credentials and allowed hosts are required" } }, 503);
     if (!authorized(request, env.MCP_API_KEY)) return json({ error: { code: "unauthorized", message: "A valid API key is required" } }, 401);
