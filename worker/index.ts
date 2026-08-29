@@ -4,7 +4,8 @@ import { tournamentOrderTemplate } from "../src/templates/tournament-order.js";
 import { hostHeaderValidationResponse } from "@modelcontextprotocol/server";
 
 interface Env {
-  MCP_API_KEY?: string;
+  /** Matches Budokon's API-key secret name and protects the MCP endpoint. */
+  API_KEY?: string;
   /** Required comma-separated hostnames, e.g. yokaiba.example.com,yokaiba.workers.dev. */
   MCP_ALLOWED_HOSTNAMES?: string;
   /** Optional requests-per-minute override. Defaults to 30. */
@@ -82,8 +83,8 @@ export default {
         headers: { "content-type": "application/json; charset=utf-8", "retry-after": "60" },
       });
     }
-    if (!env.MCP_API_KEY || !env.MCP_ALLOWED_HOSTNAMES) return json({ error: { code: "not_configured", message: "MCP credentials and allowed hosts are required" } }, 503);
-    if (!authorized(request, env.MCP_API_KEY)) return json({ error: { code: "unauthorized", message: "A valid API key is required" } }, 401);
+    if (!env.API_KEY || !env.MCP_ALLOWED_HOSTNAMES) return json({ error: { code: "not_configured", message: "MCP credentials and allowed hosts are required" } }, 503);
+    if (!authorized(request, env.API_KEY)) return json({ error: { code: "unauthorized", message: "A valid API key is required" } }, 401);
     const hostnames = env.MCP_ALLOWED_HOSTNAMES.split(",").map(value => value.trim()).filter(Boolean);
     const rejectedHost = hostHeaderValidationResponse(request, hostnames);
     if (rejectedHost) return rejectedHost;
