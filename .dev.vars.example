@@ -1,0 +1,8 @@
+# Exact comma-separated browser origins permitted to call REST in local development.
+REST_ALLOWED_ORIGINS=http://localhost:3000
+# Optional per-isolate limits. Production should configure REST_RATE_LIMITER instead.
+REST_RATE_LIMIT=60
+MCP_RATE_LIMIT=30
+# Required only to exercise /mcp locally.
+API_KEY=replace-with-a-local-development-key
+MCP_ALLOWED_HOSTNAMES=localhost
