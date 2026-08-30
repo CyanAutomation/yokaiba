@@ -12,8 +12,12 @@ interface Env {
   MCP_RATE_LIMIT?: string;
   /** Comma-separated browser origins permitted to call the public REST API. */
   REST_ALLOWED_ORIGINS?: string;
+  /** HMAC secret used to issue and validate browser puzzle tokens. */
+  PUZZLE_TOKEN_SECRET?: string;
   /** Optional best-effort, per-isolate REST requests-per-minute override. Defaults to 60. */
   REST_RATE_LIMIT?: string;
+  /** Optional best-effort verification attempts per minute; defaults to 10. */
+  VERIFY_RATE_LIMIT?: string;
   /** Optional Cloudflare Rate Limiting binding for production-wide REST enforcement. */
   REST_RATE_LIMITER?: { limit(options: { key: string }): Promise<{ success: boolean }> };
   /** Static public assets, including Swagger UI and the canonical OpenAPI document. */
@@ -21,7 +25,6 @@ interface Env {
 }
 
 const templates = [tournamentOrderTemplate];
-const rest = createRestRouter(templates);
 const mcp = createYokaibaMcpHandler(templates);
 
 function json(value: unknown, status = 200) {
@@ -136,6 +139,7 @@ async function staticAsset(request: Request, env: Env, assetPath: string): Promi
 }
 
 async function restRateLimited(request: Request, env: Env): Promise<boolean> {
+  if (new URL(request.url).pathname === "/v1/puzzles/verify" && rateLimited(request, env.VERIFY_RATE_LIMIT ?? "10", "verify")) return true;
   if (env.REST_RATE_LIMITER) {
     try {
       const url = new URL(request.url);
@@ -191,7 +195,7 @@ export default {
         headers: { "content-type": "application/json; charset=utf-8", "retry-after": "60" },
       }));
     }
-    if (path !== "/mcp") return finish(await cachePublicGet(await rest(request), request));
+    if (path !== "/mcp") return finish(await cachePublicGet(await createRestRouter(templates, { puzzleTokenSecret: env.PUZZLE_TOKEN_SECRET })(request), request));
     if (rateLimited(request, env.MCP_RATE_LIMIT, "mcp")) {
       return finish(new Response(JSON.stringify({ error: { code: "rate_limited", message: "Too many requests" } }), {
         status: 429,

@@ -51,12 +51,25 @@ test("quality reports clue diversity, readability, and no-guess human trace", ()
   assert.equal(quality.humanSolve.solved, true);
 });
 
+test("difficulty is reproducible and exercises all five calibrated levels", () => {
+  const levels = new Set<number>();
+  for (let index = 0; index < 300; index += 1) {
+    const first = generatePuzzle(tournamentOrderTemplate, `difficulty-band-${index}`);
+    const second = generatePuzzle(tournamentOrderTemplate, `difficulty-band-${index}`);
+    assert.deepEqual(first.difficulty, second.difficulty);
+    levels.add(first.difficulty.level);
+  }
+  assert.deepEqual([...levels].sort(), [1, 2, 3, 4, 5]);
+});
+
 test("OpenAPI documents every public REST endpoint", async () => {
   const specification = await readFile(new URL("../public/openapi/v1.yaml", import.meta.url), "utf8");
-  for (const path of ["/healthz", "/docs", "/openapi/v1.yaml", "/v1/scenarios", "/v1/version", "/v1/puzzles/generate"]) {
+  for (const path of ["/healthz", "/docs", "/openapi/v1.yaml", "/v1/scenarios", "/v1/version", "/v1/puzzles/generate", "/v1/puzzles/verify"]) {
     assert.match(specification, new RegExp(`^  ${path.replace(/[/.]/g, "\\$&")}:`, "m"));
   }
   assert.match(specification, /GeneratedPuzzle:/);
+  assert.match(specification, /PuzzleVerificationRequest:/);
+  assert.match(specification, /Difficulty:/);
   assert.match(specification, /Error:/);
   assert.match(specification, /X-Request-Id:/);
   assert.match(specification, /Access-Control-Allow-Origin:/);
@@ -64,7 +77,7 @@ test("OpenAPI documents every public REST endpoint", async () => {
 });
 
 test("REST generation redacts the hidden solution and includes reproducibility metadata", async () => {
-  const route = createRestRouter([tournamentOrderTemplate]);
+  const route = createRestRouter([tournamentOrderTemplate], { puzzleTokenSecret: "test-token-secret" });
   const response = await route(new Request("https://yokaiba.test/v1/puzzles/generate", {
     method: "POST",
     headers: { "content-type": "application/json" },
@@ -76,11 +89,16 @@ test("REST generation redacts the hidden solution and includes reproducibility m
   assert.equal(body.templateId, "tournament-order-v1");
   assert.equal(body.seed, "api-seed");
   assert.equal("solution" in body, false);
+  assert.equal(typeof body.puzzleToken, "string");
+  const difficulty = body.difficulty as { level: number; label: string; modelVersion: string };
+  assert.ok([1, 2, 3, 4, 5].includes(difficulty.level));
+  assert.ok(["Very easy", "Easy", "Moderate", "Hard", "Very hard"].includes(difficulty.label));
+  assert.equal(difficulty.modelVersion, "yokaiba-difficulty-v1");
   assert.ok(Array.isArray(body.clues));
 });
 
 test("REST supports cacheable deterministic GET generation", async () => {
-  const route = createRestRouter([tournamentOrderTemplate]);
+  const route = createRestRouter([tournamentOrderTemplate], { puzzleTokenSecret: "test-token-secret" });
   const response = await route(new Request("https://yokaiba.test/v1/puzzles/generate?templateId=tournament-order-v1&seed=api-seed"));
 
   assert.equal(response.status, 200);
@@ -90,8 +108,52 @@ test("REST supports cacheable deterministic GET generation", async () => {
   assert.equal("solution" in body, false);
 });
 
+test("REST verifies a complete submitted answer without exposing the solution", async () => {
+  const route = createRestRouter([tournamentOrderTemplate], { puzzleTokenSecret: "test-token-secret" });
+  const generated = await route(new Request("https://yokaiba.test/v1/puzzles/generate?templateId=tournament-order-v1&seed=verify-seed"));
+  const publicPuzzle = await generated.json() as { puzzleToken: string };
+  const solution = generatePuzzle(tournamentOrderTemplate, "verify-seed").solution;
+
+  const correct = await route(new Request("https://yokaiba.test/v1/puzzles/verify", {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ puzzleToken: publicPuzzle.puzzleToken, answer: solution }),
+  }));
+  assert.equal(correct.status, 200);
+  assert.deepEqual(await correct.json(), { correct: true });
+
+  const incorrect = await route(new Request("https://yokaiba.test/v1/puzzles/verify", {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ puzzleToken: publicPuzzle.puzzleToken, answer: { assignments: { ...solution.assignments, club: [...solution.assignments.club].reverse() } } }),
+  }));
+  assert.equal(incorrect.status, 200);
+  assert.deepEqual(await incorrect.json(), { correct: false });
+});
+
+test("REST rejects malformed answers, tampered tokens, and verification without a configured secret", async () => {
+  const route = createRestRouter([tournamentOrderTemplate], { puzzleTokenSecret: "test-token-secret" });
+  const generated = await route(new Request("https://yokaiba.test/v1/puzzles/generate?templateId=tournament-order-v1&seed=verify-invalid"));
+  const { puzzleToken } = await generated.json() as { puzzleToken: string };
+  const malformed = await route(new Request("https://yokaiba.test/v1/puzzles/verify", {
+    method: "POST", headers: { "content-type": "application/json" },
+    body: JSON.stringify({ puzzleToken, answer: { assignments: { club: ["Wolves"] } } }),
+  }));
+  assert.equal(malformed.status, 400);
+
+  const tampered = await route(new Request("https://yokaiba.test/v1/puzzles/verify", {
+    method: "POST", headers: { "content-type": "application/json" },
+    body: JSON.stringify({ puzzleToken: `${puzzleToken}x`, answer: generatePuzzle(tournamentOrderTemplate, "verify-invalid").solution }),
+  }));
+  assert.equal(tampered.status, 400);
+
+  const unconfigured = createRestRouter([tournamentOrderTemplate]);
+  const response = await unconfigured(new Request("https://yokaiba.test/v1/puzzles/verify", { method: "POST" }));
+  assert.equal(response.status, 503);
+});
+
 test("REST rejects excessively long generation inputs", async () => {
-  const route = createRestRouter([tournamentOrderTemplate]);
+  const route = createRestRouter([tournamentOrderTemplate], { puzzleTokenSecret: "test-token-secret" });
   const response = await route(new Request("https://yokaiba.test/v1/puzzles/generate", {
     method: "POST",
     headers: { "content-type": "application/json" },
@@ -103,7 +165,7 @@ test("REST rejects excessively long generation inputs", async () => {
 });
 
 test("REST router returns a bad request for an invalid URL", async () => {
-  const route = createRestRouter([tournamentOrderTemplate]);
+  const route = createRestRouter([tournamentOrderTemplate], { puzzleTokenSecret: "test-token-secret" });
   const response = await route({ method: "GET", url: "not a URL" } as Request);
 
   assert.equal(response.status, 400);
@@ -210,7 +272,7 @@ test("worker provides health, browser CORS, and REST rate limiting", async () =>
 });
 
 test("worker returns an ETag and honors conditional public GETs", async () => {
-  const env = { REST_ALLOWED_ORIGINS: "https://game.example" };
+  const env = { REST_ALLOWED_ORIGINS: "https://game.example", PUZZLE_TOKEN_SECRET: "test-token-secret" };
   const url = "https://yokaiba.test/v1/puzzles/generate?templateId=tournament-order-v1&seed=etag-seed";
   const first = await worker.fetch(new Request(url, { headers: { origin: "https://game.example", "cf-connecting-ip": "192.0.2.89" } }), env, {} as ExecutionContext);
   assert.equal(first.status, 200);
@@ -218,6 +280,17 @@ test("worker returns an ETag and honors conditional public GETs", async () => {
   assert.match(etag ?? "", /^"yokaiba-v1-[a-f0-9]{64}"$/);
   const second = await worker.fetch(new Request(url, { headers: { origin: "https://game.example", "if-none-match": etag!, "cf-connecting-ip": "192.0.2.89" } }), env, {} as ExecutionContext);
   assert.equal(second.status, 304);
+});
+
+test("worker applies a tighter best-effort limit to answer verification", async () => {
+  const env = { PUZZLE_TOKEN_SECRET: "test-token-secret", VERIFY_RATE_LIMIT: "1" };
+  const request = () => new Request("https://yokaiba.test/v1/puzzles/verify", {
+    method: "POST",
+    headers: { "content-type": "application/json", "cf-connecting-ip": "192.0.2.93" },
+    body: JSON.stringify({ puzzleToken: "invalid", answer: {} }),
+  });
+  assert.equal((await worker.fetch(request(), env, {} as ExecutionContext)).status, 400);
+  assert.equal((await worker.fetch(request(), env, {} as ExecutionContext)).status, 429);
 });
 
 test("worker serves a hardened Swagger UI and canonical OpenAPI specification", async () => {
