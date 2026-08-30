@@ -58,11 +58,11 @@ function authorized(request: Request, key: string | undefined) {
   return candidate !== null && constantTimeEqual(key, candidate);
 }
 
-const rateLimits = new Map<string, { count: number; resetAt: number }>();
+export type RateLimitStore = Map<string, { count: number; resetAt: number }>;
 const RATE_WINDOW_MS = 60_000;
 const MAX_RATE_LIMIT_KEYS = 10_000;
 
-function rateLimited(request: Request, rawLimit: string | undefined, scope: string, now = Date.now()): boolean {
+function rateLimited(rateLimits: RateLimitStore, request: Request, rawLimit: string | undefined, scope: string, now = Date.now()): boolean {
   const configured = Number(rawLimit ?? 30);
   const limit = Number.isSafeInteger(configured) && configured > 0 ? configured : 30;
   const key = `${scope}:${request.headers.get("cf-connecting-ip") ?? "unknown"}`;
@@ -138,8 +138,8 @@ async function staticAsset(request: Request, env: Env, assetPath: string): Promi
   return new Response(asset.body, { status: asset.status, statusText: asset.statusText, headers });
 }
 
-async function restRateLimited(request: Request, env: Env): Promise<boolean> {
-  if (new URL(request.url).pathname === "/v1/puzzles/verify" && rateLimited(request, env.VERIFY_RATE_LIMIT ?? "10", "verify")) return true;
+async function restRateLimited(rateLimits: RateLimitStore, request: Request, env: Env): Promise<boolean> {
+  if (new URL(request.url).pathname === "/v1/puzzles/verify" && rateLimited(rateLimits, request, env.VERIFY_RATE_LIMIT ?? "10", "verify")) return true;
   if (env.REST_RATE_LIMITER) {
     try {
       const url = new URL(request.url);
@@ -150,7 +150,7 @@ async function restRateLimited(request: Request, env: Env): Promise<boolean> {
       // Retain the local fallback if a provider binding is temporarily unavailable.
     }
   }
-  return rateLimited(request, env.REST_RATE_LIMIT ?? "60", "rest");
+  return rateLimited(rateLimits, request, env.REST_RATE_LIMIT ?? "60", "rest");
 }
 
 function allowedOrigin(request: Request, hostnames: string[]) {
@@ -159,55 +159,59 @@ function allowedOrigin(request: Request, hostnames: string[]) {
   try { return hostnames.includes(new URL(origin).hostname); } catch { return false; }
 }
 
-export default {
-  async fetch(request: Request, env: Env, ctx: ExecutionContext): Promise<Response> {
-    const startedAt = Date.now();
-    const requestId = crypto.randomUUID();
-    let path: string;
-    try {
-      path = new URL(request.url).pathname;
-    } catch {
-      const response = json({ error: { code: "bad_request", message: "Invalid URL" } }, 400);
-      response.headers.set("x-request-id", requestId);
-      console.log(JSON.stringify({ event: "request", requestId, method: request.method, path: "invalid", status: response.status, durationMs: Date.now() - startedAt }));
-      return response;
-    }
-    const restRequest = path.startsWith("/v1/");
-    const responseCorsHeaders = restRequest ? corsHeaders(request.headers.get("origin"), configuredOrigins(env.REST_ALLOWED_ORIGINS)) : undefined;
-    const finish = (response: Response) => {
-      response.headers.set("x-request-id", requestId);
-      if (responseCorsHeaders) for (const [name, value] of Object.entries(responseCorsHeaders)) response.headers.set(name, value);
-      console.log(JSON.stringify({ event: "request", requestId, method: request.method, path, status: response.status, durationMs: Date.now() - startedAt }));
-      return response;
-    };
-    if (path === "/healthz") return finish(json({ status: "ok" }));
-    if (path === "/docs" || path === "/docs/") return finish(swaggerUiResponse());
-    if (path === "/openapi/v1.yaml") return finish(await staticAsset(request, env, "/openapi/v1.yaml"));
-    if (restRequest && request.method === "OPTIONS") {
-      const requestedMethod = request.headers.get("access-control-request-method");
-      const requestedHeaders = request.headers.get("access-control-request-headers")?.split(",").map(value => value.trim().toLowerCase()).filter(Boolean) ?? [];
-      if (!responseCorsHeaders || !["GET", "POST"].includes(requestedMethod?.toUpperCase() ?? "") || requestedHeaders.some(header => header !== "content-type")) return finish(json({ error: { code: "forbidden", message: "Origin is not allowed" } }, 403));
-      return finish(new Response(null, { status: 204 }));
-    }
-    if (restRequest && await restRateLimited(request, env)) {
-      return finish(new Response(JSON.stringify({ error: { code: "rate_limited", message: "Too many requests" } }), {
-        status: 429,
-        headers: { "content-type": "application/json; charset=utf-8", "retry-after": "60" },
-      }));
-    }
-    if (path !== "/mcp") return finish(await cachePublicGet(await createRestRouter(templates, { puzzleTokenSecret: env.PUZZLE_TOKEN_SECRET })(request), request));
-    if (rateLimited(request, env.MCP_RATE_LIMIT, "mcp")) {
-      return finish(new Response(JSON.stringify({ error: { code: "rate_limited", message: "Too many requests" } }), {
-        status: 429,
-        headers: { "content-type": "application/json; charset=utf-8", "retry-after": "60" },
-      }));
-    }
-    if (!env.API_KEY || !env.MCP_ALLOWED_HOSTNAMES) return finish(json({ error: { code: "not_configured", message: "MCP credentials and allowed hosts are required" } }, 503));
-    if (!authorized(request, env.API_KEY)) return finish(json({ error: { code: "unauthorized", message: "A valid API key is required" } }, 401));
-    const hostnames = env.MCP_ALLOWED_HOSTNAMES.split(",").map(value => value.trim()).filter(Boolean);
-    const rejectedHost = hostHeaderValidationResponse(request, hostnames);
-    if (rejectedHost) return finish(rejectedHost);
-    if (!allowedOrigin(request, hostnames)) return finish(json({ error: { code: "forbidden", message: "Origin is not allowed" } }, 403));
-    return finish(await mcp.fetch(request));
-  },
-} satisfies ExportedHandler<Env>;
+export function createWorker(rateLimits: RateLimitStore = new Map()) {
+  return {
+    async fetch(request: Request, env: Env, ctx: ExecutionContext): Promise<Response> {
+      const startedAt = Date.now();
+      const requestId = crypto.randomUUID();
+      let path: string;
+      try {
+        path = new URL(request.url).pathname;
+      } catch {
+        const response = json({ error: { code: "bad_request", message: "Invalid URL" } }, 400);
+        response.headers.set("x-request-id", requestId);
+        console.log(JSON.stringify({ event: "request", requestId, method: request.method, path: "invalid", status: response.status, durationMs: Date.now() - startedAt }));
+        return response;
+      }
+      const restRequest = path.startsWith("/v1/");
+      const responseCorsHeaders = restRequest ? corsHeaders(request.headers.get("origin"), configuredOrigins(env.REST_ALLOWED_ORIGINS)) : undefined;
+      const finish = (response: Response) => {
+        response.headers.set("x-request-id", requestId);
+        if (responseCorsHeaders) for (const [name, value] of Object.entries(responseCorsHeaders)) response.headers.set(name, value);
+        console.log(JSON.stringify({ event: "request", requestId, method: request.method, path, status: response.status, durationMs: Date.now() - startedAt }));
+        return response;
+      };
+      if (path === "/healthz") return finish(json({ status: "ok" }));
+      if (path === "/docs" || path === "/docs/") return finish(swaggerUiResponse());
+      if (path === "/openapi/v1.yaml") return finish(await staticAsset(request, env, "/openapi/v1.yaml"));
+      if (restRequest && request.method === "OPTIONS") {
+        const requestedMethod = request.headers.get("access-control-request-method");
+        const requestedHeaders = request.headers.get("access-control-request-headers")?.split(",").map(value => value.trim().toLowerCase()).filter(Boolean) ?? [];
+        if (!responseCorsHeaders || !["GET", "POST"].includes(requestedMethod?.toUpperCase() ?? "") || requestedHeaders.some(header => header !== "content-type")) return finish(json({ error: { code: "forbidden", message: "Origin is not allowed" } }, 403));
+        return finish(new Response(null, { status: 204 }));
+      }
+      if (restRequest && await restRateLimited(rateLimits, request, env)) {
+        return finish(new Response(JSON.stringify({ error: { code: "rate_limited", message: "Too many requests" } }), {
+          status: 429,
+          headers: { "content-type": "application/json; charset=utf-8", "retry-after": "60" },
+        }));
+      }
+      if (path !== "/mcp") return finish(await cachePublicGet(await createRestRouter(templates, { puzzleTokenSecret: env.PUZZLE_TOKEN_SECRET })(request), request));
+      if (rateLimited(rateLimits, request, env.MCP_RATE_LIMIT, "mcp")) {
+        return finish(new Response(JSON.stringify({ error: { code: "rate_limited", message: "Too many requests" } }), {
+          status: 429,
+          headers: { "content-type": "application/json; charset=utf-8", "retry-after": "60" },
+        }));
+      }
+      if (!env.API_KEY || !env.MCP_ALLOWED_HOSTNAMES) return finish(json({ error: { code: "not_configured", message: "MCP credentials and allowed hosts are required" } }, 503));
+      if (!authorized(request, env.API_KEY)) return finish(json({ error: { code: "unauthorized", message: "A valid API key is required" } }, 401));
+      const hostnames = env.MCP_ALLOWED_HOSTNAMES.split(",").map(value => value.trim()).filter(Boolean);
+      const rejectedHost = hostHeaderValidationResponse(request, hostnames);
+      if (rejectedHost) return finish(rejectedHost);
+      if (!allowedOrigin(request, hostnames)) return finish(json({ error: { code: "forbidden", message: "Origin is not allowed" } }, 403));
+      return finish(await mcp.fetch(request));
+    },
+  } satisfies ExportedHandler<Env>;
+}
+
+export default createWorker();
