@@ -1,9 +1,10 @@
 import { generatePuzzle } from "../generation/generator.js";
 import { issuePuzzleToken, verifyPuzzleToken } from "./puzzle-token.js";
-import type { GeneratedPuzzle, PuzzleSpec, PuzzleTemplate, Solution } from "../domain/types.js";
+import type { Difficulty, GeneratedPuzzle, PuzzleSpec, PuzzleTemplate, Solution } from "../domain/types.js";
 
 const MAX_GENERATION_FIELD_LENGTH = 128;
 const MAX_GENERATION_BODY_BYTES = 16 * 1024;
+const MAX_DIFFICULTY_SEARCH_ATTEMPTS = 128;
 // Generator releases can change a puzzle's representation. Keep browser and edge
 // caches short-lived, and require revalidation instead of promising immutability.
 const GENERATED_PUZZLE_CACHE_CONTROL = "public, max-age=300, s-maxage=300, must-revalidate";
@@ -28,7 +29,9 @@ function generationParameters(value: Record<string, unknown>) {
   if (typeof value.seed !== "string" || !value.seed.trim()) throw new TypeError("seed must be a non-empty string");
   if (value.templateId.length > MAX_GENERATION_FIELD_LENGTH) throw new TypeError(`templateId must be at most ${MAX_GENERATION_FIELD_LENGTH} characters`);
   if (value.seed.length > MAX_GENERATION_FIELD_LENGTH) throw new TypeError(`seed must be at most ${MAX_GENERATION_FIELD_LENGTH} characters`);
-  return { templateId: value.templateId, seed: value.seed };
+  const difficultyLevel = value.difficultyLevel;
+  if (difficultyLevel !== undefined && (typeof difficultyLevel !== "number" || !Number.isInteger(difficultyLevel) || difficultyLevel < 1 || difficultyLevel > 5)) throw new TypeError("difficultyLevel must be an integer from 1 to 5");
+  return { templateId: value.templateId, seed: value.seed, ...(difficultyLevel === undefined ? {} : { difficultyLevel: difficultyLevel as Difficulty["level"] }) };
 }
 
 async function generationRequest(request: Request) {
@@ -41,7 +44,18 @@ async function generationRequest(request: Request) {
 }
 
 function generationQuery(url: URL) {
-  return generationParameters({ templateId: url.searchParams.get("templateId"), seed: url.searchParams.get("seed") });
+  const rawDifficulty = url.searchParams.get("difficultyLevel");
+  return generationParameters({ templateId: url.searchParams.get("templateId"), seed: url.searchParams.get("seed"), ...(rawDifficulty === null ? {} : { difficultyLevel: Number(rawDifficulty) }) });
+}
+
+function generateAtDifficulty(template: PuzzleTemplate, seed: string, difficultyLevel: Difficulty["level"] | undefined): GeneratedPuzzle {
+  if (!difficultyLevel) return generatePuzzle(template, seed);
+  for (let attempt = 0; attempt < MAX_DIFFICULTY_SEARCH_ATTEMPTS; attempt += 1) {
+    const candidateSeed = `${seed}-level-${difficultyLevel}-${attempt}`;
+    const candidate = generatePuzzle(template, candidateSeed);
+    if (candidate.difficulty.level === difficultyLevel) return candidate;
+  }
+  throw new TypeError("requested difficulty is unavailable");
 }
 
 function validateAnswer(spec: PuzzleSpec, value: unknown): Solution {
@@ -109,10 +123,10 @@ export function createRestRouter(templates: readonly PuzzleTemplate[], options: 
     }
     if ((request.method === "POST" || request.method === "GET") && path === "/v1/puzzles/generate") {
       try {
-        const { templateId, seed } = request.method === "POST" ? await generationRequest(request) : generationQuery(url);
+        const { templateId, seed, difficultyLevel } = request.method === "POST" ? await generationRequest(request) : generationQuery(url);
         const template = byId.get(templateId);
         if (!template) return json({ error: { code: "not_found", message: "unknown templateId" } }, 404);
-        return json(await publicPuzzle(generatePuzzle(template, seed), options.puzzleTokenSecret), 200,
+        return json(await publicPuzzle(generateAtDifficulty(template, seed, difficultyLevel), options.puzzleTokenSecret), 200,
           request.method === "GET" ? { "cache-control": GENERATED_PUZZLE_CACHE_CONTROL } : undefined);
       } catch (error) {
         return json({ error: { code: "bad_request", message: error instanceof Error ? error.message : "invalid request" } }, 400);
