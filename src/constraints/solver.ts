@@ -1,5 +1,9 @@
 import type { Clue, ClueConstraint, PuzzleSpec, Solution } from "../domain/types.js";
 
+/** Inclusive row-count bounds supported by the exhaustive MVP solver. */
+export const MIN_SUPPORTED_ROWS = 2;
+export const MAX_SUPPORTED_ROWS = 5;
+
 function category(spec: PuzzleSpec, id: string) {
   const found = spec.categories.find(candidate => candidate.id === id);
   if (!found) throw new Error(`unknown category: ${id}`);
@@ -69,7 +73,9 @@ function permutations(values: string[]): string[][] {
 export function solve(spec: PuzzleSpec, clues: readonly Clue[], limit = Number.POSITIVE_INFINITY): Solution[] {
   const base = category(spec, spec.baseCategory);
   const dimensions = spec.categories.filter(item => item.id !== spec.baseCategory);
-  if (base.values.length < 2 || base.values.length > 5) throw new Error("MVP solver supports grids with 2 through 5 rows");
+  if (base.values.length < MIN_SUPPORTED_ROWS || base.values.length > MAX_SUPPORTED_ROWS) {
+    throw new Error(`MVP solver supports grids with ${MIN_SUPPORTED_ROWS} through ${MAX_SUPPORTED_ROWS} rows`);
+  }
   for (const item of dimensions) if (item.values.length !== base.values.length) throw new Error("every category must have one value per base row");
   const candidates = dimensions.map(item => ({ id: item.id, permutations: permutations(item.values) }));
   const results: Solution[] = [];
