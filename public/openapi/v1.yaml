@@ -117,25 +117,6 @@ paths:
         '400': { $ref: '#/components/responses/BadRequest' }
         '429': { $ref: '#/components/responses/RateLimited' }
         '503': { $ref: '#/components/responses/NotConfigured' }
-    post:
-      summary: Generate a deterministic puzzle
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema: { $ref: '#/components/schemas/GenerationRequest' }
-      responses:
-        '200':
-          description: A reproducible puzzle without its hidden solution
-          headers:
-            Access-Control-Allow-Origin: { $ref: '#/components/headers/AccessControlAllowOrigin' }
-            X-Request-Id: { $ref: '#/components/headers/RequestId' }
-          content:
-            application/json:
-              schema: { $ref: '#/components/schemas/GeneratedPuzzle' }
-        '400': { $ref: '#/components/responses/BadRequest' }
-        '404': { $ref: '#/components/responses/NotFound' }
-        '429': { $ref: '#/components/responses/RateLimited' }
 components:
   parameters:
     TemplateId:
