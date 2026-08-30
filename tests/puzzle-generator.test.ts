@@ -8,7 +8,7 @@ import {
   type PuzzleTemplate,
 } from "../src/index.js";
 import { createRestRouter, tournamentOrderTemplate } from "../src/index.js";
-import worker from "../worker/index.js";
+import worker, { createWorker } from "../worker/index.js";
 
 const template: PuzzleTemplate = {
   id: "test-tournament",
@@ -197,6 +197,7 @@ test("solver handles the maximum supported row count", () => {
 });
 
 test("MCP rate limiting runs before authentication", async () => {
+  const isolatedWorker = createWorker();
   const env = {
     API_KEY: "secret",
     MCP_ALLOWED_HOSTNAMES: "yokaiba.test",
@@ -206,9 +207,9 @@ test("MCP rate limiting runs before authentication", async () => {
     headers: { "cf-connecting-ip": "192.0.2.10" },
   });
 
-  assert.equal((await worker.fetch(makeRequest(), env, {} as ExecutionContext)).status, 401);
-  assert.equal((await worker.fetch(makeRequest(), env, {} as ExecutionContext)).status, 401);
-  const limited = await worker.fetch(makeRequest(), env, {} as ExecutionContext);
+  assert.equal((await isolatedWorker.fetch(makeRequest(), env, {} as ExecutionContext)).status, 401);
+  assert.equal((await isolatedWorker.fetch(makeRequest(), env, {} as ExecutionContext)).status, 401);
+  const limited = await isolatedWorker.fetch(makeRequest(), env, {} as ExecutionContext);
   assert.equal(limited.status, 429);
   assert.equal(limited.headers.get("retry-after"), "60");
 });
@@ -224,6 +225,7 @@ test("worker rejects malformed URLs without throwing", async () => {
 });
 
 test("worker falls back to local REST rate limiting when the provider fails", async () => {
+  const isolatedWorker = createWorker();
   const env = {
     REST_RATE_LIMIT: "1",
     REST_RATE_LIMITER: {
@@ -234,29 +236,31 @@ test("worker falls back to local REST rate limiting when the provider fails", as
     headers: { "cf-connecting-ip": "192.0.2.90" },
   });
 
-  assert.equal((await worker.fetch(makeRequest(), env, {} as ExecutionContext)).status, 200);
-  assert.equal((await worker.fetch(makeRequest(), env, {} as ExecutionContext)).status, 429);
+  assert.equal((await isolatedWorker.fetch(makeRequest(), env, {} as ExecutionContext)).status, 200);
+  assert.equal((await isolatedWorker.fetch(makeRequest(), env, {} as ExecutionContext)).status, 429);
 });
 
-test("worker provides health, browser CORS, and REST rate limiting", async () => {
-  const env = {
-    REST_ALLOWED_ORIGINS: "https://game.example,https://preview.example",
-    REST_RATE_LIMIT: "2",
-  };
-  const corsRequest = new Request("https://yokaiba.test/v1/puzzles/generate", {
+test("worker allows supported CORS preflight headers", async () => {
+  const env = { REST_ALLOWED_ORIGINS: "https://game.example,https://preview.example" };
+  const preflight = await worker.fetch(new Request("https://yokaiba.test/v1/puzzles/generate", {
     method: "OPTIONS",
     headers: {
       origin: "https://game.example",
       "access-control-request-method": "POST",
+      "access-control-request-headers": "Content-Type",
     },
-  });
-  const preflight = await worker.fetch(corsRequest, env, {} as ExecutionContext);
+  }), env, {} as ExecutionContext);
+
   assert.equal(preflight.status, 204);
   assert.equal(preflight.headers.get("access-control-allow-origin"), "https://game.example");
   assert.equal(preflight.headers.get("access-control-allow-methods"), "GET, POST, OPTIONS");
+  assert.equal(preflight.headers.get("access-control-allow-headers"), "content-type");
   assert.equal(preflight.headers.get("vary"), "Origin");
+});
 
-  const rejectedPreflight = await worker.fetch(new Request("https://yokaiba.test/v1/puzzles/generate", {
+test("worker rejects unsupported CORS preflight headers", async () => {
+  const env = { REST_ALLOWED_ORIGINS: "https://game.example" };
+  const preflight = await worker.fetch(new Request("https://yokaiba.test/v1/puzzles/generate", {
     method: "OPTIONS",
     headers: {
       origin: "https://game.example",
@@ -264,21 +268,37 @@ test("worker provides health, browser CORS, and REST rate limiting", async () =>
       "access-control-request-headers": "x-unexpected-header",
     },
   }), env, {} as ExecutionContext);
-  assert.equal(rejectedPreflight.status, 403);
 
-  const health = await worker.fetch(new Request("https://yokaiba.test/healthz"), env, {} as ExecutionContext);
+  assert.equal(preflight.status, 403);
+});
+
+test("worker reports health status and response body", async () => {
+  const health = await worker.fetch(new Request("https://yokaiba.test/healthz"), {}, {} as ExecutionContext);
+
   assert.equal(health.status, 200);
   assert.deepEqual(await health.json(), { status: "ok" });
+});
 
+test("worker adds CORS and request-ID headers to REST responses", async () => {
+  const response = await worker.fetch(new Request("https://yokaiba.test/v1/scenarios", {
+    headers: { origin: "https://game.example" },
+  }), { REST_ALLOWED_ORIGINS: "https://game.example" }, {} as ExecutionContext);
+
+  assert.equal(response.status, 200);
+  assert.equal(response.headers.get("access-control-allow-origin"), "https://game.example");
+  assert.ok(response.headers.get("x-request-id"));
+});
+
+test("worker exhausts the REST rate limit", async () => {
+  const isolatedWorker = createWorker();
+  const env = { REST_RATE_LIMIT: "2" };
   const makeRequest = () => new Request("https://yokaiba.test/v1/scenarios", {
-    headers: { origin: "https://game.example", "cf-connecting-ip": "192.0.2.88" },
+    headers: { "cf-connecting-ip": "192.0.2.88" },
   });
-  const first = await worker.fetch(makeRequest(), env, {} as ExecutionContext);
-  assert.equal(first.status, 200);
-  assert.equal(first.headers.get("access-control-allow-origin"), "https://game.example");
-  assert.ok(first.headers.get("x-request-id"));
-  assert.equal((await worker.fetch(makeRequest(), env, {} as ExecutionContext)).status, 200);
-  assert.equal((await worker.fetch(makeRequest(), env, {} as ExecutionContext)).status, 429);
+
+  assert.equal((await isolatedWorker.fetch(makeRequest(), env, {} as ExecutionContext)).status, 200);
+  assert.equal((await isolatedWorker.fetch(makeRequest(), env, {} as ExecutionContext)).status, 200);
+  assert.equal((await isolatedWorker.fetch(makeRequest(), env, {} as ExecutionContext)).status, 429);
 });
 
 test("worker returns an ETag and honors conditional public GETs", async () => {
@@ -293,14 +313,15 @@ test("worker returns an ETag and honors conditional public GETs", async () => {
 });
 
 test("worker applies a tighter best-effort limit to answer verification", async () => {
+  const isolatedWorker = createWorker();
   const env = { PUZZLE_TOKEN_SECRET: "test-token-secret", VERIFY_RATE_LIMIT: "1" };
   const request = () => new Request("https://yokaiba.test/v1/puzzles/verify", {
     method: "POST",
     headers: { "content-type": "application/json", "cf-connecting-ip": "192.0.2.93" },
     body: JSON.stringify({ puzzleToken: "invalid", answer: {} }),
   });
-  assert.equal((await worker.fetch(request(), env, {} as ExecutionContext)).status, 400);
-  assert.equal((await worker.fetch(request(), env, {} as ExecutionContext)).status, 429);
+  assert.equal((await isolatedWorker.fetch(request(), env, {} as ExecutionContext)).status, 400);
+  assert.equal((await isolatedWorker.fetch(request(), env, {} as ExecutionContext)).status, 429);
 });
 
 test("worker serves a hardened Swagger UI and canonical OpenAPI specification", async () => {
