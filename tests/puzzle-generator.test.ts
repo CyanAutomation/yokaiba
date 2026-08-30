@@ -5,6 +5,7 @@ import {
   countSolutions,
   evaluatePuzzleQuality,
   generatePuzzle,
+  type Clue,
   type PuzzleTemplate,
 } from "../src/index.js";
 import { createRestRouter, tournamentOrderTemplate } from "../src/index.js";
@@ -21,6 +22,29 @@ const template: PuzzleTemplate = {
     { id: "placing", label: "Placing", values: ["1st", "2nd", "3rd", "4th"], ordered: true },
   ],
 };
+
+const qualityFixtureSpec: PuzzleTemplate = {
+  id: "quality-fixture",
+  title: "Quality evaluator fixture",
+  baseCategory: "person",
+  categories: [
+    { id: "person", label: "Person", values: ["Aki", "Ben"] },
+    { id: "color", label: "Color", values: ["Red", "Blue"] },
+    { id: "placing", label: "Placing", values: ["1st", "2nd"], ordered: true },
+  ],
+};
+
+const clueKindsAndReadabilityFixture: Clue[] = [
+  { id: "direct-red", constraint: { kind: "matches", subject: "Aki", category: "color", value: "Red" }, text: "Aki wore red." },
+  { id: "blank-negative", constraint: { kind: "notMatches", subject: "Ben", category: "color", value: "Red" }, text: "   " },
+  { id: "undefined-order", constraint: { kind: "before", left: { category: "person", value: "Aki" }, right: { category: "person", value: "Ben" } }, text: "undefined finished first." },
+  { id: "null-adjacency", constraint: { kind: "adjacent", left: { category: "color", value: "Red" }, right: { category: "color", value: "Blue" } }, text: "Red was beside null." },
+];
+
+const noGuessSolveFixture: Clue[] = [
+  { id: "aki-red", constraint: { kind: "matches", subject: "Aki", category: "color", value: "Red" }, text: "Aki wore red." },
+  { id: "aki-not-second", constraint: { kind: "notMatches", subject: "Aki", category: "placing", value: "2nd" }, text: "Aki did not finish second." },
+];
 
 test("a seeded puzzle is reproducible and has exactly one solution", () => {
   const first = generatePuzzle(template, "golden-seed");
@@ -41,14 +65,46 @@ test("the generated clue set is minimal for uniqueness", () => {
   }
 });
 
-test("quality reports clue diversity, readability, and no-guess human trace", () => {
-  const puzzle = generatePuzzle(template, "quality-seed");
-  const quality = evaluatePuzzleQuality(puzzle.spec, puzzle.clues);
+test("quality reports the exact clue kinds in a controlled fixture", () => {
+  const quality = evaluatePuzzleQuality(qualityFixtureSpec, clueKindsAndReadabilityFixture);
 
-  assert.ok(quality.clueDiversity.distinctKinds >= 2);
-  assert.equal(quality.readability.unreadableClueIds.length, 0);
-  assert.equal(quality.humanSolve.usedGuessing, false);
-  assert.equal(quality.humanSolve.solved, true);
+  assert.deepEqual(quality.clueDiversity, {
+    distinctKinds: 4,
+    kinds: ["adjacent", "before", "matches", "notMatches"],
+  });
+});
+
+test("quality reports the exact unreadable clue IDs in a controlled fixture", () => {
+  const quality = evaluatePuzzleQuality(qualityFixtureSpec, clueKindsAndReadabilityFixture);
+
+  assert.deepEqual(quality.readability.unreadableClueIds, [
+    "blank-negative",
+    "undefined-order",
+    "null-adjacency",
+  ]);
+});
+
+test("quality records a completed human trace without guessing", () => {
+  const quality = evaluatePuzzleQuality(qualityFixtureSpec, noGuessSolveFixture);
+
+  assert.deepEqual(quality.humanSolve, {
+    solved: true,
+    usedGuessing: false,
+    totalCost: 2,
+    hardestStep: 1,
+  });
+});
+
+test("quality reports an incomplete human trace when clues cannot finish the puzzle", () => {
+  const incompleteFixture = noGuessSolveFixture.slice(0, 1);
+  const quality = evaluatePuzzleQuality(qualityFixtureSpec, incompleteFixture);
+
+  assert.deepEqual(quality.humanSolve, {
+    solved: false,
+    usedGuessing: false,
+    totalCost: 1,
+    hardestStep: 1,
+  });
 });
 
 test("difficulty is reproducible and exercises all five calibrated levels", () => {
