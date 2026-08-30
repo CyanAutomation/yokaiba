@@ -291,7 +291,7 @@ test("solver rejects a grid one row above the supported maximum", () => {
 
 test("MCP rate limiting runs before authentication", async () => {
   const isolatedLimiter = createRateLimiter(new Map());
-  const isolatedWorker = createWorker(isolatedLimiter);
+  const isolatedWorker = createWorker({ rateLimiter: isolatedLimiter });
   const env = {
     API_KEY: "secret",
     MCP_ALLOWED_HOSTNAMES: "yokaiba.test",
@@ -322,9 +322,11 @@ test("MCP rate limiting runs before authentication", async () => {
 
 test("worker rejects malformed URLs without throwing", async () => {
   let rateLimiterCalls = 0;
-  const isolatedWorker = createWorker(() => {
-    rateLimiterCalls += 1;
-    return false;
+  const isolatedWorker = createWorker({
+    rateLimiter: () => {
+      rateLimiterCalls += 1;
+      return false;
+    },
   });
   // Request-like objects cover malformed runtime input that the standard Request constructor rejects first.
   const request = { method: "GET", url: "not a URL" } as Request;
@@ -336,19 +338,38 @@ test("worker rejects malformed URLs without throwing", async () => {
 });
 
 test("worker falls back to local REST rate limiting when the provider fails", async () => {
-  const isolatedWorker = createWorker();
+  const providerInvocations: string[] = [];
+  const isolatedWorker = createWorker({
+    localRateLimitStore: new Map(),
+    clock: () => 1_000,
+  });
   const env = {
     REST_RATE_LIMIT: "1",
     REST_RATE_LIMITER: {
-      limit: async () => { throw new Error("provider unavailable"); },
+      limit: async ({ key }: { key: string }) => {
+        providerInvocations.push(key);
+        throw new Error("provider unavailable");
+      },
     },
   };
   const makeRequest = () => new Request("https://yokaiba.test/v1/scenarios", {
-    headers: { "cf-connecting-ip": "192.0.2.90" },
+    headers: { "cf-connecting-ip": "192.0.2.254" },
   });
 
-  assert.equal((await isolatedWorker.fetch(makeRequest(), env, {} as ExecutionContext)).status, 200);
-  assert.equal((await isolatedWorker.fetch(makeRequest(), env, {} as ExecutionContext)).status, 429);
+  const first = await isolatedWorker.fetch(makeRequest(), env, {} as ExecutionContext);
+  assert.equal(first.status, 200);
+  assert.deepEqual(providerInvocations, ["192.0.2.254:/v1/scenarios"]);
+
+  const limited = await isolatedWorker.fetch(makeRequest(), env, {} as ExecutionContext);
+  assert.deepEqual(providerInvocations, [
+    "192.0.2.254:/v1/scenarios",
+    "192.0.2.254:/v1/scenarios",
+  ]);
+  assert.equal(limited.status, 429);
+  assert.deepEqual(await limited.json(), {
+    error: { code: "rate_limited", message: "Too many requests" },
+  });
+  assert.equal(limited.headers.get("retry-after"), "60");
 });
 
 test("worker allows supported CORS preflight headers", async () => {
