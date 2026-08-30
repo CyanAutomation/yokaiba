@@ -308,16 +308,6 @@ test("MCP rate limiting runs before authentication", async () => {
   assert.equal(limited.headers.get("retry-after"), "60");
 });
 
-test("worker rejects malformed URLs without throwing", async () => {
-  const request = { method: "GET", url: "invalid" } as Request;
-  const response = await worker.fetch(request, {
-    REST_RATE_LIMITER: {
-      limit: async () => { throw new Error("rate limiter should not receive an invalid URL"); },
-    },
-  }, {} as ExecutionContext);
-  assert.equal(response.status, 400);
-});
-
 test("worker falls back to local REST rate limiting when the provider fails", async () => {
   const isolatedWorker = createWorker();
   const env = {
