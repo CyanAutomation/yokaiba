@@ -255,14 +255,6 @@ test("REST rejects excessively long generation inputs", async () => {
   assert.deepEqual(await response.json(), { error: { code: "bad_request", message: "seed must be at most 128 characters" } });
 });
 
-test("REST router returns a bad request for an invalid URL", async () => {
-  const route = createRestRouter([tournamentOrderTemplate], { puzzleTokenSecret: "test-token-secret" });
-  const response = await route({ method: "GET", url: "not a URL" } as Request);
-
-  assert.equal(response.status, 400);
-  assert.deepEqual(await response.json(), { error: { code: "bad_request", message: "Invalid URL" } });
-});
-
 test("solver handles the maximum supported row count", () => {
   const fiveRows: PuzzleTemplate = {
     id: "five-rows",
@@ -306,6 +298,21 @@ test("MCP rate limiting runs before authentication", async () => {
     error: { code: "rate_limited", message: "Too many requests" },
   });
   assert.equal(limited.headers.get("retry-after"), "60");
+});
+
+test("worker rejects malformed URLs without throwing", async () => {
+  let rateLimiterCalls = 0;
+  const isolatedWorker = createWorker(() => {
+    rateLimiterCalls += 1;
+    return false;
+  });
+  // Request-like objects cover malformed runtime input that the standard Request constructor rejects first.
+  const request = { method: "GET", url: "not a URL" } as Request;
+  const response = await isolatedWorker.fetch(request, {}, {} as ExecutionContext);
+
+  assert.equal(response.status, 400);
+  assert.deepEqual(await response.json(), { error: { code: "bad_request", message: "Invalid URL" } });
+  assert.equal(rateLimiterCalls, 0);
 });
 
 test("worker falls back to local REST rate limiting when the provider fails", async () => {
