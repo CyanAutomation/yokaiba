@@ -1,5 +1,6 @@
 import type { Clue, GeneratedPuzzle, PuzzleTemplate, Solution } from "../domain/types.js";
 import { countSolutions } from "../constraints/solver.js";
+import { assessPuzzleDifficulty } from "./quality.js";
 
 export const GENERATOR_VERSION = "yokaiba-generator-v1";
 export const SOLVER_VERSION = "yokaiba-exhaustive-v1";
@@ -131,6 +132,7 @@ export function generatePuzzle(template: PuzzleTemplate, seed: string): Generate
     solverVersion: SOLVER_VERSION,
     spec: template,
     clues: selected,
+    difficulty: assessPuzzleDifficulty(selected),
     solution,
   };
 }

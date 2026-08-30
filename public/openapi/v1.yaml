@@ -94,6 +94,29 @@ paths:
         '400': { $ref: '#/components/responses/BadRequest' }
         '404': { $ref: '#/components/responses/NotFound' }
         '429': { $ref: '#/components/responses/RateLimited' }
+  /v1/puzzles/verify:
+    post:
+      summary: Verify a submitted puzzle answer
+      description: |
+        Checks a complete answer server-side using a signed token returned by puzzle generation.
+        The response never reveals the hidden solution or which entries are incorrect.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/PuzzleVerificationRequest' }
+      responses:
+        '200':
+          description: The answer was checked.
+          headers:
+            Access-Control-Allow-Origin: { $ref: '#/components/headers/AccessControlAllowOrigin' }
+            X-Request-Id: { $ref: '#/components/headers/RequestId' }
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/PuzzleVerificationResult' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '429': { $ref: '#/components/responses/RateLimited' }
+        '503': { $ref: '#/components/responses/NotConfigured' }
     post:
       summary: Generate a deterministic puzzle
       requestBody:
@@ -163,6 +186,10 @@ components:
         Retry-After: { schema: { type: integer, minimum: 1 } }
         X-Request-Id: { $ref: '#/components/headers/RequestId' }
       content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } }
+    NotConfigured:
+      description: The service is missing required server configuration.
+      headers: { X-Request-Id: { $ref: '#/components/headers/RequestId' } }
+      content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } }
   schemas:
     Health:
       type: object
@@ -221,16 +248,50 @@ components:
         categories: { type: array, items: { $ref: '#/components/schemas/Category' } }
     GeneratedPuzzle:
       type: object
-      required: [id, seed, templateId, generatorVersion, solverVersion, spec, clues]
+      required: [id, seed, templateId, generatorVersion, solverVersion, spec, clues, difficulty]
       properties:
         id: { type: string }
         seed: { type: string }
         templateId: { type: string }
         generatorVersion: { type: string }
         solverVersion: { type: string }
+        puzzleToken:
+          type: string
+          description: Opaque HMAC-signed token required by the verification endpoint; present when PUZZLE_TOKEN_SECRET is configured.
         spec: { $ref: '#/components/schemas/PuzzleSpec' }
         clues: { type: array, items: { $ref: '#/components/schemas/Clue' } }
+        difficulty: { $ref: '#/components/schemas/Difficulty' }
       not: { required: [solution] }
+    Difficulty:
+      type: object
+      required: [level, label, modelVersion]
+      properties:
+        level: { type: integer, minimum: 1, maximum: 5 }
+        label: { type: string, enum: [Very easy, Easy, Moderate, Hard, Very hard] }
+        modelVersion: { type: string, example: yokaiba-difficulty-v1 }
+    SolutionAnswer:
+      type: object
+      required: [assignments]
+      additionalProperties: false
+      properties:
+        assignments:
+          type: object
+          description: Each non-base category maps base-row order to a complete permutation of its values.
+          additionalProperties:
+            type: array
+            items: { type: string }
+    PuzzleVerificationRequest:
+      type: object
+      required: [puzzleToken, answer]
+      additionalProperties: false
+      properties:
+        puzzleToken: { type: string, minLength: 1 }
+        answer: { $ref: '#/components/schemas/SolutionAnswer' }
+    PuzzleVerificationResult:
+      type: object
+      required: [correct]
+      properties:
+        correct: { type: boolean }
     Error:
       type: object
       required: [error]

@@ -37,6 +37,13 @@ export interface Solution {
   assignments: Record<string, string[]>;
 }
 
+/** Public, deterministic difficulty assessment for the current puzzle. */
+export interface Difficulty {
+  level: 1 | 2 | 3 | 4 | 5;
+  label: "Very easy" | "Easy" | "Moderate" | "Hard" | "Very hard";
+  modelVersion: string;
+}
+
 export interface GeneratedPuzzle {
   id: string;
   seed: string;
@@ -45,6 +52,7 @@ export interface GeneratedPuzzle {
   solverVersion: string;
   spec: PuzzleSpec;
   clues: Clue[];
+  difficulty: Difficulty;
   /** Retained by trusted callers only; REST/MCP generation responses redact this. */
   solution: Solution;
 }
