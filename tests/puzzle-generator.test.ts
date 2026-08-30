@@ -47,6 +47,14 @@ const noGuessSolveFixture: Clue[] = [
   { id: "aki-not-second", constraint: { kind: "notMatches", subject: "Aki", category: "placing", value: "2nd" }, text: "Aki did not finish second." },
 ];
 
+test("Tournament Order uses a four-category default working board", () => {
+  assert.equal(tournamentOrderTemplate.baseCategory, "tournament-order");
+  assert.deepEqual(tournamentOrderTemplate.categories.map(category => category.id), [
+    "tournament-order", "weight", "tatami", "placing",
+  ]);
+  assert.deepEqual(tournamentOrderTemplate.categories[0]?.values, ["Match 1", "Match 2", "Match 3", "Match 4"]);
+});
+
 test("a seeded puzzle is reproducible and has exactly one solution", () => {
   const first = generatePuzzle(template, "golden-seed");
   const second = generatePuzzle(template, "golden-seed");
@@ -109,13 +117,13 @@ test("quality reports an incomplete human trace when clues cannot finish the puz
 });
 
 test("difficulty is reproducible and exercises all five calibrated levels", () => {
-  // Representative fixtures from the 1,000-seed calibration corpus documented near README.md:54.
+  // Representative fixtures recalibrated for the four-category Tournament Order board.
   const fixtures = [
-    { seed: "difficulty-band-0", level: 1, label: "Very easy", modelVersion: "yokaiba-difficulty-v1" },
-    { seed: "difficulty-band-14", level: 2, label: "Easy", modelVersion: "yokaiba-difficulty-v1" },
-    { seed: "difficulty-band-2", level: 3, label: "Moderate", modelVersion: "yokaiba-difficulty-v1" },
-    { seed: "difficulty-band-7", level: 4, label: "Hard", modelVersion: "yokaiba-difficulty-v1" },
-    { seed: "difficulty-band-1", level: 5, label: "Very hard", modelVersion: "yokaiba-difficulty-v1" },
+    { seed: "recalibrate-7", level: 1, label: "Very easy", modelVersion: "yokaiba-difficulty-v1" },
+    { seed: "recalibrate-18", level: 2, label: "Easy", modelVersion: "yokaiba-difficulty-v1" },
+    { seed: "recalibrate-3", level: 3, label: "Moderate", modelVersion: "yokaiba-difficulty-v1" },
+    { seed: "recalibrate-1", level: 4, label: "Hard", modelVersion: "yokaiba-difficulty-v1" },
+    { seed: "recalibrate-0", level: 5, label: "Very hard", modelVersion: "yokaiba-difficulty-v1" },
   ];
 
   for (const { seed, ...expectedDifficulty } of fixtures) {
@@ -200,10 +208,12 @@ test("REST verifies a complete submitted answer without exposing the solution", 
   assert.equal(correct.status, 200);
   assert.deepEqual(await correct.json(), { correct: true });
 
+  const categoryId = Object.keys(solution.assignments)[0]!;
+
   const incorrect = await route(new Request("https://yokaiba.test/v1/puzzles/verify", {
     method: "POST",
     headers: { "content-type": "application/json" },
-    body: JSON.stringify({ puzzleToken: publicPuzzle.puzzleToken, answer: { assignments: { ...solution.assignments, club: [...solution.assignments.club].reverse() } } }),
+    body: JSON.stringify({ puzzleToken: publicPuzzle.puzzleToken, answer: { assignments: { ...solution.assignments, [categoryId]: [...solution.assignments[categoryId]!].reverse() } } }),
   }));
   assert.equal(incorrect.status, 200);
   assert.deepEqual(await incorrect.json(), { correct: false });
