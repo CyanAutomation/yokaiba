@@ -175,6 +175,17 @@ test("REST supports cacheable deterministic GET generation", async () => {
   assert.equal("solution" in body, false);
 });
 
+test("REST can deterministically select a requested difficulty level", async () => {
+  const route = createRestRouter([tournamentOrderTemplate]);
+  const first = await route(new Request("https://yokaiba.test/v1/puzzles/generate?templateId=tournament-order-v1&seed=level-picker&difficultyLevel=4"));
+  const second = await route(new Request("https://yokaiba.test/v1/puzzles/generate?templateId=tournament-order-v1&seed=level-picker&difficultyLevel=4"));
+
+  assert.equal(first.status, 200);
+  assert.deepEqual(await first.json(), await second.json());
+  const replay = await route(new Request("https://yokaiba.test/v1/puzzles/generate?templateId=tournament-order-v1&seed=level-picker&difficultyLevel=4"));
+  assert.equal((await replay.json() as { difficulty: { level: number } }).difficulty.level, 4);
+});
+
 test("REST verifies a complete submitted answer without exposing the solution", async () => {
   const route = createRestRouter([tournamentOrderTemplate], { puzzleTokenSecret: "test-token-secret" });
   const generated = await route(new Request("https://yokaiba.test/v1/puzzles/generate?templateId=tournament-order-v1&seed=verify-seed"));
