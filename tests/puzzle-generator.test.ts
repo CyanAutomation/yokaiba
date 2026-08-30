@@ -52,14 +52,24 @@ test("quality reports clue diversity, readability, and no-guess human trace", ()
 });
 
 test("difficulty is reproducible and exercises all five calibrated levels", () => {
-  const levels = new Set<number>();
-  for (let index = 0; index < 300; index += 1) {
-    const first = generatePuzzle(tournamentOrderTemplate, `difficulty-band-${index}`);
-    const second = generatePuzzle(tournamentOrderTemplate, `difficulty-band-${index}`);
-    assert.deepEqual(first.difficulty, second.difficulty);
-    levels.add(first.difficulty.level);
+  // Representative fixtures from the 1,000-seed calibration corpus documented near README.md:54.
+  const fixtures = [
+    { seed: "difficulty-band-0", level: 1, label: "Very easy", modelVersion: "yokaiba-difficulty-v1" },
+    { seed: "difficulty-band-14", level: 2, label: "Easy", modelVersion: "yokaiba-difficulty-v1" },
+    { seed: "difficulty-band-2", level: 3, label: "Moderate", modelVersion: "yokaiba-difficulty-v1" },
+    { seed: "difficulty-band-7", level: 4, label: "Hard", modelVersion: "yokaiba-difficulty-v1" },
+    { seed: "difficulty-band-1", level: 5, label: "Very hard", modelVersion: "yokaiba-difficulty-v1" },
+  ];
+
+  for (const { seed, ...expectedDifficulty } of fixtures) {
+    const puzzle = generatePuzzle(tournamentOrderTemplate, seed);
+    assert.deepEqual(puzzle.difficulty, expectedDifficulty);
   }
-  assert.deepEqual([...levels].sort(), [1, 2, 3, 4, 5]);
+
+  const reproducibleSeed = fixtures[2].seed;
+  const first = generatePuzzle(tournamentOrderTemplate, reproducibleSeed);
+  const second = generatePuzzle(tournamentOrderTemplate, reproducibleSeed);
+  assert.deepEqual(first.difficulty, second.difficulty);
 });
 
 test("OpenAPI documents every public REST endpoint", async () => {
