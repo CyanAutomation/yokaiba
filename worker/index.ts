@@ -60,6 +60,11 @@ function authorized(request: Request, key: string | undefined) {
 
 export type RateLimitStore = Map<string, { count: number; resetAt: number }>;
 export type RateLimiter = (request: Request, rawLimit: string | undefined, scope: string) => boolean;
+export interface WorkerOptions {
+  localRateLimitStore?: RateLimitStore;
+  clock?: () => number;
+  rateLimiter?: RateLimiter;
+}
 const RATE_WINDOW_MS = 60_000;
 const MAX_RATE_LIMIT_KEYS = 10_000;
 
@@ -163,7 +168,8 @@ function allowedOrigin(request: Request, hostnames: string[]) {
   try { return hostnames.includes(new URL(origin).hostname); } catch { return false; }
 }
 
-export function createWorker(rateLimited: RateLimiter = createRateLimiter()) {
+export function createWorker(options: WorkerOptions = {}) {
+  const rateLimited = options.rateLimiter ?? createRateLimiter(options.localRateLimitStore, options.clock);
   return {
     async fetch(request: Request, env: Env, ctx: ExecutionContext): Promise<Response> {
       const startedAt = Date.now();
