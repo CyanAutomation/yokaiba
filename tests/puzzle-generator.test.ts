@@ -141,25 +141,50 @@ test("REST verifies a complete submitted answer without exposing the solution", 
   assert.deepEqual(await incorrect.json(), { correct: false });
 });
 
-test("REST rejects malformed answers, tampered tokens, and verification without a configured secret", async () => {
+async function verificationSetup() {
   const route = createRestRouter([tournamentOrderTemplate], { puzzleTokenSecret: "test-token-secret" });
   const generated = await route(new Request("https://yokaiba.test/v1/puzzles/generate?templateId=tournament-order-v1&seed=verify-invalid"));
   const { puzzleToken } = await generated.json() as { puzzleToken: string };
+  return { route, puzzleToken };
+}
+
+test("REST rejects malformed verification assignments", async () => {
+  const { route, puzzleToken } = await verificationSetup();
   const malformed = await route(new Request("https://yokaiba.test/v1/puzzles/verify", {
     method: "POST", headers: { "content-type": "application/json" },
     body: JSON.stringify({ puzzleToken, answer: { assignments: { club: ["Wolves"] } } }),
   }));
-  assert.equal(malformed.status, 400);
 
+  assert.equal(malformed.status, 400);
+  assert.deepEqual(await malformed.json(), {
+    error: { code: "bad_request", message: "answer must include every non-base category exactly once" },
+  });
+});
+
+test("REST rejects a puzzle token with a tampered signature", async () => {
+  const { route, puzzleToken } = await verificationSetup();
+  const signatureStart = puzzleToken.indexOf(".") + 1;
+  const replacement = puzzleToken[signatureStart] === "A" ? "B" : "A";
+  const tamperedPuzzleToken = `${puzzleToken.slice(0, signatureStart)}${replacement}${puzzleToken.slice(signatureStart + 1)}`;
   const tampered = await route(new Request("https://yokaiba.test/v1/puzzles/verify", {
     method: "POST", headers: { "content-type": "application/json" },
-    body: JSON.stringify({ puzzleToken: `${puzzleToken}x`, answer: generatePuzzle(tournamentOrderTemplate, "verify-invalid").solution }),
+    body: JSON.stringify({ puzzleToken: tamperedPuzzleToken, answer: generatePuzzle(tournamentOrderTemplate, "verify-invalid").solution }),
   }));
-  assert.equal(tampered.status, 400);
 
+  assert.equal(tampered.status, 400);
+  assert.deepEqual(await tampered.json(), {
+    error: { code: "bad_request", message: "puzzleToken is invalid" },
+  });
+});
+
+test("REST rejects verification without a configured PUZZLE_TOKEN_SECRET", async () => {
   const unconfigured = createRestRouter([tournamentOrderTemplate]);
   const response = await unconfigured(new Request("https://yokaiba.test/v1/puzzles/verify", { method: "POST" }));
+
   assert.equal(response.status, 503);
+  assert.deepEqual(await response.json(), {
+    error: { code: "not_configured", message: "puzzle verification is not configured" },
+  });
 });
 
 test("REST rejects excessively long generation inputs", async () => {
