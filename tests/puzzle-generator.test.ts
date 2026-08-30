@@ -9,7 +9,7 @@ import {
   type PuzzleTemplate,
 } from "../src/index.js";
 import { createRestRouter, tournamentOrderTemplate } from "../src/index.js";
-import worker, { createWorker } from "../worker/index.js";
+import worker, { createRateLimiter, createWorker } from "../worker/index.js";
 
 const template: PuzzleTemplate = {
   id: "test-tournament",
@@ -278,20 +278,33 @@ test("solver handles the maximum supported row count", () => {
 });
 
 test("MCP rate limiting runs before authentication", async () => {
-  const isolatedWorker = createWorker();
+  const isolatedLimiter = createRateLimiter(new Map());
+  const isolatedWorker = createWorker(isolatedLimiter);
   const env = {
     API_KEY: "secret",
     MCP_ALLOWED_HOSTNAMES: "yokaiba.test",
     MCP_RATE_LIMIT: "2",
   };
   const makeRequest = () => new Request("https://yokaiba.test/mcp", {
-    headers: { "cf-connecting-ip": "192.0.2.10" },
+    headers: { "cf-connecting-ip": "192.0.2.201" },
   });
 
-  assert.equal((await isolatedWorker.fetch(makeRequest(), env, {} as ExecutionContext)).status, 401);
-  assert.equal((await isolatedWorker.fetch(makeRequest(), env, {} as ExecutionContext)).status, 401);
+  // Apply the limit before authentication so unauthenticated request floods cannot bypass this protection.
+  const firstUnauthorized = await isolatedWorker.fetch(makeRequest(), env, {} as ExecutionContext);
+  assert.equal(firstUnauthorized.status, 401);
+  assert.deepEqual(await firstUnauthorized.json(), {
+    error: { code: "unauthorized", message: "A valid API key is required" },
+  });
+  const secondUnauthorized = await isolatedWorker.fetch(makeRequest(), env, {} as ExecutionContext);
+  assert.equal(secondUnauthorized.status, 401);
+  assert.deepEqual(await secondUnauthorized.json(), {
+    error: { code: "unauthorized", message: "A valid API key is required" },
+  });
   const limited = await isolatedWorker.fetch(makeRequest(), env, {} as ExecutionContext);
   assert.equal(limited.status, 429);
+  assert.deepEqual(await limited.clone().json(), {
+    error: { code: "rate_limited", message: "Too many requests" },
+  });
   assert.equal(limited.headers.get("retry-after"), "60");
 });
 

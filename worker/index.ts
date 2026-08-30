@@ -59,26 +59,30 @@ function authorized(request: Request, key: string | undefined) {
 }
 
 export type RateLimitStore = Map<string, { count: number; resetAt: number }>;
+export type RateLimiter = (request: Request, rawLimit: string | undefined, scope: string) => boolean;
 const RATE_WINDOW_MS = 60_000;
 const MAX_RATE_LIMIT_KEYS = 10_000;
 
-function rateLimited(rateLimits: RateLimitStore, request: Request, rawLimit: string | undefined, scope: string, now = Date.now()): boolean {
-  const configured = Number(rawLimit ?? 30);
-  const limit = Number.isSafeInteger(configured) && configured > 0 ? configured : 30;
-  const key = `${scope}:${request.headers.get("cf-connecting-ip") ?? "unknown"}`;
-  const current = rateLimits.get(key);
-  if (!current || current.resetAt <= now) {
-    if (rateLimits.size >= MAX_RATE_LIMIT_KEYS) {
-      for (const [candidate, value] of rateLimits) {
-        if (value.resetAt <= now) rateLimits.delete(candidate);
+export function createRateLimiter(rateLimits: RateLimitStore = new Map(), clock: () => number = Date.now): RateLimiter {
+  return (request, rawLimit, scope) => {
+    const now = clock();
+    const configured = Number(rawLimit ?? 30);
+    const limit = Number.isSafeInteger(configured) && configured > 0 ? configured : 30;
+    const key = `${scope}:${request.headers.get("cf-connecting-ip") ?? "unknown"}`;
+    const current = rateLimits.get(key);
+    if (!current || current.resetAt <= now) {
+      if (rateLimits.size >= MAX_RATE_LIMIT_KEYS) {
+        for (const [candidate, value] of rateLimits) {
+          if (value.resetAt <= now) rateLimits.delete(candidate);
+        }
+        if (rateLimits.size >= MAX_RATE_LIMIT_KEYS) rateLimits.delete(rateLimits.keys().next().value as string);
       }
-      if (rateLimits.size >= MAX_RATE_LIMIT_KEYS) rateLimits.delete(rateLimits.keys().next().value as string);
+      rateLimits.set(key, { count: 1, resetAt: now + RATE_WINDOW_MS });
+      return false;
     }
-    rateLimits.set(key, { count: 1, resetAt: now + RATE_WINDOW_MS });
-    return false;
-  }
-  current.count += 1;
-  return current.count > limit;
+    current.count += 1;
+    return current.count > limit;
+  };
 }
 
 function configuredOrigins(rawOrigins: string | undefined) {
@@ -138,8 +142,8 @@ async function staticAsset(request: Request, env: Env, assetPath: string): Promi
   return new Response(asset.body, { status: asset.status, statusText: asset.statusText, headers });
 }
 
-async function restRateLimited(rateLimits: RateLimitStore, request: Request, env: Env): Promise<boolean> {
-  if (new URL(request.url).pathname === "/v1/puzzles/verify" && rateLimited(rateLimits, request, env.VERIFY_RATE_LIMIT ?? "10", "verify")) return true;
+async function restRateLimited(rateLimited: RateLimiter, request: Request, env: Env): Promise<boolean> {
+  if (new URL(request.url).pathname === "/v1/puzzles/verify" && rateLimited(request, env.VERIFY_RATE_LIMIT ?? "10", "verify")) return true;
   if (env.REST_RATE_LIMITER) {
     try {
       const url = new URL(request.url);
@@ -150,7 +154,7 @@ async function restRateLimited(rateLimits: RateLimitStore, request: Request, env
       // Retain the local fallback if a provider binding is temporarily unavailable.
     }
   }
-  return rateLimited(rateLimits, request, env.REST_RATE_LIMIT ?? "60", "rest");
+  return rateLimited(request, env.REST_RATE_LIMIT ?? "60", "rest");
 }
 
 function allowedOrigin(request: Request, hostnames: string[]) {
@@ -159,7 +163,7 @@ function allowedOrigin(request: Request, hostnames: string[]) {
   try { return hostnames.includes(new URL(origin).hostname); } catch { return false; }
 }
 
-export function createWorker(rateLimits: RateLimitStore = new Map()) {
+export function createWorker(rateLimited: RateLimiter = createRateLimiter()) {
   return {
     async fetch(request: Request, env: Env, ctx: ExecutionContext): Promise<Response> {
       const startedAt = Date.now();
@@ -190,14 +194,14 @@ export function createWorker(rateLimits: RateLimitStore = new Map()) {
         if (!responseCorsHeaders || !["GET", "POST"].includes(requestedMethod?.toUpperCase() ?? "") || requestedHeaders.some(header => header !== "content-type")) return finish(json({ error: { code: "forbidden", message: "Origin is not allowed" } }, 403));
         return finish(new Response(null, { status: 204 }));
       }
-      if (restRequest && await restRateLimited(rateLimits, request, env)) {
+      if (restRequest && await restRateLimited(rateLimited, request, env)) {
         return finish(new Response(JSON.stringify({ error: { code: "rate_limited", message: "Too many requests" } }), {
           status: 429,
           headers: { "content-type": "application/json; charset=utf-8", "retry-after": "60" },
         }));
       }
       if (path !== "/mcp") return finish(await cachePublicGet(await createRestRouter(templates, { puzzleTokenSecret: env.PUZZLE_TOKEN_SECRET })(request), request));
-      if (rateLimited(rateLimits, request, env.MCP_RATE_LIMIT, "mcp")) {
+      if (rateLimited(request, env.MCP_RATE_LIMIT, "mcp")) {
         return finish(new Response(JSON.stringify({ error: { code: "rate_limited", message: "Too many requests" } }), {
           status: 429,
           headers: { "content-type": "application/json; charset=utf-8", "retry-after": "60" },
