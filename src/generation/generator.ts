@@ -88,13 +88,13 @@ function relationalCandidates(template: PuzzleTemplate, solution: Solution, next
         candidates.push({
           id: `before-${category.id}-${leftRow}-${rightRow}`,
           constraint: { kind: "before", left, right },
-          text: `In the ${template.title.toLowerCase()} lineup, the judoka associated with ${left.value} appeared before the judoka associated with ${right.value}.`,
+          text: `In the ${template.title.toLowerCase()} lineup, the entry associated with ${left.value} appeared before the entry associated with ${right.value}.`,
         });
         if (rightRow === leftRow + 1) {
           candidates.push({
             id: `adjacent-${category.id}-${leftRow}-${rightRow}`,
             constraint: { kind: "adjacent", left, right },
-            text: `In the ${template.title.toLowerCase()} lineup, the judoka associated with ${left.value} stood next to the judoka associated with ${right.value}.`,
+          text: `In the ${template.title.toLowerCase()} lineup, the entry associated with ${left.value} stood next to the entry associated with ${right.value}.`,
           });
         }
       }

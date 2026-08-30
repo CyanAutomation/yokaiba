@@ -4,10 +4,9 @@ import type { PuzzleTemplate } from "../domain/types.js";
 export const tournamentOrderTemplate: PuzzleTemplate = {
   id: "tournament-order-v1",
   title: "Tournament Order",
-  baseCategory: "judoka",
+  baseCategory: "tournament-order",
   categories: [
-    { id: "judoka", label: "Judoka", values: ["Aki", "Ben", "Cora", "Daichi"] },
-    { id: "club", label: "Club", values: ["Falcons", "Lions", "Tigers", "Wolves"] },
+    { id: "tournament-order", label: "Tournament order", values: ["Match 1", "Match 2", "Match 3", "Match 4"], ordered: true },
     { id: "weight", label: "Weight category", values: ["-60 kg", "-66 kg", "-73 kg", "-81 kg"], ordered: true },
     { id: "tatami", label: "Tatami", values: ["Tatami 1", "Tatami 2", "Tatami 3", "Tatami 4"], ordered: true },
     { id: "placing", label: "Placing", values: ["1st", "2nd", "3rd", "4th"], ordered: true },
