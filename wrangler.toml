@@ -11,11 +11,14 @@ run_worker_first = ["/docs", "/docs/", "/openapi/*"]
 #   npx wrangler secret put API_KEY
 #   npx wrangler secret put MCP_ALLOWED_HOSTNAMES
 #   npx wrangler secret put REST_ALLOWED_ORIGINS
+#   npx wrangler secret put PUZZLE_TOKEN_SECRET
 # API_KEY matches the Budokon Worker convention. It is required for /mcp only.
 # MCP_ALLOWED_HOSTNAMES is a comma-separated hostname allowlist; it is required
 # for the MCP handler's Origin and Host validation.
 # REST_ALLOWED_ORIGINS is a comma-separated list of exact browser origins that
 # may call the public REST API. It is intentionally unset by default.
+# PUZZLE_TOKEN_SECRET signs browser puzzle tokens used by /v1/puzzles/verify.
+# VERIFY_RATE_LIMIT optionally sets the per-isolate verification attempts per minute (default 10).
 
 [[ratelimits]]
 name = "REST_RATE_LIMITER"
