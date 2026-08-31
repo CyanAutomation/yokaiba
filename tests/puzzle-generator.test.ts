@@ -47,12 +47,12 @@ const noGuessSolveFixture: Clue[] = [
   { id: "aki-not-second", constraint: { kind: "notMatches", subject: "Aki", category: "placing", value: "2nd" }, text: "Aki did not finish second." },
 ];
 
-test("Tournament Order uses a four-category default working board", () => {
-  assert.equal(tournamentOrderTemplate.baseCategory, "tournament-order");
+test("Tournament Order uses judoka names for its default working board", () => {
+  assert.equal(tournamentOrderTemplate.baseCategory, "judoka");
   assert.deepEqual(tournamentOrderTemplate.categories.map(category => category.id), [
-    "tournament-order", "weight", "tatami", "placing",
+    "judoka", "weight", "tatami", "placing",
   ]);
-  assert.deepEqual(tournamentOrderTemplate.categories[0]?.values, ["Match 1", "Match 2", "Match 3", "Match 4"]);
+  assert.deepEqual(tournamentOrderTemplate.categories[0]?.values, ["Aki", "Hana", "Kenji", "Sora"]);
 });
 
 test("a seeded puzzle is reproducible and has exactly one solution", () => {
