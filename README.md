@@ -19,6 +19,11 @@ solvers must preserve clue semantics, solution-limit behaviour, deterministic
 solution ordering, and expose a stable `version`; that version is recorded on
 each generated puzzle so deterministic replay remains auditable.
 
+For local solver profiling, `solveWithTelemetry(spec, clues, limit)` returns
+the normal solutions together with visited permutation nodes, evaluated ready
+constraints, and elapsed milliseconds. It is diagnostic-only; the default
+`solve` and `countSolutions` APIs retain the same exhaustive-solver contract.
+
 ## Develop and verify
 
 ```sh
