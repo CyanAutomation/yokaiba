@@ -31,7 +31,8 @@ jobs:
 
       - name: Read package version
         id: build
-        run: echo "version=$(node -p \"require('./package.json').version\")" >> "$GITHUB_OUTPUT"
+        run: |
+          node --print '"version=" + require("./package.json").version' >> "$GITHUB_OUTPUT"
 
       - name: Validate deployment credentials
         env:
