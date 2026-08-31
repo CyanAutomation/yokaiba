@@ -1,4 +1,5 @@
 import type { Clue, ClueConstraint, PuzzleSpec, Solution } from "../domain/types.js";
+import type { PuzzleSolver } from "../domain/puzzle-solver.js";
 
 /** Inclusive row-count bounds supported by the exhaustive MVP solver. */
 export const MIN_SUPPORTED_ROWS = 2;
@@ -103,3 +104,10 @@ export function solve(spec: PuzzleSpec, clues: readonly Clue[], limit = Number.P
 export function countSolutions(spec: PuzzleSpec, clues: readonly Clue[], limit = 2): number {
   return solve(spec, clues, limit).length;
 }
+
+/** The built-in exhaustive implementation for small, deterministic grids. */
+export const exhaustivePuzzleSolver: PuzzleSolver = {
+  version: "yokaiba-exhaustive-v1",
+  solve,
+  countSolutions,
+};

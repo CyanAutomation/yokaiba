@@ -1,5 +1,6 @@
 import type { Clue, Difficulty, PuzzleSpec } from "../domain/types.js";
-import { countSolutions } from "../constraints/solver.js";
+import type { PuzzleSolver } from "../domain/puzzle-solver.js";
+import { exhaustivePuzzleSolver } from "../constraints/solver.js";
 
 const COST: Record<Clue["constraint"]["kind"], number> = { matches: 1, notMatches: 1, before: 3, adjacent: 3 };
 
@@ -97,9 +98,9 @@ function directHumanSolve(spec: PuzzleSpec, clues: readonly Clue[]) {
   return { solved: [...possible.values()].every(cells => cells.every(cell => cell.size === 1)), usedGuessing: false as const, totalCost, hardestStep };
 }
 
-export function evaluatePuzzleQuality(spec: PuzzleSpec, clues: readonly Clue[]): PuzzleQuality {
-  const unique = countSolutions(spec, clues, 2) === 1;
-  const redundantClueIds = clues.filter(clue => countSolutions(spec, clues.filter(candidate => candidate.id !== clue.id), 2) === 1).map(clue => clue.id);
+export function evaluatePuzzleQuality(spec: PuzzleSpec, clues: readonly Clue[], solver: PuzzleSolver = exhaustivePuzzleSolver): PuzzleQuality {
+  const unique = solver.countSolutions(spec, clues, 2) === 1;
+  const redundantClueIds = clues.filter(clue => solver.countSolutions(spec, clues.filter(candidate => candidate.id !== clue.id), 2) === 1).map(clue => clue.id);
   const kinds = [...new Set(clues.map(clue => clue.constraint.kind))].sort();
   return {
     unique,

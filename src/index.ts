@@ -1,4 +1,5 @@
 export * from "./domain/types.js";
+export * from "./domain/puzzle-solver.js";
 export * from "./constraints/solver.js";
 export * from "./generation/generator.js";
 export * from "./generation/quality.js";

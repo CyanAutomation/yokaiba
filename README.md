@@ -10,6 +10,15 @@ Yokaiba creates deterministic, uniquely solvable judo logic-grid puzzles for gam
 - Server-side browser-answer verification using signed puzzle tokens, plus a deterministic 1–5 difficulty assessment.
 - A Cloudflare Worker with public REST and an API-key-protected Streamable HTTP MCP endpoint.
 
+## Solver implementations
+
+Generation and quality evaluation depend on the exported `PuzzleSolver` contract,
+not directly on the exhaustive implementation. The built-in
+`exhaustivePuzzleSolver` supports 2–5-row grids and is the default. Alternative
+solvers must preserve clue semantics, solution-limit behaviour, deterministic
+solution ordering, and expose a stable `version`; that version is recorded on
+each generated puzzle so deterministic replay remains auditable.
+
 ## Develop and verify
 
 ```sh
