@@ -22,6 +22,17 @@ paths:
           content:
             application/json:
               schema: { $ref: '#/components/schemas/Health' }
+  /readyz:
+    get:
+      summary: Readiness check, including rate-limit provider configuration
+      responses:
+        '200':
+          description: Service is ready to receive traffic
+          headers:
+            X-Request-Id: { $ref: '#/components/headers/RequestId' }
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Readiness' }
   /docs:
     get:
       summary: Interactive Swagger UI
@@ -92,6 +103,27 @@ paths:
             application/json:
               schema: { $ref: '#/components/schemas/GeneratedPuzzle' }
         '304': { $ref: '#/components/responses/NotModified' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '429': { $ref: '#/components/responses/RateLimited' }
+    post:
+      summary: Generate a deterministic puzzle from a JSON request
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/GenerationRequest' }
+      responses:
+        '200':
+          description: A reproducible puzzle without its hidden solution
+          headers:
+            Access-Control-Allow-Origin: { $ref: '#/components/headers/AccessControlAllowOrigin' }
+            X-Request-Id: { $ref: '#/components/headers/RequestId' }
+            RateLimit-Limit: { schema: { type: integer, minimum: 1 } }
+            RateLimit-Policy: { schema: { type: string, example: 60;w=60 } }
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/GeneratedPuzzle' }
         '400': { $ref: '#/components/responses/BadRequest' }
         '404': { $ref: '#/components/responses/NotFound' }
         '429': { $ref: '#/components/responses/RateLimited' }
@@ -172,6 +204,8 @@ components:
       description: Too many requests
       headers:
         Retry-After: { schema: { type: integer, minimum: 1 } }
+        RateLimit-Limit: { schema: { type: integer, minimum: 1 } }
+        RateLimit-Policy: { schema: { type: string, example: 60;w=60 } }
         X-Request-Id: { $ref: '#/components/headers/RequestId' }
       content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } }
     NotConfigured:
@@ -181,19 +215,55 @@ components:
   schemas:
     Health:
       type: object
-      required: [status]
-      properties: { status: { type: string, const: ok } }
-    Version:
+      required: [status, build]
+      properties:
+        status: { type: string, const: ok }
+        build: { $ref: '#/components/schemas/Build' }
+    Readiness:
       type: object
-      required: [serviceVersion, generatorVersion, solverVersion]
+      required: [status, build, rateLimitProvider]
+      properties:
+        status: { type: string, const: ready }
+        build: { $ref: '#/components/schemas/Build' }
+        rateLimitProvider: { type: string, enum: [configured, fallback] }
+    Build:
+      type: object
+      required: [serviceVersion, buildSha]
       properties:
         serviceVersion: { type: string }
+        buildSha: { type: string, description: Immutable deployment revision or local for development. }
+    Version:
+      type: object
+      required: [serviceVersion, buildSha, generatorVersion, solverVersion]
+      properties:
+        serviceVersion: { type: string }
+        buildSha: { type: string }
         generatorVersion: { type: string }
         solverVersion: { type: string }
+    TemplateMetadata:
+      type: object
+      required: [locales, difficultyCalibration]
+      properties:
+        locales:
+          type: object
+          required: [default, supported]
+          properties:
+            default: { type: string, example: en }
+            supported: { type: array, items: { type: string } }
+        difficultyCalibration:
+          type: object
+          required: [modelVersion, scoreThresholds, corpus]
+          properties:
+            modelVersion: { type: string }
+            scoreThresholds: { type: array, minItems: 4, maxItems: 4, items: { type: number } }
+            corpus: { type: object, additionalProperties: true }
     Scenario:
       type: object
       required: [id, title]
-      properties: { id: { type: string }, title: { type: string } }
+      properties:
+        id: { type: string }
+        title: { type: string }
+        metadata: { $ref: '#/components/schemas/TemplateMetadata' }
     ScenarioList:
       type: object
       required: [scenarios]
@@ -246,18 +316,25 @@ components:
         solverVersion: { type: string }
         puzzleToken:
           type: string
-          description: Opaque HMAC-signed token required by the verification endpoint; present when PUZZLE_TOKEN_SECRET is configured.
+          description: HMAC-signed token required by the verification endpoint. Its base64url payload contains reproducibility metadata (including the seed), so it is not an encryption or anti-cheating mechanism; present when PUZZLE_TOKEN_SECRET is configured.
         spec: { $ref: '#/components/schemas/PuzzleSpec' }
         clues: { type: array, items: { $ref: '#/components/schemas/Clue' } }
         difficulty: { $ref: '#/components/schemas/Difficulty' }
       not: { required: [solution] }
     Difficulty:
       type: object
-      required: [level, label, modelVersion]
+      required: [level, label, modelVersion, evidence]
       properties:
         level: { type: integer, minimum: 1, maximum: 5 }
         label: { type: string, enum: [Very easy, Easy, Moderate, Hard, Very hard] }
-        modelVersion: { type: string, example: yokaiba-difficulty-v1 }
+        modelVersion: { type: string, example: yokaiba-difficulty-v2 }
+        evidence:
+          type: object
+          required: [score, humanSolve, solver]
+          properties:
+            score: { type: integer }
+            humanSolve: { type: object, additionalProperties: true }
+            solver: { type: object, additionalProperties: true }
     SolutionAnswer:
       type: object
       required: [assignments]

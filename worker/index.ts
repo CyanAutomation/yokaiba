@@ -1,6 +1,7 @@
 import { createRestRouter } from "../src/api/router.js";
 import { createYokaibaMcpHandler } from "../src/mcp/server.js";
 import { tournamentOrderTemplate } from "../src/templates/tournament-order.js";
+import { openDivisionTemplate } from "../src/templates/open-division.js";
 import { hostHeaderValidationResponse } from "@modelcontextprotocol/server";
 
 interface Env {
@@ -14,6 +15,9 @@ interface Env {
   REST_ALLOWED_ORIGINS?: string;
   /** HMAC secret used to issue and validate browser puzzle tokens. */
   PUZZLE_TOKEN_SECRET?: string;
+  /** Deployment-time package version and immutable revision, injected by CI. */
+  BUILD_VERSION?: string;
+  BUILD_SHA?: string;
   /** Optional best-effort, per-isolate REST requests-per-minute override. Defaults to 60. */
   REST_RATE_LIMIT?: string;
   /** Optional best-effort verification attempts per minute; defaults to 10. */
@@ -24,7 +28,7 @@ interface Env {
   ASSETS?: { fetch(request: Request): Promise<Response> };
 }
 
-const templates = [tournamentOrderTemplate];
+const templates = [tournamentOrderTemplate, openDivisionTemplate];
 const mcp = createYokaibaMcpHandler(templates);
 
 function json(value: unknown, status = 200) {
@@ -147,7 +151,7 @@ async function staticAsset(request: Request, env: Env, assetPath: string): Promi
   return new Response(asset.body, { status: asset.status, statusText: asset.statusText, headers });
 }
 
-async function restRateLimited(rateLimited: RateLimiter, request: Request, env: Env): Promise<boolean> {
+async function restRateLimited(rateLimited: RateLimiter, request: Request, env: Env, onProviderFailure: () => void): Promise<boolean> {
   if (new URL(request.url).pathname === "/v1/puzzles/verify" && rateLimited(request, env.VERIFY_RATE_LIMIT ?? "10", "verify")) return true;
   if (env.REST_RATE_LIMITER) {
     try {
@@ -157,6 +161,8 @@ async function restRateLimited(rateLimited: RateLimiter, request: Request, env: 
       return !(await env.REST_RATE_LIMITER.limit({ key: `${client}:${path}` })).success;
     } catch {
       // Retain the local fallback if a provider binding is temporarily unavailable.
+      onProviderFailure();
+      console.error(JSON.stringify({ event: "rate_limit_provider_failure", path: new URL(request.url).pathname }));
     }
   }
   return rateLimited(request, env.REST_RATE_LIMIT ?? "60", "rest");
@@ -170,6 +176,7 @@ function allowedOrigin(request: Request, hostnames: string[]) {
 
 export function createWorker(options: WorkerOptions = {}) {
   const rateLimited = options.rateLimiter ?? createRateLimiter(options.localRateLimitStore, options.clock);
+  let rateLimitProviderFailed = false;
   return {
     async fetch(request: Request, env: Env, ctx: ExecutionContext): Promise<Response> {
       const startedAt = Date.now();
@@ -187,11 +194,19 @@ export function createWorker(options: WorkerOptions = {}) {
       const responseCorsHeaders = restRequest ? corsHeaders(request.headers.get("origin"), configuredOrigins(env.REST_ALLOWED_ORIGINS)) : undefined;
       const finish = (response: Response) => {
         response.headers.set("x-request-id", requestId);
+        if (restRequest) {
+          const configuredLimit = path === "/v1/puzzles/verify" ? env.VERIFY_RATE_LIMIT ?? "10" : env.REST_RATE_LIMIT ?? "60";
+          response.headers.set("ratelimit-limit", configuredLimit);
+          response.headers.set("ratelimit-policy", `${configuredLimit};w=60`);
+          if (response.status === 429) response.headers.set("ratelimit-remaining", "0");
+        }
         if (responseCorsHeaders) for (const [name, value] of Object.entries(responseCorsHeaders)) response.headers.set(name, value);
         console.log(JSON.stringify({ event: "request", requestId, method: request.method, path, status: response.status, durationMs: Date.now() - startedAt }));
         return response;
       };
-      if (path === "/healthz") return finish(json({ status: "ok" }));
+      const build = { serviceVersion: env.BUILD_VERSION ?? "0.1.0", buildSha: env.BUILD_SHA ?? "local" };
+      if (path === "/healthz") return finish(json({ status: "ok", build }));
+      if (path === "/readyz") return finish(json({ status: "ready", build, rateLimitProvider: env.REST_RATE_LIMITER && !rateLimitProviderFailed ? "configured" : "fallback" }));
       if (path === "/docs" || path === "/docs/") return finish(swaggerUiResponse());
       if (path === "/openapi/v1.yaml") return finish(await staticAsset(request, env, "/openapi/v1.yaml"));
       if (restRequest && request.method === "OPTIONS") {
@@ -200,13 +215,13 @@ export function createWorker(options: WorkerOptions = {}) {
         if (!responseCorsHeaders || !["GET", "POST"].includes(requestedMethod?.toUpperCase() ?? "") || requestedHeaders.some(header => header !== "content-type")) return finish(json({ error: { code: "forbidden", message: "Origin is not allowed" } }, 403));
         return finish(new Response(null, { status: 204 }));
       }
-      if (restRequest && await restRateLimited(rateLimited, request, env)) {
+      if (restRequest && await restRateLimited(rateLimited, request, env, () => { rateLimitProviderFailed = true; })) {
         return finish(new Response(JSON.stringify({ error: { code: "rate_limited", message: "Too many requests" } }), {
           status: 429,
           headers: { "content-type": "application/json; charset=utf-8", "retry-after": "60" },
         }));
       }
-      if (path !== "/mcp") return finish(await cachePublicGet(await createRestRouter(templates, { puzzleTokenSecret: env.PUZZLE_TOKEN_SECRET })(request), request));
+      if (path !== "/mcp") return finish(await cachePublicGet(await createRestRouter(templates, { puzzleTokenSecret: env.PUZZLE_TOKEN_SECRET, ...build })(request), request));
       if (rateLimited(request, env.MCP_RATE_LIMIT, "mcp")) {
         return finish(new Response(JSON.stringify({ error: { code: "rate_limited", message: "Too many requests" } }), {
           status: 429,

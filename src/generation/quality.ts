@@ -1,10 +1,15 @@
-import type { Clue, Difficulty, PuzzleSpec } from "../domain/types.js";
+import type { Clue, Difficulty, DifficultyCalibration, PuzzleSpec } from "../domain/types.js";
 import type { PuzzleSolver } from "../domain/puzzle-solver.js";
-import { exhaustivePuzzleSolver } from "../constraints/solver.js";
+import { exhaustivePuzzleSolver, solveWithTelemetry } from "../constraints/solver.js";
 
 const COST: Record<Clue["constraint"]["kind"], number> = { matches: 1, notMatches: 1, before: 3, adjacent: 3 };
 
-export const DIFFICULTY_MODEL_VERSION = "yokaiba-difficulty-v1";
+export const DIFFICULTY_MODEL_VERSION = "yokaiba-difficulty-v2";
+const defaultCalibration: DifficultyCalibration = {
+  modelVersion: DIFFICULTY_MODEL_VERSION,
+  scoreThresholds: [68, 73, 79, 88],
+  corpus: { sampleSize: 1_000, methodology: "Seeded corpus scored with the no-guess trace and deterministic solver telemetry." },
+};
 
 /**
  * A stable initial rubric for the 4x4 template. Relational clues require more
@@ -12,17 +17,32 @@ export const DIFFICULTY_MODEL_VERSION = "yokaiba-difficulty-v1";
  * add smaller penalties. The model version is returned to clients so future
  * calibration does not silently relabel an existing puzzle.
  */
-export function assessPuzzleDifficulty(clues: readonly Clue[]): Difficulty {
-  const relationalClues = clues.filter(clue => clue.constraint.kind === "before" || clue.constraint.kind === "adjacent").length;
-  const negativeClues = clues.filter(clue => clue.constraint.kind === "notMatches").length;
-  const score = relationalClues * 3 + negativeClues + Math.max(0, 14 - clues.length) * 2;
-  // Thresholds are percentile-calibrated against a 1,000-seed corpus of the
-  // tournament-order-v1 template, so all five labels are meaningfully usable.
-  const level: Difficulty["level"] = score <= 16 ? 1 : score <= 19 ? 2 : score <= 21 ? 3 : score <= 24 ? 4 : 5;
+export function assessPuzzleDifficulty(spec: PuzzleSpec, clues: readonly Clue[]): Difficulty {
+  const calibration = spec.metadata?.difficultyCalibration ?? defaultCalibration;
+  const humanSolve = directHumanSolve(spec, clues);
+  const telemetry = solveWithTelemetry(spec, clues, 2).telemetry;
+  // The score is intentionally deterministic: wall-clock duration varies by runtime,
+  // while a no-guess trace and solver search work provide reproducible evidence.
+  const score = humanSolve.totalCost * 2
+    + humanSolve.hardestStep * 3
+    + (humanSolve.solved ? 0 : 8)
+    + Math.min(24, Math.floor(Math.log2(telemetry.nodesVisited + 1)) * 2)
+    + Math.min(16, Math.floor(telemetry.constraintChecks / 8));
+  const [levelOne, levelTwo, levelThree, levelFour] = calibration.scoreThresholds;
+  const level: Difficulty["level"] = score <= levelOne ? 1 : score <= levelTwo ? 2 : score <= levelThree ? 3 : score <= levelFour ? 4 : 5;
   const labels: Record<Difficulty["level"], Difficulty["label"]> = {
     1: "Very easy", 2: "Easy", 3: "Moderate", 4: "Hard", 5: "Very hard",
   };
-  return { level, label: labels[level], modelVersion: DIFFICULTY_MODEL_VERSION };
+  return {
+    level,
+    label: labels[level],
+    modelVersion: calibration.modelVersion,
+    evidence: {
+      score,
+      humanSolve: { solved: humanSolve.solved, totalCost: humanSolve.totalCost, hardestStep: humanSolve.hardestStep },
+      solver: { nodesVisited: telemetry.nodesVisited, constraintChecks: telemetry.constraintChecks },
+    },
+  };
 }
 
 export interface PuzzleQuality {
