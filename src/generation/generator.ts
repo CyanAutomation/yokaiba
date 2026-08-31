@@ -1,9 +1,11 @@
 import type { Clue, GeneratedPuzzle, PuzzleTemplate, Solution } from "../domain/types.js";
-import { countSolutions } from "../constraints/solver.js";
+import type { PuzzleSolver } from "../domain/puzzle-solver.js";
+import { exhaustivePuzzleSolver } from "../constraints/solver.js";
 import { assessPuzzleDifficulty } from "./quality.js";
 
 export const GENERATOR_VERSION = "yokaiba-generator-v1";
-export const SOLVER_VERSION = "yokaiba-exhaustive-v1";
+/** Version of the built-in solver used when callers do not provide one. */
+export const SOLVER_VERSION = exhaustivePuzzleSolver.version;
 
 function hash(seed: string): number {
   let value = 2166136261;
@@ -109,27 +111,27 @@ function relationalCandidates(template: PuzzleTemplate, solution: Solution, next
  * ordering, and adjacency clues so template prose can create genuine logic
  * deductions instead of presenting the full answer as facts.
  */
-export function generatePuzzle(template: PuzzleTemplate, seed: string): GeneratedPuzzle {
+export function generatePuzzle(template: PuzzleTemplate, seed: string, solver: PuzzleSolver = exhaustivePuzzleSolver): GeneratedPuzzle {
   validateTemplate(template);
   const next = random(`${template.id}:${seed}`);
   const solution = makeSolution(template, next);
   const selected: Clue[] = [];
   const candidates = shuffled([...directCandidates(template, solution, next), ...relationalCandidates(template, solution, next)], next);
   for (const clue of candidates) {
-    if (countSolutions(template, selected, 2) === 1) break;
+    if (solver.countSolutions(template, selected, 2) === 1) break;
     selected.push(clue);
   }
-  if (countSolutions(template, selected, 2) !== 1) throw new Error("candidate pool did not establish uniqueness");
+  if (solver.countSolutions(template, selected, 2) !== 1) throw new Error("candidate pool did not establish uniqueness");
   for (let index = selected.length - 1; index >= 0; index -= 1) {
     const without = selected.filter((_clue, candidateIndex) => candidateIndex !== index);
-    if (countSolutions(template, without, 2) === 1) selected.splice(index, 1);
+    if (solver.countSolutions(template, without, 2) === 1) selected.splice(index, 1);
   }
   return {
     id: `${template.id}:${seed}`,
     seed,
     templateId: template.id,
     generatorVersion: GENERATOR_VERSION,
-    solverVersion: SOLVER_VERSION,
+    solverVersion: solver.version,
     spec: template,
     clues: selected,
     difficulty: assessPuzzleDifficulty(selected),
