@@ -3,10 +3,13 @@ import { readFile } from "node:fs/promises";
 import test from "node:test";
 import {
   countSolutions,
+  exhaustivePuzzleSolver,
   evaluatePuzzleQuality,
   generatePuzzle,
   MAX_SUPPORTED_ROWS,
+  solve,
   type Clue,
+  type PuzzleSolver,
   type PuzzleTemplate,
 } from "../src/index.js";
 import { createRestRouter, tournamentOrderTemplate } from "../src/index.js";
@@ -61,6 +64,31 @@ test("a seeded puzzle is reproducible and has exactly one solution", () => {
 
   assert.deepEqual(first, second);
   assert.equal(countSolutions(first.spec, first.clues, 2), 1);
+});
+
+test("the exhaustive solver fulfils the public solver contract", () => {
+  const clues = [{ id: "aki-red", constraint: { kind: "matches" as const, subject: "Aki", category: "color", value: "Red" }, text: "Aki wore red." }];
+  assert.equal(exhaustivePuzzleSolver.version, "yokaiba-exhaustive-v1");
+  assert.deepEqual(exhaustivePuzzleSolver.solve(qualityFixtureSpec, clues, 1), solve(qualityFixtureSpec, clues, 1));
+  assert.equal(exhaustivePuzzleSolver.countSolutions(qualityFixtureSpec, clues, 1), countSolutions(qualityFixtureSpec, clues, 1));
+});
+
+test("generation and quality evaluation use an injected solver and record its version", () => {
+  const calls: string[] = [];
+  const solver: PuzzleSolver = {
+    version: "contract-test-v1",
+    solve: (spec, clues, limit) => exhaustivePuzzleSolver.solve(spec, clues, limit),
+    countSolutions: (spec, clues, limit) => {
+      calls.push(`count:${clues.length}:${limit}`);
+      return exhaustivePuzzleSolver.countSolutions(spec, clues, limit);
+    },
+  };
+  const puzzle = generatePuzzle(template, "injected-solver", solver);
+  const quality = evaluatePuzzleQuality(puzzle.spec, puzzle.clues, solver);
+
+  assert.equal(puzzle.solverVersion, "contract-test-v1");
+  assert.equal(quality.unique, true);
+  assert.ok(calls.length > 0);
 });
 
 test("the generated clue set is minimal for uniqueness", () => {
