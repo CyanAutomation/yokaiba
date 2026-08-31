@@ -4,6 +4,7 @@ import type { Difficulty, GeneratedPuzzle, PuzzleSpec, PuzzleTemplate, Solution 
 
 const MAX_GENERATION_FIELD_LENGTH = 128;
 const MAX_GENERATION_BODY_BYTES = 16 * 1024;
+const INVALID_JSON_BODY_MESSAGE = "request body must be valid JSON";
 const MAX_DIFFICULTY_SEARCH_ATTEMPTS = 128;
 // Generator releases can change a puzzle's representation. Keep browser and edge
 // caches short-lived, and require revalidation instead of promising immutability.
@@ -24,8 +25,8 @@ export interface RestRouterOptions {
 /** Read bounded bytes instead of trusting a spoofable or absent Content-Length header. */
 async function readJsonBody(request: Request): Promise<unknown> {
   const declaredLength = Number(request.headers.get("content-length"));
-  if (Number.isFinite(declaredLength) && declaredLength > MAX_GENERATION_BODY_BYTES) throw new TypeError("request body is too large");
-  if (!request.body) throw new TypeError("request body must be valid JSON");
+  if (Number.isFinite(declaredLength) && declaredLength > MAX_GENERATION_BODY_BYTES) throw new TypeError(INVALID_JSON_BODY_MESSAGE);
+  if (!request.body) throw new TypeError(INVALID_JSON_BODY_MESSAGE);
   const reader = request.body.getReader();
   const chunks: Uint8Array[] = [];
   let bytes = 0;
@@ -36,7 +37,7 @@ async function readJsonBody(request: Request): Promise<unknown> {
       bytes += value.byteLength;
       if (bytes > MAX_GENERATION_BODY_BYTES) {
         await reader.cancel();
-        throw new TypeError("request body is too large");
+        throw new TypeError(INVALID_JSON_BODY_MESSAGE);
       }
       chunks.push(value);
     }
@@ -45,11 +46,10 @@ async function readJsonBody(request: Request): Promise<unknown> {
     for (const chunk of chunks) { body.set(chunk, offset); offset += chunk.byteLength; }
     return JSON.parse(new TextDecoder().decode(body));
   } catch {
-    throw new TypeError("request body must be valid JSON");
+    throw new TypeError(INVALID_JSON_BODY_MESSAGE);
   } finally {
     reader.releaseLock();
   }
-}
 }
 
 async function publicPuzzle(puzzle: GeneratedPuzzle, puzzleTokenSecret?: string) {
