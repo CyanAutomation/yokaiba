@@ -134,7 +134,7 @@ export function generatePuzzle(template: PuzzleTemplate, seed: string, solver: P
     solverVersion: solver.version,
     spec: template,
     clues: selected,
-    difficulty: assessPuzzleDifficulty(selected),
+    difficulty: assessPuzzleDifficulty(template, selected),
     solution,
   };
 }

@@ -12,11 +12,15 @@ async function get(path, options) {
 
 const health = await get("/healthz");
 const healthBody = await health.json();
-if (healthBody.status !== "ok") throw new Error("health response did not report ok");
+if (healthBody.status !== "ok" || !healthBody.build?.serviceVersion || !healthBody.build?.buildSha) throw new Error("health response is incomplete");
+
+const ready = await get("/readyz");
+const readyBody = await ready.json();
+if (readyBody.status !== "ready" || readyBody.rateLimitProvider !== "configured") throw new Error("readiness did not confirm the production rate-limit binding");
 
 const version = await get("/v1/version");
 const versionBody = await version.json();
-if (!versionBody.serviceVersion || !versionBody.generatorVersion || !versionBody.solverVersion) throw new Error("version response is incomplete");
+if (!versionBody.serviceVersion || !versionBody.buildSha || !versionBody.generatorVersion || !versionBody.solverVersion) throw new Error("version response is incomplete");
 
 const puzzlePath = "/v1/puzzles/generate?templateId=tournament-order-v1&seed=deployment-smoke";
 const puzzle = await get(puzzlePath);
