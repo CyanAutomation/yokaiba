@@ -8,6 +8,7 @@ import {
   generatePuzzle,
   MAX_SUPPORTED_ROWS,
   solve,
+  solveWithTelemetry,
   type Clue,
   type PuzzleSolver,
   type PuzzleTemplate,
@@ -35,6 +36,17 @@ const qualityFixtureSpec: PuzzleTemplate = {
     { id: "person", label: "Person", values: ["Aki", "Ben"] },
     { id: "color", label: "Color", values: ["Red", "Blue"] },
     { id: "placing", label: "Placing", values: ["1st", "2nd"], ordered: true },
+  ],
+};
+
+const solverFixtureSpec: PuzzleTemplate = {
+  id: "solver-fixture",
+  title: "Solver fixture",
+  baseCategory: "person",
+  categories: [
+    { id: "person", label: "Person", values: ["Aki", "Ben", "Cora"] },
+    { id: "color", label: "Color", values: ["Red", "Blue", "Green"] },
+    { id: "pet", label: "Pet", values: ["Cat", "Dog", "Fox"] },
   ],
 };
 
@@ -71,6 +83,68 @@ test("the exhaustive solver fulfils the public solver contract", () => {
   assert.equal(exhaustivePuzzleSolver.version, "yokaiba-exhaustive-v1");
   assert.deepEqual(exhaustivePuzzleSolver.solve(qualityFixtureSpec, clues, 1), solve(qualityFixtureSpec, clues, 1));
   assert.equal(exhaustivePuzzleSolver.countSolutions(qualityFixtureSpec, clues, 1), countSolutions(qualityFixtureSpec, clues, 1));
+});
+
+test("solver preserves the semantics of every clue kind", () => {
+  const count = (constraint: Clue["constraint"]) => countSolutions(solverFixtureSpec, [{ id: constraint.kind, constraint, text: constraint.kind }], 100);
+
+  assert.equal(count({ kind: "matches", subject: "Aki", category: "color", value: "Red" }), 12);
+  assert.equal(count({ kind: "notMatches", subject: "Aki", category: "color", value: "Red" }), 24);
+  assert.equal(count({ kind: "before", left: { category: "color", value: "Red" }, right: { category: "color", value: "Blue" } }), 18);
+  assert.equal(count({ kind: "adjacent", left: { category: "color", value: "Red" }, right: { category: "color", value: "Blue" } }), 24);
+});
+
+test("solver evaluates relational clues across categories", () => {
+  const before: Clue = {
+    id: "red-before-cat",
+    constraint: { kind: "before", left: { category: "color", value: "Red" }, right: { category: "pet", value: "Cat" } },
+    text: "Red comes before Cat.",
+  };
+  const adjacent: Clue = {
+    id: "blue-next-to-dog",
+    constraint: { kind: "adjacent", left: { category: "color", value: "Blue" }, right: { category: "pet", value: "Dog" } },
+    text: "Blue is next to Dog.",
+  };
+
+  assert.equal(countSolutions(solverFixtureSpec, [before], 100), 12);
+  assert.equal(countSolutions(solverFixtureSpec, [adjacent], 100), 16);
+});
+
+test("solver returns no solution for contradictory clues", () => {
+  const contradictory: Clue[] = [
+    { id: "aki-red", constraint: { kind: "matches", subject: "Aki", category: "color", value: "Red" }, text: "Aki is Red." },
+    { id: "aki-not-red", constraint: { kind: "notMatches", subject: "Aki", category: "color", value: "Red" }, text: "Aki is not Red." },
+  ];
+
+  assert.equal(countSolutions(solverFixtureSpec, contradictory, 2), 0);
+  assert.deepEqual(solve(solverFixtureSpec, contradictory), []);
+});
+
+test("solver honours limits while retaining deterministic exhaustive results", () => {
+  const first = solve(solverFixtureSpec, [], 2);
+  const second = solve(solverFixtureSpec, [], 2);
+
+  assert.equal(countSolutions(solverFixtureSpec, [], 100), 36);
+  assert.equal(countSolutions(solverFixtureSpec, [], 2), 2);
+  assert.deepEqual(first, second);
+  assert.equal(first.length, 2);
+  assert.deepEqual(solve(solverFixtureSpec, [], 0), []);
+});
+
+test("solver telemetry reports searched nodes, evaluated constraints, and elapsed time", () => {
+  const clue: Clue = {
+    id: "aki-cat",
+    constraint: { kind: "matches", subject: "Aki", category: "pet", value: "Cat" },
+    text: "Aki has Cat.",
+  };
+  const result = solveWithTelemetry(solverFixtureSpec, [clue], 2);
+
+  assert.equal(result.solutions.length, 2);
+  // `pet` appears after unconstrained `color` in the template. The solver
+  // branches on the constrained category first, avoiding an extra color node.
+  assert.equal(result.telemetry.nodesVisited, 3);
+  assert.equal(result.telemetry.constraintChecks, 1);
+  assert.ok(result.telemetry.elapsedMs >= 0);
 });
 
 test("generation and quality evaluation use an injected solver and record its version", () => {
