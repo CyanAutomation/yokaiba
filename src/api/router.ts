@@ -44,12 +44,12 @@ async function readJsonBody(request: Request): Promise<unknown> {
     let offset = 0;
     for (const chunk of chunks) { body.set(chunk, offset); offset += chunk.byteLength; }
     return JSON.parse(new TextDecoder().decode(body));
-  } catch (error) {
-    if (error instanceof TypeError) throw error;
+  } catch {
     throw new TypeError("request body must be valid JSON");
   } finally {
     reader.releaseLock();
   }
+}
 }
 
 async function publicPuzzle(puzzle: GeneratedPuzzle, puzzleTokenSecret?: string) {
