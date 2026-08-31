@@ -388,16 +388,26 @@ test("REST rejects excessively long generation inputs", async () => {
   assert.deepEqual(await response.json(), { error: { code: "bad_request", message: "seed must be at most 128 characters" } });
 });
 
-test("REST enforces its body size limit when Content-Length is absent", async () => {
+test("REST does not disclose why a JSON request body was rejected", async () => {
   const route = createRestRouter([tournamentOrderTemplate]);
-  const response = await route(new Request("https://yokaiba.test/v1/puzzles/generate", {
-    method: "POST",
-    headers: { "content-type": "application/json" },
-    body: JSON.stringify({ templateId: "tournament-order-v1", seed: "x".repeat(16 * 1024) }),
-  }));
+  const requests = [
+    new Request("https://yokaiba.test/v1/puzzles/generate", { method: "POST" }),
+    new Request("https://yokaiba.test/v1/puzzles/generate", { method: "POST", body: "{" }),
+    new Request("https://yokaiba.test/v1/puzzles/generate", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ templateId: "tournament-order-v1", seed: "x".repeat(16 * 1024) }),
+    }),
+    new Request("https://yokaiba.test/v1/puzzles/generate", {
+      method: "POST", headers: { "content-length": `${16 * 1024 + 1}` }, body: "{}",
+    }),
+  ];
 
-  assert.equal(response.status, 400);
-  assert.deepEqual(await response.json(), { error: { code: "bad_request", message: "request body is too large" } });
+  for (const request of requests) {
+    const response = await route(request);
+    assert.equal(response.status, 400);
+    assert.deepEqual(await response.json(), { error: { code: "bad_request", message: "request body must be valid JSON" } });
+  }
 });
 
 test("version and readiness expose deployed build and rate-limit configuration", async () => {
