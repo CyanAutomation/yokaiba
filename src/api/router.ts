@@ -17,6 +17,39 @@ const json = (body: unknown, status = 200, headers?: HeadersInit) => new Respons
 export interface RestRouterOptions {
   /** Required to issue tamper-proof puzzle tokens for server-side verification. */
   puzzleTokenSecret?: string;
+  serviceVersion?: string;
+  buildSha?: string;
+}
+
+/** Read bounded bytes instead of trusting a spoofable or absent Content-Length header. */
+async function readJsonBody(request: Request): Promise<unknown> {
+  const declaredLength = Number(request.headers.get("content-length"));
+  if (Number.isFinite(declaredLength) && declaredLength > MAX_GENERATION_BODY_BYTES) throw new TypeError("request body is too large");
+  if (!request.body) throw new TypeError("request body must be valid JSON");
+  const reader = request.body.getReader();
+  const chunks: Uint8Array[] = [];
+  let bytes = 0;
+  try {
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      bytes += value.byteLength;
+      if (bytes > MAX_GENERATION_BODY_BYTES) {
+        await reader.cancel();
+        throw new TypeError("request body is too large");
+      }
+      chunks.push(value);
+    }
+    const body = new Uint8Array(bytes);
+    let offset = 0;
+    for (const chunk of chunks) { body.set(chunk, offset); offset += chunk.byteLength; }
+    return JSON.parse(new TextDecoder().decode(body));
+  } catch {
+    throw new TypeError("request body must be valid JSON");
+  } finally {
+    reader.releaseLock();
+  }
+}
 }
 
 async function publicPuzzle(puzzle: GeneratedPuzzle, puzzleTokenSecret?: string) {
@@ -35,10 +68,7 @@ function generationParameters(value: Record<string, unknown>) {
 }
 
 async function generationRequest(request: Request) {
-  const declaredLength = Number(request.headers.get("content-length"));
-  if (Number.isFinite(declaredLength) && declaredLength > MAX_GENERATION_BODY_BYTES) throw new TypeError("request body is too large");
-  let body: unknown;
-  try { body = await request.json(); } catch { throw new TypeError("request body must be valid JSON"); }
+  const body = await readJsonBody(request);
   if (!body || typeof body !== "object" || Array.isArray(body)) throw new TypeError("request body must be an object");
   return generationParameters(body as Record<string, unknown>);
 }
@@ -82,10 +112,7 @@ function sameSolution(left: Solution, right: Solution): boolean {
 }
 
 async function verificationRequest(request: Request) {
-  const declaredLength = Number(request.headers.get("content-length"));
-  if (Number.isFinite(declaredLength) && declaredLength > MAX_GENERATION_BODY_BYTES) throw new TypeError("request body is too large");
-  let body: unknown;
-  try { body = await request.json(); } catch { throw new TypeError("request body must be valid JSON"); }
+  const body = await readJsonBody(request);
   if (!body || typeof body !== "object" || Array.isArray(body)) throw new TypeError("request body must be an object");
   const value = body as Record<string, unknown>;
   if (typeof value.puzzleToken !== "string" || !value.puzzleToken) throw new TypeError("puzzleToken must be a non-empty string");
@@ -104,8 +131,8 @@ export function createRestRouter(templates: readonly PuzzleTemplate[], options: 
       return json({ error: { code: "bad_request", message: "Invalid URL" } }, 400);
     }
     const path = url.pathname;
-    if (request.method === "GET" && path === "/v1/scenarios") return json({ scenarios: templates.map(({ id, title }) => ({ id, title })) });
-    if (request.method === "GET" && path === "/v1/version") return json({ serviceVersion: "0.1.0", generatorVersion: "yokaiba-generator-v1", solverVersion: "yokaiba-exhaustive-v1" });
+    if (request.method === "GET" && path === "/v1/scenarios") return json({ scenarios: templates.map(({ id, title, metadata }) => ({ id, title, ...(metadata ? { metadata } : {}) })) });
+    if (request.method === "GET" && path === "/v1/version") return json({ serviceVersion: options.serviceVersion ?? "0.1.0", buildSha: options.buildSha ?? "local", generatorVersion: "yokaiba-generator-v1", solverVersion: "yokaiba-exhaustive-v1" });
     if (request.method === "POST" && path === "/v1/puzzles/verify") {
       if (!options.puzzleTokenSecret) return json({ error: { code: "not_configured", message: "puzzle verification is not configured" } }, 503);
       try {

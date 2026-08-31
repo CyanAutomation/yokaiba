@@ -13,7 +13,7 @@ export function createYokaibaMcpHandler(templates: readonly PuzzleTemplate[]) {
     const server = new McpServer({ name: "yokaiba", version: "0.1.0" });
     server.registerTool("list_scenarios", {
       description: "List curated judo logic-puzzle scenarios.", inputSchema: {},
-    }, async () => textResult({ scenarios: templates.map(({ id, title }) => ({ id, title })) }));
+    }, async () => textResult({ scenarios: templates.map(({ id, title, metadata }) => ({ id, title, ...(metadata ? { metadata } : {}) })) }));
     server.registerTool("generate_puzzle", {
       description: "Generate a deterministic, uniquely solvable judo logic-grid puzzle.",
       inputSchema: { templateId: z.string().min(1), seed: z.string().min(1) },

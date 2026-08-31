@@ -13,7 +13,7 @@ import {
   type PuzzleSolver,
   type PuzzleTemplate,
 } from "../src/index.js";
-import { createRestRouter, tournamentOrderTemplate } from "../src/index.js";
+import { createRestRouter, openDivisionTemplate, tournamentOrderTemplate } from "../src/index.js";
 import worker, { createRateLimiter, createWorker } from "../worker/index.js";
 
 const template: PuzzleTemplate = {
@@ -68,6 +68,14 @@ test("Tournament Order uses judoka names for its default working board", () => {
     "judoka", "weight", "tatami", "placing",
   ]);
   assert.deepEqual(tournamentOrderTemplate.categories[0]?.values, ["Aki", "Hana", "Kenji", "Sora"]);
+});
+
+test("Open Division expands the public catalogue with a five-row, localization-ready template", () => {
+  assert.equal(openDivisionTemplate.categories[0]?.values.length, 5);
+  assert.deepEqual(openDivisionTemplate.metadata!.locales, { default: "en", supported: ["en"] });
+  assert.ok(openDivisionTemplate.metadata!.difficultyCalibration.modelVersion.startsWith("yokaiba-difficulty-"));
+  const puzzle = generatePuzzle(openDivisionTemplate, "catalogue-seed");
+  assert.equal(countSolutions(puzzle.spec, puzzle.clues, 2), 1);
 });
 
 test("a seeded puzzle is reproducible and has exactly one solution", () => {
@@ -218,22 +226,18 @@ test("quality reports an incomplete human trace when clues cannot finish the puz
   });
 });
 
-test("difficulty is reproducible and exercises all five calibrated levels", () => {
-  // Representative fixtures recalibrated for the four-category Tournament Order board.
-  const fixtures = [
-    { seed: "recalibrate-7", level: 1, label: "Very easy", modelVersion: "yokaiba-difficulty-v1" },
-    { seed: "recalibrate-18", level: 2, label: "Easy", modelVersion: "yokaiba-difficulty-v1" },
-    { seed: "recalibrate-3", level: 3, label: "Moderate", modelVersion: "yokaiba-difficulty-v1" },
-    { seed: "recalibrate-1", level: 4, label: "Hard", modelVersion: "yokaiba-difficulty-v1" },
-    { seed: "recalibrate-0", level: 5, label: "Very hard", modelVersion: "yokaiba-difficulty-v1" },
-  ];
-
-  for (const { seed, ...expectedDifficulty } of fixtures) {
-    const puzzle = generatePuzzle(tournamentOrderTemplate, seed);
-    assert.deepEqual(puzzle.difficulty, expectedDifficulty);
+test("difficulty is reproducible and publishes deterministic human and solver evidence", () => {
+  const fixtures = ["recalibrate-7", "recalibrate-18", "recalibrate-3", "recalibrate-1", "recalibrate-0"];
+  for (const seed of fixtures) {
+    const difficulty = generatePuzzle(tournamentOrderTemplate, seed).difficulty;
+    assert.equal(difficulty.modelVersion, "yokaiba-difficulty-v2");
+    assert.ok(difficulty.evidence.score > 0);
+    assert.ok(difficulty.evidence.solver.nodesVisited > 0);
+    assert.ok(difficulty.evidence.solver.constraintChecks > 0);
+    assert.equal(typeof difficulty.evidence.humanSolve.solved, "boolean");
   }
 
-  const reproducibleSeed = fixtures[2].seed;
+  const reproducibleSeed = fixtures[2]!;
   const first = generatePuzzle(tournamentOrderTemplate, reproducibleSeed);
   const second = generatePuzzle(tournamentOrderTemplate, reproducibleSeed);
   assert.deepEqual(first.difficulty, second.difficulty);
@@ -241,7 +245,7 @@ test("difficulty is reproducible and exercises all five calibrated levels", () =
 
 test("OpenAPI documents every public REST endpoint", async () => {
   const specification = await readFile(new URL("../public/openapi/v1.yaml", import.meta.url), "utf8");
-  for (const path of ["/healthz", "/docs", "/openapi/v1.yaml", "/v1/scenarios", "/v1/version", "/v1/puzzles/generate", "/v1/puzzles/verify"]) {
+  for (const path of ["/healthz", "/readyz", "/docs", "/openapi/v1.yaml", "/v1/scenarios", "/v1/version", "/v1/puzzles/generate", "/v1/puzzles/verify"]) {
     assert.match(specification, new RegExp(`^  ${path.replace(/[/.]/g, "\\$&")}:`, "m"));
   }
   assert.match(specification, /GeneratedPuzzle:/);
@@ -267,10 +271,11 @@ test("REST generation redacts the hidden solution and includes reproducibility m
   assert.equal(body.seed, "api-seed");
   assert.equal("solution" in body, false);
   assert.equal(typeof body.puzzleToken, "string");
-  const difficulty = body.difficulty as { level: number; label: string; modelVersion: string };
+  const difficulty = body.difficulty as { level: number; label: string; modelVersion: string; evidence: { score: number } };
   assert.ok([1, 2, 3, 4, 5].includes(difficulty.level));
   assert.ok(["Very easy", "Easy", "Moderate", "Hard", "Very hard"].includes(difficulty.label));
-  assert.equal(difficulty.modelVersion, "yokaiba-difficulty-v1");
+  assert.equal(difficulty.modelVersion, "yokaiba-difficulty-v2");
+  assert.equal(typeof difficulty.evidence.score, "number");
   assert.ok(Array.isArray(body.clues));
 });
 
@@ -285,15 +290,19 @@ test("REST supports cacheable deterministic GET generation", async () => {
   assert.equal("solution" in body, false);
 });
 
-test("REST can deterministically select a requested difficulty level", async () => {
-  const route = createRestRouter([tournamentOrderTemplate]);
-  const first = await route(new Request("https://yokaiba.test/v1/puzzles/generate?templateId=tournament-order-v1&seed=level-picker&difficultyLevel=4"));
-  const second = await route(new Request("https://yokaiba.test/v1/puzzles/generate?templateId=tournament-order-v1&seed=level-picker&difficultyLevel=4"));
-
-  assert.equal(first.status, 200);
-  assert.deepEqual(await first.json(), await second.json());
-  const replay = await route(new Request("https://yokaiba.test/v1/puzzles/generate?templateId=tournament-order-v1&seed=level-picker&difficultyLevel=4"));
-  assert.equal((await replay.json() as { difficulty: { level: number } }).difficulty.level, 4);
+test("REST can deterministically select every calibrated difficulty level", async () => {
+  for (const template of [tournamentOrderTemplate, openDivisionTemplate]) {
+    const route = createRestRouter([template]);
+    for (const level of [1, 2, 3, 4, 5]) {
+      const path = `https://yokaiba.test/v1/puzzles/generate?templateId=${template.id}&seed=level-picker&difficultyLevel=${level}`;
+      const first = await route(new Request(path));
+      const second = await route(new Request(path));
+      assert.equal(first.status, 200);
+      assert.deepEqual(await first.json(), await second.json());
+      const replay = await route(new Request(path));
+      assert.equal((await replay.json() as { difficulty: { level: number } }).difficulty.level, level);
+    }
+  }
 });
 
 test("REST verifies a complete submitted answer without exposing the solution", async () => {
@@ -377,6 +386,29 @@ test("REST rejects excessively long generation inputs", async () => {
 
   assert.equal(response.status, 400);
   assert.deepEqual(await response.json(), { error: { code: "bad_request", message: "seed must be at most 128 characters" } });
+});
+
+test("REST enforces its body size limit when Content-Length is absent", async () => {
+  const route = createRestRouter([tournamentOrderTemplate]);
+  const response = await route(new Request("https://yokaiba.test/v1/puzzles/generate", {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ templateId: "tournament-order-v1", seed: "x".repeat(16 * 1024) }),
+  }));
+
+  assert.equal(response.status, 400);
+  assert.deepEqual(await response.json(), { error: { code: "bad_request", message: "request body is too large" } });
+});
+
+test("version and readiness expose deployed build and rate-limit configuration", async () => {
+  const isolatedWorker = createWorker({ rateLimiter: () => false });
+  const env = { BUILD_VERSION: "0.1.0-test", BUILD_SHA: "deadbeef", REST_RATE_LIMITER: { limit: async () => ({ success: true }) } };
+  const version = await isolatedWorker.fetch(new Request("https://yokaiba.test/v1/version"), env, {} as ExecutionContext);
+  assert.deepEqual(await version.json(), {
+    serviceVersion: "0.1.0-test", buildSha: "deadbeef", generatorVersion: "yokaiba-generator-v1", solverVersion: "yokaiba-exhaustive-v1",
+  });
+  const ready = await isolatedWorker.fetch(new Request("https://yokaiba.test/readyz"), env, {} as ExecutionContext);
+  assert.deepEqual(await ready.json(), { status: "ready", build: { serviceVersion: "0.1.0-test", buildSha: "deadbeef" }, rateLimitProvider: "configured" });
 });
 
 test("solver handles the maximum supported row count", () => {
@@ -493,6 +525,9 @@ test("worker falls back to local REST rate limiting when the provider fails", as
     error: { code: "rate_limited", message: "Too many requests" },
   });
   assert.equal(limited.headers.get("retry-after"), "60");
+  assert.equal(limited.headers.get("ratelimit-remaining"), "0");
+  const ready = await isolatedWorker.fetch(new Request("https://yokaiba.test/readyz"), env, {} as ExecutionContext);
+  assert.equal((await ready.json() as { rateLimitProvider: string }).rateLimitProvider, "fallback");
 });
 
 test("worker allows supported CORS preflight headers", async () => {
@@ -531,7 +566,7 @@ test("worker reports health status and response body", async () => {
   const health = await worker.fetch(new Request("https://yokaiba.test/healthz"), {}, {} as ExecutionContext);
 
   assert.equal(health.status, 200);
-  assert.deepEqual(await health.json(), { status: "ok" });
+  assert.deepEqual(await health.json(), { status: "ok", build: { serviceVersion: "0.1.0", buildSha: "local" } });
 });
 
 test("worker adds CORS and request-ID headers to REST responses", async () => {
@@ -542,6 +577,8 @@ test("worker adds CORS and request-ID headers to REST responses", async () => {
   assert.equal(response.status, 200);
   assert.equal(response.headers.get("access-control-allow-origin"), "https://game.example");
   assert.ok(response.headers.get("x-request-id"));
+  assert.equal(response.headers.get("ratelimit-limit"), "60");
+  assert.equal(response.headers.get("ratelimit-policy"), "60;w=60");
 });
 
 test("worker exhausts the REST rate limit", async () => {

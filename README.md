@@ -4,10 +4,10 @@ Yokaiba creates deterministic, uniquely solvable judo logic-grid puzzles for gam
 
 ## What it provides
 
-- A 4×4 tournament-order scenario and a portable TypeScript constraint solver.
+- A 4×4 tournament-order scenario, a 5×5 open-division scenario, and a portable TypeScript constraint solver.
 - Deterministic generation: the same template ID, seed, generator version, and solver version reproduce the same puzzle.
 - Minimal clue sets with direct, negative, ordering, and adjacency clues. The hidden solution is never returned over REST or MCP.
-- Server-side browser-answer verification using signed puzzle tokens, plus a deterministic 1–5 difficulty assessment.
+- Server-side browser-answer verification using signed puzzle tokens, plus a deterministic 1–5 difficulty assessment with published human-trace and solver-search evidence.
 - A Cloudflare Worker with public REST and an API-key-protected Streamable HTTP MCP endpoint.
 
 ## Solver implementations
@@ -40,6 +40,7 @@ npm run dev
 The complete contract is published at [`/openapi/v1.yaml`](https://yokaiba.scheimann.workers.dev/openapi/v1.yaml), with an interactive [Swagger UI](https://yokaiba.scheimann.workers.dev/docs). The repository source is [public/openapi/v1.yaml](public/openapi/v1.yaml). Public endpoints are:
 
 - `GET /healthz`
+- `GET /readyz`
 - `GET /v1/scenarios`
 - `GET /v1/version`
 - `GET` or `POST /v1/puzzles/generate`
@@ -65,7 +66,9 @@ curl -X POST http://localhost:8787/v1/puzzles/generate \
 
 `templateId` and `seed` must be non-empty strings of at most 128 characters. Every response includes `X-Request-Id`, which is also included in Worker logs.
 
-Generated puzzles include `difficulty` (`level` 1–5, label, and a versioned model identifier). The initial bands are calibrated against a 1,000-seed corpus of the tournament template and combine relational, negative, and clue-density signals; retain `modelVersion` when recording scores. They also include an opaque `puzzleToken` when `PUZZLE_TOKEN_SECRET` is configured. Keep that token with the puzzle in the browser and submit only the player’s completed non-base category assignments:
+Generated puzzles include `difficulty` (`level` 1–5, label, model identifier, and deterministic evidence). Each template publishes its locale metadata and its own 1,000-seed calibration strategy. Difficulty combines the no-guess human trace with deterministic solver-search nodes and constraint checks; retain `modelVersion` and `evidence` when recording scores.
+
+They also include a **signed** `puzzleToken` when `PUZZLE_TOKEN_SECRET` is configured. The token payload is base64url-encoded, readable reproducibility metadata (including the seed), followed by an HMAC signature. It protects against tampering; it does not encrypt the seed, hide the puzzle solution from a determined caller, or make public deterministic puzzles cheat-proof. Keep it with the puzzle in the browser and submit only the player’s completed non-base category assignments:
 
 ```js
 const check = await fetch(`${baseUrl}/v1/puzzles/verify`, {
@@ -99,7 +102,9 @@ npx wrangler secret put PUZZLE_TOKEN_SECRET
 
 Allowed origins receive `GET, POST, OPTIONS` CORS headers. Public GET responses also provide an ETag and return `304 Not Modified` for a matching `If-None-Match` request.
 
-The Worker uses a best-effort per-isolate REST rate limit (60 requests/minute by default; configure `REST_RATE_LIMIT`) when no provider binding is available. Answer verification has a tighter 10 requests/minute per-isolate limit (`VERIFY_RATE_LIMIT`). For production, configure a Cloudflare Rate Limiting binding named `REST_RATE_LIMITER`; it is keyed by client IP and route and provides enforcement across isolates. Keep the in-memory fallback for local development and temporary binding failures.
+The Worker uses a best-effort per-isolate REST rate limit (60 requests/minute by default; configure `REST_RATE_LIMIT`) when no provider binding is available. Answer verification has a tighter 10 requests/minute per-isolate limit (`VERIFY_RATE_LIMIT`). REST responses publish `RateLimit-Limit` and `RateLimit-Policy`; rate-limited responses additionally publish `RateLimit-Remaining: 0` and `Retry-After`.
+
+For production, configure a Cloudflare Rate Limiting binding named `REST_RATE_LIMITER`; it is keyed by client IP and route and provides enforcement across isolates. `/readyz` reports whether that binding is configured for the active isolate. A binding exception logs the structured `rate_limit_provider_failure` event and switches readiness to `fallback`, so configure an alert for that event. Keep the in-memory fallback for local development and temporary binding failures.
 
 ## MCP and deployment
 
@@ -115,4 +120,4 @@ curl -fsS https://your-worker.workers.dev/healthz
 
 `MCP_ALLOWED_HOSTNAMES` is a comma-separated hostname allowlist (for example `yokaiba.example.com,yokaiba.workers.dev`), not an origin list. MCP is rate-limited to 30 requests/minute per isolate by default; configure `MCP_RATE_LIMIT` if needed.
 
-For GitHub deployment automation, configure `CLOUDFLARE_API_TOKEN` and `CLOUDFLARE_ACCOUNT_ID` as repository secrets, plus `CLOUDFLARE_DEPLOYMENT_URL` as a repository variable containing the canonical Worker origin (for example `https://yokaiba.example.workers.dev`). The deploy workflow verifies health, version metadata, public puzzle redaction, and conditional GET caching after each deployment.
+For GitHub deployment automation, configure `CLOUDFLARE_API_TOKEN` and `CLOUDFLARE_ACCOUNT_ID` as repository secrets, plus `CLOUDFLARE_DEPLOYMENT_URL` as a repository variable containing the canonical Worker origin (for example `https://yokaiba.example.workers.dev`). CI injects the package version and immutable Git SHA into the deployed Worker; `/healthz`, `/readyz`, and `/v1/version` expose them for support and cache diagnostics. The deploy workflow verifies health, readiness, version metadata, public puzzle redaction, conditional GET caching, and a deployed OpenAPI contract check after each deployment.
