@@ -1,4 +1,4 @@
-import { generatePuzzle } from "../generation/generator.js";
+import { GENERATOR_VERSION, generatePuzzle, generatePuzzleAtDifficulty, SOLVER_VERSION } from "../generation/generator.js";
 import { issuePuzzleToken, verifyPuzzleToken } from "./puzzle-token.js";
 import type { Difficulty, GeneratedPuzzle, PuzzleSpec, PuzzleTemplate, Solution } from "../domain/types.js";
 
@@ -80,12 +80,7 @@ function generationQuery(url: URL) {
 
 function generateAtDifficulty(template: PuzzleTemplate, seed: string, difficultyLevel: Difficulty["level"] | undefined): GeneratedPuzzle {
   if (!difficultyLevel) return generatePuzzle(template, seed);
-  for (let attempt = 0; attempt < MAX_DIFFICULTY_SEARCH_ATTEMPTS; attempt += 1) {
-    const candidateSeed = `${seed}-level-${difficultyLevel}-${attempt}`;
-    const candidate = generatePuzzle(template, candidateSeed);
-    if (candidate.difficulty.level === difficultyLevel) return candidate;
-  }
-  throw new TypeError("requested difficulty is unavailable");
+  return generatePuzzleAtDifficulty(template, seed, difficultyLevel);
 }
 
 function validateAnswer(spec: PuzzleSpec, value: unknown): Solution {
@@ -132,7 +127,7 @@ export function createRestRouter(templates: readonly PuzzleTemplate[], options: 
     }
     const path = url.pathname;
     if (request.method === "GET" && path === "/v1/scenarios") return json({ scenarios: templates.map(({ id, title, metadata }) => ({ id, title, ...(metadata ? { metadata } : {}) })) });
-    if (request.method === "GET" && path === "/v1/version") return json({ serviceVersion: options.serviceVersion ?? "0.1.0", buildSha: options.buildSha ?? "local", generatorVersion: "yokaiba-generator-v1", solverVersion: "yokaiba-exhaustive-v1" });
+    if (request.method === "GET" && path === "/v1/version") return json({ serviceVersion: options.serviceVersion ?? "0.1.0", buildSha: options.buildSha ?? "local", generatorVersion: GENERATOR_VERSION, solverVersion: SOLVER_VERSION });
     if (request.method === "POST" && path === "/v1/puzzles/verify") {
       if (!options.puzzleTokenSecret) return json({ error: { code: "not_configured", message: "puzzle verification is not configured" } }, 503);
       try {
@@ -141,7 +136,9 @@ export function createRestRouter(templates: readonly PuzzleTemplate[], options: 
         if (!token) throw new TypeError("puzzleToken is invalid");
         const template = byId.get(token.templateId);
         if (!template) throw new TypeError("puzzleToken references an unknown template");
-        const puzzle = generatePuzzle(template, token.seed);
+        const puzzle = token.requestedDifficultyLevel === undefined
+          ? generatePuzzle(template, token.seed)
+          : generatePuzzleAtDifficulty(template, token.seed, token.requestedDifficultyLevel);
         if (puzzle.generatorVersion !== token.generatorVersion || puzzle.solverVersion !== token.solverVersion) throw new TypeError("puzzleToken references an unsupported puzzle version");
         return json({ correct: sameSolution(puzzle.solution, validateAnswer(puzzle.spec, answer)) });
       } catch (error) {

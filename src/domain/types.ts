@@ -34,7 +34,11 @@ export type ClueConstraint =
   | { kind: "matches"; subject: string; category: string; value: string }
   | { kind: "notMatches"; subject: string; category: string; value: string }
   | { kind: "before"; left: ClueTerm; right: ClueTerm }
-  | { kind: "adjacent"; left: ClueTerm; right: ClueTerm };
+  | { kind: "adjacent"; left: ClueTerm; right: ClueTerm }
+  /** The two values occur on the same base row, possibly in different categories. */
+  | { kind: "sameRow"; left: ClueTerm; right: ClueTerm }
+  /** The two values are separated by exactly this many base rows. */
+  | { kind: "distance"; left: ClueTerm; right: ClueTerm; distance: number };
 
 export interface ClueTerm {
   category: string;
@@ -60,13 +64,16 @@ export interface Difficulty {
   /** Stable inputs used to classify this puzzle; timings are deliberately excluded. */
   evidence: {
     score: number;
-    humanSolve: { solved: boolean; totalCost: number; hardestStep: number };
+    humanSolve: { solved: boolean; totalCost: number; hardestStep: number; deductionPasses: number };
+    clueStructure: { directClues: number; relationalClues: number; crossCategoryClues: number };
     solver: { nodesVisited: number; constraintChecks: number };
   };
 }
 
 export interface GeneratedPuzzle {
   id: string;
+  /** Stable caller-selected identity, including difficulty-selected puzzles. */
+  requestedSeed: string;
   seed: string;
   templateId: string;
   generatorVersion: string;
@@ -74,6 +81,9 @@ export interface GeneratedPuzzle {
   spec: PuzzleSpec;
   clues: Clue[];
   difficulty: Difficulty;
+  /** Present only when a target difficulty selected a clue-generation strategy. */
+  requestedDifficultyLevel?: Difficulty["level"];
+  generationStrategy?: number;
   /** Retained by trusted callers only; REST/MCP generation responses redact this. */
   solution: Solution;
 }

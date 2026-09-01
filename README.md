@@ -4,9 +4,9 @@ Yokaiba creates deterministic, uniquely solvable judo logic-grid puzzles for gam
 
 ## What it provides
 
-- A 4×4 tournament-order scenario, a 5×5 open-division scenario, and a portable TypeScript constraint solver.
+- A 4×4 tournament-order scenario, a 5×5 open-division scenario, a denser 5×5 Championship Circuit scenario, and a portable TypeScript constraint solver.
 - Deterministic generation: the same template ID, seed, generator version, and solver version reproduce the same puzzle.
-- Minimal clue sets with direct, negative, ordering, and adjacency clues. The hidden solution is never returned over REST or MCP.
+- Minimal clue sets with direct, negative, ordering, adjacency, same-row, and exact-distance clues. The hidden solution is never returned over REST or MCP.
 - Server-side browser-answer verification using signed puzzle tokens, plus a deterministic 1–5 difficulty assessment with published human-trace and solver-search evidence.
 - A Cloudflare Worker with public REST and an API-key-protected Streamable HTTP MCP endpoint.
 
@@ -66,7 +66,7 @@ curl -X POST http://localhost:8787/v1/puzzles/generate \
 
 `templateId` and `seed` must be non-empty strings of at most 128 characters. Every response includes `X-Request-Id`, which is also included in Worker logs.
 
-Generated puzzles include `difficulty` (`level` 1–5, label, model identifier, and deterministic evidence). Each template publishes its locale metadata and its own 1,000-seed calibration strategy. Difficulty combines the no-guess human trace with deterministic solver-search nodes and constraint checks; retain `modelVersion` and `evidence` when recording scores.
+Generated puzzles include `difficulty` (`level` 1–5, label, model identifier, and deterministic evidence). Each template publishes its locale metadata and its own 1,000-seed calibration strategy. Difficulty combines the deduction trace, relational/cross-category clue structure, and deterministic solver telemetry; retain `modelVersion` and `evidence` when recording scores. When `difficultyLevel` is supplied, generation first searches deterministic clue-order strategies for the requested seed. `requestedSeed` always preserves the caller input; `seed` is the replay identifier if a bounded compatibility fallback is required.
 
 They also include a **signed** `puzzleToken` when `PUZZLE_TOKEN_SECRET` is configured. The token payload is base64url-encoded, readable reproducibility metadata (including the seed), followed by an HMAC signature. It protects against tampering; it does not encrypt the seed, hide the puzzle solution from a determined caller, or make public deterministic puzzles cheat-proof. Keep it with the puzzle in the browser and submit only the player’s completed non-base category assignments:
 

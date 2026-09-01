@@ -4,11 +4,12 @@ const encoder = new TextEncoder();
 const decoder = new TextDecoder();
 
 export interface PuzzleTokenPayload {
-  version: 1;
+  version: 2;
   templateId: string;
   seed: string;
   generatorVersion: string;
   solverVersion: string;
+  requestedDifficultyLevel?: 1 | 2 | 3 | 4 | 5;
 }
 
 function base64UrlEncode(value: Uint8Array): string {
@@ -38,11 +39,12 @@ async function signature(secret: string, encodedPayload: string): Promise<Uint8A
 
 export async function issuePuzzleToken(puzzle: GeneratedPuzzle, secret: string): Promise<string> {
   const payload: PuzzleTokenPayload = {
-    version: 1,
+    version: 2,
     templateId: puzzle.templateId,
     seed: puzzle.seed,
     generatorVersion: puzzle.generatorVersion,
     solverVersion: puzzle.solverVersion,
+    ...(puzzle.requestedDifficultyLevel === undefined ? {} : { requestedDifficultyLevel: puzzle.requestedDifficultyLevel }),
   };
   const encodedPayload = base64UrlEncode(encoder.encode(JSON.stringify(payload)));
   return `${encodedPayload}.${base64UrlEncode(await signature(secret, encodedPayload))}`;
@@ -60,7 +62,8 @@ export async function verifyPuzzleToken(token: string, secret: string): Promise<
     const value: unknown = JSON.parse(decoder.decode(rawPayload));
     if (!value || typeof value !== "object" || Array.isArray(value)) return undefined;
     const payload = value as Record<string, unknown>;
-    if (payload.version !== 1 || typeof payload.templateId !== "string" || typeof payload.seed !== "string" || typeof payload.generatorVersion !== "string" || typeof payload.solverVersion !== "string") return undefined;
+    if (payload.version !== 2 || typeof payload.templateId !== "string" || typeof payload.seed !== "string" || typeof payload.generatorVersion !== "string" || typeof payload.solverVersion !== "string") return undefined;
+    if (payload.requestedDifficultyLevel !== undefined && (typeof payload.requestedDifficultyLevel !== "number" || !Number.isInteger(payload.requestedDifficultyLevel) || payload.requestedDifficultyLevel < 1 || payload.requestedDifficultyLevel > 5)) return undefined;
     return payload as unknown as PuzzleTokenPayload;
   } catch {
     return undefined;

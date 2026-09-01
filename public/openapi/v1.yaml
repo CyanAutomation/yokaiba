@@ -166,7 +166,7 @@ components:
       name: difficultyLevel
       in: query
       required: false
-      description: Selects a reproducible puzzle at this assessed difficulty; the returned seed identifies the selected puzzle.
+      description: Selects a reproducible puzzle at this assessed difficulty. requestedSeed remains the caller value; seed identifies the generated replay.
       schema: { type: integer, minimum: 1, maximum: 5 }
     IfNoneMatch:
       name: If-None-Match
@@ -280,7 +280,7 @@ components:
       type: object
       required: [kind]
       properties:
-        kind: { type: string, enum: [matches, notMatches, before, adjacent] }
+        kind: { type: string, enum: [matches, notMatches, before, adjacent, sameRow, distance] }
       additionalProperties: true
     Clue:
       type: object
@@ -307,10 +307,12 @@ components:
         categories: { type: array, items: { $ref: '#/components/schemas/Category' } }
     GeneratedPuzzle:
       type: object
-      required: [id, seed, templateId, generatorVersion, solverVersion, spec, clues, difficulty]
+      required: [id, requestedSeed, seed, templateId, generatorVersion, solverVersion, spec, clues, difficulty]
       properties:
         id: { type: string }
+        requestedSeed: { type: string, description: The seed provided by the caller. }
         seed: { type: string }
+        requestedDifficultyLevel: { type: integer, minimum: 1, maximum: 5 }
         templateId: { type: string }
         generatorVersion: { type: string }
         solverVersion: { type: string }
@@ -327,13 +329,14 @@ components:
       properties:
         level: { type: integer, minimum: 1, maximum: 5 }
         label: { type: string, enum: [Very easy, Easy, Moderate, Hard, Very hard] }
-        modelVersion: { type: string, example: yokaiba-difficulty-v2 }
+        modelVersion: { type: string, example: yokaiba-difficulty-v3 }
         evidence:
           type: object
-          required: [score, humanSolve, solver]
+          required: [score, humanSolve, clueStructure, solver]
           properties:
             score: { type: integer }
             humanSolve: { type: object, additionalProperties: true }
+            clueStructure: { type: object, additionalProperties: true }
             solver: { type: object, additionalProperties: true }
     SolutionAnswer:
       type: object
