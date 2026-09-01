@@ -1,6 +1,7 @@
 import { GENERATOR_VERSION, generatePuzzle, generatePuzzleAtDifficulty, SOLVER_VERSION } from "../generation/generator.js";
 import { issuePuzzleToken, verifyPuzzleToken } from "./puzzle-token.js";
 import type { Difficulty, GeneratedPuzzle, PuzzleSpec, PuzzleTemplate, Solution } from "../domain/types.js";
+import { scenarioSummary } from "../catalogue.js";
 
 const MAX_GENERATION_FIELD_LENGTH = 128;
 const MAX_GENERATION_BODY_BYTES = 16 * 1024;
@@ -126,7 +127,7 @@ export function createRestRouter(templates: readonly PuzzleTemplate[], options: 
       return json({ error: { code: "bad_request", message: "Invalid URL" } }, 400);
     }
     const path = url.pathname;
-    if (request.method === "GET" && path === "/v1/scenarios") return json({ scenarios: templates.map(({ id, title, metadata }) => ({ id, title, ...(metadata ? { metadata } : {}) })) });
+    if (request.method === "GET" && path === "/v1/scenarios") return json({ scenarios: templates.map(scenarioSummary) });
     if (request.method === "GET" && path === "/v1/version") return json({ serviceVersion: options.serviceVersion ?? "0.1.0", buildSha: options.buildSha ?? "local", generatorVersion: GENERATOR_VERSION, solverVersion: SOLVER_VERSION });
     if (request.method === "POST" && path === "/v1/puzzles/verify") {
       if (!options.puzzleTokenSecret) return json({ error: { code: "not_configured", message: "puzzle verification is not configured" } }, 503);

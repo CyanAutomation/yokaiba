@@ -46,10 +46,21 @@ The complete contract is published at [`/openapi/v1.yaml`](https://yokaiba.schei
 - `GET` or `POST /v1/puzzles/generate`
 - `POST /v1/puzzles/verify`
 
+`GET /v1/scenarios` includes each scenario's base category and complete board
+categories, allowing clients to build their selection and game UI without first
+generating a puzzle.
+
+Template IDs are versioned public contracts. A correction that changes a
+template's values or generated output receives a new template ID; clients must
+store the template ID, seed, generator version, and solver version together for
+replay. The currently supported five-row templates are `open-division-v2` and
+`championship-circuit-v2`; both use the IJF sequence `-60 kg`, `-66 kg`,
+`-73 kg`, `-81 kg`, `-90 kg`.
+
 For browser games, use the cacheable GET form. Deterministic responses are cached for five minutes and then revalidated, so a generator release cannot be held indefinitely by a stale browser or edge cache.
 
 ```js
-const baseUrl = "https://your-worker.workers.dev";
+const baseUrl = "https://yokaiba.scheimann.workers.dev";
 const params = new URLSearchParams({ templateId: "tournament-order-v1", seed: "round-42" });
 const response = await fetch(`${baseUrl}/v1/puzzles/generate?${params}`);
 if (!response.ok) throw new Error(`Puzzle request failed: ${response.status}`);
