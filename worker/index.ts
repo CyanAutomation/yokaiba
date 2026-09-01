@@ -2,6 +2,7 @@ import { createRestRouter } from "../src/api/router.js";
 import { createYokaibaMcpHandler } from "../src/mcp/server.js";
 import { tournamentOrderTemplate } from "../src/templates/tournament-order.js";
 import { openDivisionTemplate } from "../src/templates/open-division.js";
+import { championshipCircuitTemplate } from "../src/templates/championship-circuit.js";
 import { hostHeaderValidationResponse } from "@modelcontextprotocol/server";
 
 interface Env {
@@ -28,7 +29,7 @@ interface Env {
   ASSETS?: { fetch(request: Request): Promise<Response> };
 }
 
-const templates = [tournamentOrderTemplate, openDivisionTemplate];
+const templates = [tournamentOrderTemplate, openDivisionTemplate, championshipCircuitTemplate];
 const mcp = createYokaibaMcpHandler(templates);
 
 function json(value: unknown, status = 200) {

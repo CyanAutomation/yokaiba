@@ -5,5 +5,6 @@ export * from "./generation/generator.js";
 export * from "./generation/quality.js";
 export * from "./templates/tournament-order.js";
 export * from "./templates/open-division.js";
+export * from "./templates/championship-circuit.js";
 export * from "./api/router.js";
 export * from "./mcp/server.js";
