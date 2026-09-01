@@ -1,6 +1,6 @@
 import { createMcpHandler, McpServer } from "@modelcontextprotocol/server";
 import { z } from "zod";
-import { generatePuzzle } from "../generation/generator.js";
+import { generatePuzzle, generatePuzzleAtDifficulty } from "../generation/generator.js";
 import type { PuzzleTemplate } from "../domain/types.js";
 
 function textResult(value: unknown) {
@@ -16,11 +16,13 @@ export function createYokaibaMcpHandler(templates: readonly PuzzleTemplate[]) {
     }, async () => textResult({ scenarios: templates.map(({ id, title, metadata }) => ({ id, title, ...(metadata ? { metadata } : {}) })) }));
     server.registerTool("generate_puzzle", {
       description: "Generate a deterministic, uniquely solvable judo logic-grid puzzle.",
-      inputSchema: { templateId: z.string().min(1), seed: z.string().min(1) },
-    }, async ({ templateId, seed }) => {
+      inputSchema: { templateId: z.string().min(1), seed: z.string().min(1), difficultyLevel: z.number().int().min(1).max(5).optional() },
+    }, async ({ templateId, seed, difficultyLevel }) => {
       const template = byId.get(templateId);
       if (!template) return { content: [{ type: "text" as const, text: `Unknown templateId: ${templateId}` }], isError: true };
-      const { solution: _solution, ...puzzle } = generatePuzzle(template, seed);
+      const { solution: _solution, generationStrategy: _strategy, ...puzzle } = difficultyLevel === undefined
+        ? generatePuzzle(template, seed)
+        : generatePuzzleAtDifficulty(template, seed, difficultyLevel as 1 | 2 | 3 | 4 | 5);
       return textResult(puzzle);
     });
     return server;

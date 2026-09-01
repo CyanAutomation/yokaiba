@@ -3,7 +3,7 @@ import type { PuzzleSolver } from "../domain/puzzle-solver.js";
 import { exhaustivePuzzleSolver } from "../constraints/solver.js";
 import { assessPuzzleDifficulty } from "./quality.js";
 
-export const GENERATOR_VERSION = "yokaiba-generator-v1";
+export const GENERATOR_VERSION = "yokaiba-generator-v2";
 /** Version of the built-in solver used when callers do not provide one. */
 export const SOLVER_VERSION = exhaustivePuzzleSolver.version;
 
@@ -45,6 +45,30 @@ function makeSolution(template: PuzzleTemplate, next: () => number): Solution {
   };
 }
 
+function directText(subject: string, categoryId: string, value: string) {
+  if (categoryId === "weight") return `${subject} fought in the ${value} division.`;
+  if (categoryId === "tatami") return `${subject} competed on ${value}.`;
+  if (categoryId === "placing") return `${subject} finished ${value}.`;
+  if (categoryId === "medal") return `${subject} earned ${value}.`;
+  return `${subject}'s ${categoryId.replace(/([A-Z])/g, " $1").toLowerCase()} was ${value}.`;
+}
+
+function negativeText(subject: string, categoryId: string, value: string) {
+  if (categoryId === "weight") return `${subject} did not fight in the ${value} division.`;
+  if (categoryId === "tatami") return `${subject} was not scheduled on ${value}.`;
+  if (categoryId === "placing") return `${subject} did not finish ${value}.`;
+  if (categoryId === "medal") return `${subject} did not earn ${value}.`;
+  return `${subject}'s ${categoryId.replace(/([A-Z])/g, " $1").toLowerCase()} was not ${value}.`;
+}
+
+function sameRowText(leftValue: string, rightCategoryId: string, rightValue: string) {
+  if (rightCategoryId === "tatami") return `The ${leftValue} competitor fought on ${rightValue}.`;
+  if (rightCategoryId === "medal") return `The ${leftValue} competitor earned ${rightValue}.`;
+  if (rightCategoryId === "placing") return `The ${leftValue} competitor finished ${rightValue}.`;
+  if (rightCategoryId === "weight") return `The competitor on ${leftValue} fought in the ${rightValue} division.`;
+  return `The competitor with ${leftValue} had ${rightValue} for ${rightCategoryId.replace(/([A-Z])/g, " $1").toLowerCase()}.`;
+}
+
 function directCandidates(template: PuzzleTemplate, solution: Solution, next: () => number): Clue[] {
   const base = template.categories.find(category => category.id === template.baseCategory)!;
   const candidates: Clue[] = [];
@@ -55,7 +79,7 @@ function directCandidates(template: PuzzleTemplate, solution: Solution, next: ()
       candidates.push({
         id: `matches-${category.id}-${row}`,
         constraint: { kind: "matches", subject, category: category.id, value },
-        text: `${subject} was associated with ${value}.`,
+        text: directText(subject, category.id, value),
       });
     }
   }
@@ -79,7 +103,7 @@ function relationalCandidates(template: PuzzleTemplate, solution: Solution, next
       candidates.push({
         id: `not-matches-${category.id}-${row}`,
         constraint: { kind: "notMatches", subject: base.values[row], category: category.id, value },
-        text: `${base.values[row]} was not associated with ${value}.`,
+        text: negativeText(base.values[row], category.id, value),
       });
     }
     if (!category.ordered) continue;
@@ -90,13 +114,40 @@ function relationalCandidates(template: PuzzleTemplate, solution: Solution, next
         candidates.push({
           id: `before-${category.id}-${leftRow}-${rightRow}`,
           constraint: { kind: "before", left, right },
-          text: `In the ${template.title.toLowerCase()} lineup, the entry associated with ${left.value} appeared before the entry associated with ${right.value}.`,
+          text: `In the ${template.title.toLowerCase()}, ${left.value} came before ${right.value}.`,
         });
         if (rightRow === leftRow + 1) {
           candidates.push({
             id: `adjacent-${category.id}-${leftRow}-${rightRow}`,
             constraint: { kind: "adjacent", left, right },
-          text: `In the ${template.title.toLowerCase()} lineup, the entry associated with ${left.value} stood next to the entry associated with ${right.value}.`,
+          text: `${left.value} and ${right.value} were consecutive in the ${template.title.toLowerCase()}.`,
+          });
+        }
+      }
+    }
+  }
+  const dimensions = template.categories.filter(category => category.id !== base.id);
+  for (let leftIndex = 0; leftIndex < dimensions.length; leftIndex += 1) {
+    for (let rightIndex = leftIndex + 1; rightIndex < dimensions.length; rightIndex += 1) {
+      const leftCategory = dimensions[leftIndex]!;
+      const rightCategory = dimensions[rightIndex]!;
+      const leftAssignment = solution.assignments[leftCategory.id]!;
+      const rightAssignment = solution.assignments[rightCategory.id]!;
+      for (let row = 0; row < base.values.length; row += 1) {
+        const left = { category: leftCategory.id, value: leftAssignment[row]! };
+        const right = { category: rightCategory.id, value: rightAssignment[row]! };
+        candidates.push({
+          id: `same-row-${leftCategory.id}-${rightCategory.id}-${row}`,
+          constraint: { kind: "sameRow", left, right },
+          text: sameRowText(left.value, rightCategory.id, right.value),
+        });
+        for (let otherRow = row + 1; otherRow < base.values.length; otherRow += 1) {
+          const distance = otherRow - row;
+          const distantRight = { category: rightCategory.id, value: rightAssignment[otherRow]! };
+          candidates.push({
+            id: `distance-${leftCategory.id}-${rightCategory.id}-${row}-${otherRow}`,
+            constraint: { kind: "distance", left, right: distantRight, distance },
+            text: `${left.value} and ${distantRight.value} were ${distance} ${distance === 1 ? "place" : "places"} apart.`,
           });
         }
       }
@@ -105,18 +156,43 @@ function relationalCandidates(template: PuzzleTemplate, solution: Solution, next
   return shuffled(candidates, next);
 }
 
+export interface GenerationOptions {
+  difficultyLevel?: 1 | 2 | 3 | 4 | 5;
+  /** Selects a deterministic clue strategy without changing the puzzle seed. */
+  strategy?: number;
+}
+
+function prioritizeForDifficulty(candidates: readonly Clue[], difficultyLevel: GenerationOptions["difficultyLevel"], next: () => number) {
+  const shuffledCandidates = shuffled(candidates, next);
+  if (!difficultyLevel) return shuffledCandidates;
+  const eligibleCandidates = difficultyLevel >= 4
+    ? shuffledCandidates.filter(clue => clue.constraint.kind !== "matches")
+    : shuffledCandidates;
+  const weight = (clue: Clue) => {
+    const kind = clue.constraint.kind;
+    if (difficultyLevel <= 2) return kind === "matches" ? 0 : kind === "notMatches" ? 1 : 2;
+    if (difficultyLevel === 3) return kind === "matches" ? 1 : kind === "notMatches" ? 2 : 0;
+    return kind === "matches" ? 3 : kind === "notMatches" ? 2 : kind === "sameRow" || kind === "distance" ? 0 : 1;
+  };
+  return eligibleCandidates.sort((left, right) => weight(left) - weight(right));
+}
+
 /**
  * Select a clue subset that establishes uniqueness, then remove every
  * individually redundant clue. The candidate pool combines direct, negative,
  * ordering, and adjacency clues so template prose can create genuine logic
  * deductions instead of presenting the full answer as facts.
  */
-export function generatePuzzle(template: PuzzleTemplate, seed: string, solver: PuzzleSolver = exhaustivePuzzleSolver): GeneratedPuzzle {
+export function generatePuzzle(template: PuzzleTemplate, seed: string, solver: PuzzleSolver = exhaustivePuzzleSolver, options: GenerationOptions = {}): GeneratedPuzzle {
   validateTemplate(template);
   const next = random(`${template.id}:${seed}`);
   const solution = makeSolution(template, next);
   const selected: Clue[] = [];
-  const candidates = shuffled([...directCandidates(template, solution, next), ...relationalCandidates(template, solution, next)], next);
+  const candidates = prioritizeForDifficulty(
+    [...directCandidates(template, solution, next), ...relationalCandidates(template, solution, next)],
+    options.difficultyLevel,
+    random(`${template.id}:${seed}:strategy:${options.strategy ?? 0}`),
+  );
   for (const clue of candidates) {
     if (solver.countSolutions(template, selected, 2) === 1) break;
     selected.push(clue);
@@ -128,6 +204,7 @@ export function generatePuzzle(template: PuzzleTemplate, seed: string, solver: P
   }
   return {
     id: `${template.id}:${seed}`,
+    requestedSeed: seed,
     seed,
     templateId: template.id,
     generatorVersion: GENERATOR_VERSION,
@@ -137,4 +214,29 @@ export function generatePuzzle(template: PuzzleTemplate, seed: string, solver: P
     difficulty: assessPuzzleDifficulty(template, selected),
     solution,
   };
+}
+
+/**
+ * Construct from one stable solution seed and explore deterministic clue-order
+ * strategies. This targets difficulty without silently substituting a caller's
+ * seed for a different puzzle identity.
+ */
+export function generatePuzzleAtDifficulty(template: PuzzleTemplate, seed: string, difficultyLevel: 1 | 2 | 3 | 4 | 5, solver: PuzzleSolver = exhaustivePuzzleSolver): GeneratedPuzzle {
+  for (let strategy = 0; strategy < 64; strategy += 1) {
+    const candidate = generatePuzzle(template, seed, solver, { difficultyLevel, strategy });
+    if (candidate.difficulty.level === difficultyLevel) {
+      return { ...candidate, requestedDifficultyLevel: difficultyLevel, generationStrategy: strategy };
+    }
+  }
+  // Some small boards have no subset in a requested score band for one fixed
+  // solution. Preserve the caller's identity while using the historical seed
+  // search only as a bounded compatibility fallback.
+  for (let attempt = 0; attempt < 128; attempt += 1) {
+    const candidateSeed = `${seed}:difficulty:${difficultyLevel}:${attempt}`;
+    const candidate = generatePuzzle(template, candidateSeed, solver);
+    if (candidate.difficulty.level === difficultyLevel) {
+      return { ...candidate, requestedSeed: seed, requestedDifficultyLevel: difficultyLevel, generationStrategy: attempt };
+    }
+  }
+  throw new Error("requested difficulty is unavailable");
 }

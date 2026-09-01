@@ -14,7 +14,7 @@ import {
   type PuzzleSolver,
   type PuzzleTemplate,
 } from "../src/index.js";
-import { createRestRouter, openDivisionTemplate, tournamentOrderTemplate } from "../src/index.js";
+import { championshipCircuitTemplate, createRestRouter, openDivisionTemplate, tournamentOrderTemplate } from "../src/index.js";
 import worker, { createRateLimiter, createWorker } from "../worker/index.js";
 
 const template: PuzzleTemplate = {
@@ -78,6 +78,12 @@ test("Open Division publishes its five-row template contract", () => {
   assert.deepEqual(openDivisionTemplate.metadata!.locales, { default: "en", supported: ["en"] });
 });
 
+test("Championship Circuit provides an expert-sized board with three non-base categories", () => {
+  assert.equal(championshipCircuitTemplate.id, "championship-circuit-v1");
+  assert.equal(championshipCircuitTemplate.categories.length, 4);
+  assert.ok(championshipCircuitTemplate.categories.every(category => category.values.length === 5));
+});
+
 test("Open Division generation is deterministic and unique for a fixed seed", () => {
   const first = generatePuzzle(openDivisionTemplate, "catalogue-seed");
   const second = generatePuzzle(openDivisionTemplate, "catalogue-seed");
@@ -92,6 +98,21 @@ test("a seeded puzzle is reproducible and has exactly one solution", () => {
 
   assert.deepEqual(first, second);
   assert.equal(countSolutions(first.spec, first.clues, 2), 1);
+});
+
+test("generated clue prose is natural and avoids implementation phrasing", () => {
+  const puzzle = generatePuzzle(tournamentOrderTemplate, "natural-language");
+
+  assert.ok(puzzle.clues.every(clue => !/associated with|entry associated/i.test(clue.text)));
+  assert.ok(puzzle.clues.some(clue => /finished|fought|competed|bout|places?/i.test(clue.text)));
+});
+
+test("expert target generation favors relational deductions over direct facts", () => {
+  const puzzle = generatePuzzle(championshipCircuitTemplate, "expert-relational", undefined, { difficultyLevel: 5, strategy: 0 });
+
+  assert.equal(countSolutions(puzzle.spec, puzzle.clues, 2), 1);
+  assert.ok(puzzle.clues.every(clue => clue.constraint.kind !== "matches"));
+  assert.ok(puzzle.clues.some(clue => clue.constraint.kind === "sameRow" || clue.constraint.kind === "distance"));
 });
 
 test("the exhaustive solver fulfils the public solver contract", () => {
@@ -142,6 +163,21 @@ test("solver evaluates relational clues across categories", () => {
 
   assert.equal(countSolutions(solverFixtureSpec, [before], 100), 12);
   assert.equal(countSolutions(solverFixtureSpec, [adjacent], 100), 16);
+});
+
+test("solver supports same-row and exact-distance clues", () => {
+  const sameRow: Clue = {
+    id: "red-cat", constraint: { kind: "sameRow", left: { category: "color", value: "Red" }, right: { category: "pet", value: "Cat" } }, text: "Red belongs with Cat.",
+  };
+  const distance: Clue = {
+    id: "blue-two-from-fox", constraint: { kind: "distance", left: { category: "color", value: "Blue" }, right: { category: "pet", value: "Fox" }, distance: 2 }, text: "Blue is two places from Fox.",
+  };
+
+  assert.equal(countSolutions(solverFixtureSpec, [sameRow], 100), 12);
+  assert.equal(countSolutions(solverFixtureSpec, [distance], 100), 8);
+  const solution = solve(solverFixtureSpec, [sameRow, distance], 1)[0]!;
+  assert.ok(satisfiesConstraint(solverFixtureSpec, solution, sameRow.constraint));
+  assert.ok(satisfiesConstraint(solverFixtureSpec, solution, distance.constraint));
 });
 
 test("solver returns no solution for contradictory clues", () => {
@@ -241,6 +277,7 @@ test("quality records a completed human trace without guessing", () => {
     usedGuessing: false,
     totalCost: 2,
     hardestStep: 1,
+    deductionPasses: 2,
   });
 });
 
@@ -253,6 +290,7 @@ test("quality reports an incomplete human trace when clues cannot finish the puz
     usedGuessing: false,
     totalCost: 1,
     hardestStep: 1,
+    deductionPasses: 2,
   });
 });
 
@@ -260,7 +298,7 @@ test("difficulty is reproducible and publishes deterministic human and solver ev
   const fixtures = ["recalibrate-7", "recalibrate-18", "recalibrate-3", "recalibrate-1", "recalibrate-0"];
   for (const seed of fixtures) {
     const difficulty = generatePuzzle(tournamentOrderTemplate, seed).difficulty;
-    assert.equal(difficulty.modelVersion, "yokaiba-difficulty-v2");
+    assert.equal(difficulty.modelVersion, "yokaiba-difficulty-v3");
     assert.ok(difficulty.evidence.score > 0);
     assert.ok(difficulty.evidence.solver.nodesVisited > 0);
     assert.ok(difficulty.evidence.solver.constraintChecks > 0);
@@ -304,7 +342,7 @@ test("REST generation redacts the hidden solution and includes reproducibility m
   const difficulty = body.difficulty as { level: number; label: string; modelVersion: string; evidence: { score: number } };
   assert.ok([1, 2, 3, 4, 5].includes(difficulty.level));
   assert.ok(["Very easy", "Easy", "Moderate", "Hard", "Very hard"].includes(difficulty.label));
-  assert.equal(difficulty.modelVersion, "yokaiba-difficulty-v2");
+  assert.equal(difficulty.modelVersion, "yokaiba-difficulty-v3");
   assert.equal(typeof difficulty.evidence.score, "number");
   assert.ok(Array.isArray(body.clues));
 });
@@ -328,7 +366,9 @@ test("REST can deterministically select every calibrated difficulty level", asyn
       const first = await route(new Request(path));
       const second = await route(new Request(path));
       assert.equal(first.status, 200);
-      assert.deepEqual(await first.json(), await second.json());
+      const firstBody = await first.json() as { seed: string; requestedSeed?: string };
+      assert.deepEqual(firstBody, await second.json());
+      assert.equal(firstBody.requestedSeed, "level-picker");
       const replay = await route(new Request(path));
       assert.equal((await replay.json() as { difficulty: { level: number } }).difficulty.level, level);
     }
@@ -445,7 +485,7 @@ test("version and readiness expose deployed build and rate-limit configuration",
   const env = { BUILD_VERSION: "0.1.0-test", BUILD_SHA: "deadbeef", REST_RATE_LIMITER: { limit: async () => ({ success: true }) } };
   const version = await isolatedWorker.fetch(new Request("https://yokaiba.test/v1/version"), env, {} as ExecutionContext);
   assert.deepEqual(await version.json(), {
-    serviceVersion: "0.1.0-test", buildSha: "deadbeef", generatorVersion: "yokaiba-generator-v1", solverVersion: "yokaiba-exhaustive-v1",
+    serviceVersion: "0.1.0-test", buildSha: "deadbeef", generatorVersion: "yokaiba-generator-v2", solverVersion: "yokaiba-exhaustive-v1",
   });
   const ready = await isolatedWorker.fetch(new Request("https://yokaiba.test/readyz"), env, {} as ExecutionContext);
   assert.deepEqual(await ready.json(), { status: "ready", build: { serviceVersion: "0.1.0-test", buildSha: "deadbeef" }, rateLimitProvider: "configured" });
