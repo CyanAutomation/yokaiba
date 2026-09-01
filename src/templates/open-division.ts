@@ -1,13 +1,14 @@
 import type { PuzzleTemplate } from "../domain/types.js";
+import { IJF_SENIOR_MENS_WEIGHT_CLASSES } from "../domain/ijf-weight-classes.js";
 
 /** A five-judoka format that exercises the solver's supported maximum board size. */
 export const openDivisionTemplate: PuzzleTemplate = {
-  id: "open-division-v1",
+  id: "open-division-v2",
   title: "Open Division",
   baseCategory: "judoka",
   categories: [
     { id: "judoka", label: "Judoka", values: ["Aki", "Hana", "Kenji", "Mika", "Sora"] },
-    { id: "weight", label: "Weight category", values: ["-60 kg", "-66 kg", "-73 kg", "-81 kg", "+81 kg"], ordered: true },
+    { id: "weight", label: "Weight category", values: IJF_SENIOR_MENS_WEIGHT_CLASSES.slice(0, 5), ordered: true },
     { id: "tatami", label: "Tatami", values: ["Tatami 1", "Tatami 2", "Tatami 3", "Tatami 4", "Tatami 5"], ordered: true },
   ],
   metadata: {
