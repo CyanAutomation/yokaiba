@@ -6,6 +6,7 @@ import {
   exhaustivePuzzleSolver,
   evaluatePuzzleQuality,
   generatePuzzle,
+  isIjfSeniorMensWeightClass,
   MAX_SUPPORTED_ROWS,
   satisfiesConstraint,
   solve,
@@ -72,16 +73,40 @@ test("Tournament Order uses judoka names for its default working board", () => {
 });
 
 test("Open Division publishes its five-row template contract", () => {
-  assert.equal(openDivisionTemplate.id, "open-division-v1");
+  assert.equal(openDivisionTemplate.id, "open-division-v2");
   assert.equal(openDivisionTemplate.baseCategory, "judoka");
   assert.ok(openDivisionTemplate.categories.every(category => category.values.length === 5));
   assert.deepEqual(openDivisionTemplate.metadata!.locales, { default: "en", supported: ["en"] });
+  assert.deepEqual(openDivisionTemplate.categories.find(category => category.id === "weight")?.values, ["-60 kg", "-66 kg", "-73 kg", "-81 kg", "-90 kg"]);
 });
 
 test("Championship Circuit provides an expert-sized board with three non-base categories", () => {
-  assert.equal(championshipCircuitTemplate.id, "championship-circuit-v1");
+  assert.equal(championshipCircuitTemplate.id, "championship-circuit-v2");
   assert.equal(championshipCircuitTemplate.categories.length, 4);
   assert.ok(championshipCircuitTemplate.categories.every(category => category.values.length === 5));
+  assert.deepEqual(championshipCircuitTemplate.categories.find(category => category.id === "weight")?.values, ["-60 kg", "-66 kg", "-73 kg", "-81 kg", "-90 kg"]);
+});
+
+test("IJF-template puzzle payloads never use the invalid +81 kg division", () => {
+  for (const template of [openDivisionTemplate, championshipCircuitTemplate]) {
+    const puzzle = generatePuzzle(template, "ijf-weight-regression");
+    const serialized = JSON.stringify({ spec: puzzle.spec, clues: puzzle.clues });
+    assert.doesNotMatch(serialized, /\+81 kg/);
+    assert.match(serialized, /-90 kg/);
+  }
+});
+
+test("generation rejects a non-IJF value in a weight category", () => {
+  const invalidTemplate: PuzzleTemplate = {
+    ...openDivisionTemplate,
+    categories: openDivisionTemplate.categories.map(category => category.id === "weight"
+      ? { ...category, values: ["-60 kg", "-66 kg", "-73 kg", "-81 kg", "+81 kg"] }
+      : category),
+  };
+
+  assert.equal(isIjfSeniorMensWeightClass("-90 kg"), true);
+  assert.equal(isIjfSeniorMensWeightClass("+81 kg"), false);
+  assert.throws(() => generatePuzzle(invalidTemplate, "invalid-weight"), /valid IJF senior men's weight classes/);
 });
 
 test("Open Division generation is deterministic and unique for a fixed seed", () => {
@@ -356,6 +381,21 @@ test("REST supports cacheable deterministic GET generation", async () => {
   const body = await response.json() as Record<string, unknown>;
   assert.equal(body.seed, "api-seed");
   assert.equal("solution" in body, false);
+});
+
+test("REST scenario catalogue includes category values needed to render a game", async () => {
+  const route = createRestRouter([openDivisionTemplate]);
+  const response = await route(new Request("https://yokaiba.test/v1/scenarios"));
+
+  assert.equal(response.status, 200);
+  const body = await response.json() as { scenarios: Array<{ id: string; baseCategory: string; categories: Array<{ id: string; values: string[] }> }> };
+  assert.deepEqual(body.scenarios, [{
+    id: "open-division-v2",
+    title: "Open Division",
+    baseCategory: "judoka",
+    categories: openDivisionTemplate.categories,
+    metadata: openDivisionTemplate.metadata,
+  }]);
 });
 
 test("REST can deterministically select every calibrated difficulty level", async () => {

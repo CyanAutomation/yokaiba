@@ -259,10 +259,15 @@ components:
             corpus: { type: object, additionalProperties: true }
     Scenario:
       type: object
-      required: [id, title]
+      required: [id, title, baseCategory, categories]
       properties:
         id: { type: string }
         title: { type: string }
+        baseCategory: { type: string }
+        categories:
+          type: array
+          description: Board categories and values, provided so clients can render a puzzle before generation.
+          items: { $ref: '#/components/schemas/Category' }
         metadata: { $ref: '#/components/schemas/TemplateMetadata' }
     ScenarioList:
       type: object
