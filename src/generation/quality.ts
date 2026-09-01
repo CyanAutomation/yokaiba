@@ -2,9 +2,9 @@ import type { Clue, Difficulty, DifficultyCalibration, PuzzleSpec } from "../dom
 import type { PuzzleSolver } from "../domain/puzzle-solver.js";
 import { exhaustivePuzzleSolver, solveWithTelemetry } from "../constraints/solver.js";
 
-const COST: Record<Clue["constraint"]["kind"], number> = { matches: 1, notMatches: 1, before: 3, adjacent: 3 };
+const COST: Record<Clue["constraint"]["kind"], number> = { matches: 1, notMatches: 1, before: 3, adjacent: 3, sameRow: 3, distance: 4 };
 
-export const DIFFICULTY_MODEL_VERSION = "yokaiba-difficulty-v2";
+export const DIFFICULTY_MODEL_VERSION = "yokaiba-difficulty-v3";
 const defaultCalibration: DifficultyCalibration = {
   modelVersion: DIFFICULTY_MODEL_VERSION,
   scoreThresholds: [68, 73, 79, 88],
@@ -21,11 +21,17 @@ export function assessPuzzleDifficulty(spec: PuzzleSpec, clues: readonly Clue[])
   const calibration = spec.metadata?.difficultyCalibration ?? defaultCalibration;
   const humanSolve = directHumanSolve(spec, clues);
   const telemetry = solveWithTelemetry(spec, clues, 2).telemetry;
+  const directClues = clues.filter(clue => clue.constraint.kind === "matches" || clue.constraint.kind === "notMatches").length;
+  const relationalClues = clues.length - directClues;
+  const crossCategoryClues = clues.filter(clue => "left" in clue.constraint && clue.constraint.left.category !== clue.constraint.right.category).length;
   // The score is intentionally deterministic: wall-clock duration varies by runtime,
   // while a no-guess trace and solver search work provide reproducible evidence.
   const score = humanSolve.totalCost * 2
     + humanSolve.hardestStep * 3
     + (humanSolve.solved ? 0 : 8)
+    + relationalClues * 2
+    + crossCategoryClues * 3
+    + Math.min(10, humanSolve.deductionPasses)
     + Math.min(24, Math.floor(Math.log2(telemetry.nodesVisited + 1)) * 2)
     + Math.min(16, Math.floor(telemetry.constraintChecks / 8));
   const [levelOne, levelTwo, levelThree, levelFour] = calibration.scoreThresholds;
@@ -39,7 +45,8 @@ export function assessPuzzleDifficulty(spec: PuzzleSpec, clues: readonly Clue[])
     modelVersion: calibration.modelVersion,
     evidence: {
       score,
-      humanSolve: { solved: humanSolve.solved, totalCost: humanSolve.totalCost, hardestStep: humanSolve.hardestStep },
+      humanSolve: { solved: humanSolve.solved, totalCost: humanSolve.totalCost, hardestStep: humanSolve.hardestStep, deductionPasses: humanSolve.deductionPasses },
+      clueStructure: { directClues, relationalClues, crossCategoryClues },
       solver: { nodesVisited: telemetry.nodesVisited, constraintChecks: telemetry.constraintChecks },
     },
   };
@@ -50,7 +57,7 @@ export interface PuzzleQuality {
   redundantClueIds: string[];
   clueDiversity: { distinctKinds: number; kinds: string[] };
   readability: { unreadableClueIds: string[] };
-  humanSolve: { solved: boolean; usedGuessing: false; totalCost: number; hardestStep: number };
+  humanSolve: { solved: boolean; usedGuessing: false; totalCost: number; hardestStep: number; deductionPasses: number };
 }
 
 /** A no-guess human model using direct, all-different, ordering, and adjacency elimination. */
@@ -79,7 +86,9 @@ function directHumanSolve(spec: PuzzleSpec, clues: readonly Clue[]) {
   };
 
   let changed = true;
+  let deductionPasses = 0;
   while (changed) {
+    deductionPasses += 1;
     changed = false;
     for (const clue of clues) {
       const constraint = clue.constraint;
@@ -97,7 +106,11 @@ function directHumanSolve(spec: PuzzleSpec, clues: readonly Clue[]) {
       const rightRows = termRows(constraint.right.category, constraint.right.value);
       const satisfies = constraint.kind === "before"
         ? (left: number, right: number) => left < right
-        : (left: number, right: number) => Math.abs(left - right) === 1;
+        : constraint.kind === "sameRow"
+          ? (left: number, right: number) => left === right
+          : constraint.kind === "distance"
+            ? (left: number, right: number) => Math.abs(left - right) === constraint.distance
+            : (left: number, right: number) => Math.abs(left - right) === 1;
       changed = removeTermRows(constraint.left.category, constraint.left.value,
         new Set(leftRows.filter(left => !rightRows.some(right => satisfies(left, right))))) || changed;
       changed = removeTermRows(constraint.right.category, constraint.right.value,
@@ -115,7 +128,7 @@ function directHumanSolve(spec: PuzzleSpec, clues: readonly Clue[]) {
       }
     }
   }
-  return { solved: [...possible.values()].every(cells => cells.every(cell => cell.size === 1)), usedGuessing: false as const, totalCost, hardestStep };
+  return { solved: [...possible.values()].every(cells => cells.every(cell => cell.size === 1)), usedGuessing: false as const, totalCost, hardestStep, deductionPasses };
 }
 
 export function evaluatePuzzleQuality(spec: PuzzleSpec, clues: readonly Clue[], solver: PuzzleSolver = exhaustivePuzzleSolver): PuzzleQuality {

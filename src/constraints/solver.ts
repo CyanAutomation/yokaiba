@@ -31,6 +31,10 @@ export function satisfiesConstraint(spec: PuzzleSpec, solution: Solution, constr
       return positionOf(spec, solution, constraint.left.category, constraint.left.value) < positionOf(spec, solution, constraint.right.category, constraint.right.value);
     case "adjacent":
       return Math.abs(positionOf(spec, solution, constraint.left.category, constraint.left.value) - positionOf(spec, solution, constraint.right.category, constraint.right.value)) === 1;
+    case "sameRow":
+      return positionOf(spec, solution, constraint.left.category, constraint.left.value) === positionOf(spec, solution, constraint.right.category, constraint.right.value);
+    case "distance":
+      return Math.abs(positionOf(spec, solution, constraint.left.category, constraint.left.value) - positionOf(spec, solution, constraint.right.category, constraint.right.value)) === constraint.distance;
   }
 }
 
@@ -128,6 +132,23 @@ function compileConstraints(spec: PuzzleSpec, clues: readonly Clue[]): CompiledC
         return {
           requiredCategories: requirements(constraint.left.category, constraint.right.category),
           satisfies: assignments => Math.abs(leftPosition(assignments) - rightPosition(assignments)) === 1,
+        };
+      }
+      case "sameRow": {
+        const leftPosition = position(constraint.left.category, constraint.left.value);
+        const rightPosition = position(constraint.right.category, constraint.right.value);
+        return {
+          requiredCategories: requirements(constraint.left.category, constraint.right.category),
+          satisfies: assignments => leftPosition(assignments) === rightPosition(assignments),
+        };
+      }
+      case "distance": {
+        if (!Number.isInteger(constraint.distance) || constraint.distance < 1) throw new Error("distance clues require a positive integer distance");
+        const leftPosition = position(constraint.left.category, constraint.left.value);
+        const rightPosition = position(constraint.right.category, constraint.right.value);
+        return {
+          requiredCategories: requirements(constraint.left.category, constraint.right.category),
+          satisfies: assignments => Math.abs(leftPosition(assignments) - rightPosition(assignments)) === constraint.distance,
         };
       }
     }
