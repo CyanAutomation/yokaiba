@@ -95,10 +95,28 @@ test("a seeded puzzle is reproducible and has exactly one solution", () => {
 });
 
 test("the exhaustive solver fulfils the public solver contract", () => {
+  const spec: PuzzleTemplate = {
+    id: "exhaustive-solver-contract",
+    title: "Exhaustive solver contract fixture",
+    baseCategory: "person",
+    categories: [
+      { id: "person", label: "Person", values: ["Aki", "Ben"] },
+      { id: "color", label: "Color", values: ["Red", "Blue"] },
+      { id: "pet", label: "Pet", values: ["Cat", "Dog"] },
+    ],
+  };
   const clues = [{ id: "aki-red", constraint: { kind: "matches" as const, subject: "Aki", category: "color", value: "Red" }, text: "Aki wore red." }];
+  const expectedAssignments = [
+    { assignments: { color: ["Red", "Blue"], pet: ["Cat", "Dog"] } },
+    { assignments: { color: ["Red", "Blue"], pet: ["Dog", "Cat"] } },
+  ];
+
+  assert.deepEqual(exhaustivePuzzleSolver.solve(spec, clues, 10), expectedAssignments);
+  assert.deepEqual(exhaustivePuzzleSolver.solve(spec, clues, 1), expectedAssignments.slice(0, 1));
+  assert.equal(exhaustivePuzzleSolver.countSolutions(spec, clues, 10), 2);
+
+  // Replay contract: README.md, "Solver implementations".
   assert.equal(exhaustivePuzzleSolver.version, "yokaiba-exhaustive-v1");
-  assert.deepEqual(exhaustivePuzzleSolver.solve(qualityFixtureSpec, clues, 1), solve(qualityFixtureSpec, clues, 1));
-  assert.equal(exhaustivePuzzleSolver.countSolutions(qualityFixtureSpec, clues, 1), countSolutions(qualityFixtureSpec, clues, 1));
 });
 
 test("solver preserves the semantics of every clue kind", () => {
