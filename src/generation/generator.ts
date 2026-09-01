@@ -2,6 +2,7 @@ import type { Clue, GeneratedPuzzle, PuzzleTemplate, Solution } from "../domain/
 import type { PuzzleSolver } from "../domain/puzzle-solver.js";
 import { exhaustivePuzzleSolver } from "../constraints/solver.js";
 import { assessPuzzleDifficulty } from "./quality.js";
+import { isIjfSeniorMensWeightClass } from "../domain/ijf-weight-classes.js";
 
 export const GENERATOR_VERSION = "yokaiba-generator-v2";
 /** Version of the built-in solver used when callers do not provide one. */
@@ -35,6 +36,7 @@ function validateTemplate(template: PuzzleTemplate) {
   if (new Set(base.values).size !== base.values.length) throw new Error("base values must be unique");
   for (const category of template.categories) {
     if (category.values.length !== base.values.length || new Set(category.values).size !== category.values.length) throw new Error("each category needs unique values matching base row count");
+    if (category.id === "weight" && category.values.some(value => !isIjfSeniorMensWeightClass(value))) throw new Error("weight categories must use valid IJF senior men's weight classes");
   }
 }
 
