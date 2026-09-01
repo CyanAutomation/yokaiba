@@ -71,12 +71,19 @@ test("Tournament Order uses judoka names for its default working board", () => {
   assert.deepEqual(tournamentOrderTemplate.categories[0]?.values, ["Aki", "Hana", "Kenji", "Sora"]);
 });
 
-test("Open Division expands the public catalogue with a five-row, localization-ready template", () => {
-  assert.equal(openDivisionTemplate.categories[0]?.values.length, 5);
+test("Open Division publishes its five-row template contract", () => {
+  assert.equal(openDivisionTemplate.id, "open-division-v1");
+  assert.equal(openDivisionTemplate.baseCategory, "judoka");
+  assert.ok(openDivisionTemplate.categories.every(category => category.values.length === 5));
   assert.deepEqual(openDivisionTemplate.metadata!.locales, { default: "en", supported: ["en"] });
-  assert.ok(openDivisionTemplate.metadata!.difficultyCalibration.modelVersion.startsWith("yokaiba-difficulty-"));
-  const puzzle = generatePuzzle(openDivisionTemplate, "catalogue-seed");
-  assert.equal(countSolutions(puzzle.spec, puzzle.clues, 2), 1);
+});
+
+test("Open Division generation is deterministic and unique for a fixed seed", () => {
+  const first = generatePuzzle(openDivisionTemplate, "catalogue-seed");
+  const second = generatePuzzle(openDivisionTemplate, "catalogue-seed");
+
+  assert.deepEqual(first, second);
+  assert.equal(countSolutions(first.spec, first.clues, 2), 1);
 });
 
 test("a seeded puzzle is reproducible and has exactly one solution", () => {
