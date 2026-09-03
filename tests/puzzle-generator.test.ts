@@ -192,6 +192,14 @@ test("targeted difficulty never substitutes a different seed", () => {
   assert.throws(() => generatePuzzleAtDifficulty(twoRowTemplate, "strict-seed", 5), DifficultyUnavailableError);
 });
 
+test("the beginner curriculum can generate every calibrated difficulty from one seed", () => {
+  for (const level of [1, 2, 3, 4] as const) {
+    const puzzle = generatePuzzleAtDifficulty(tournamentOrderTemplate, "curriculum-ready", level);
+    assert.equal(puzzle.seed, "curriculum-ready");
+    assert.equal(puzzle.difficulty.level, level);
+  }
+});
+
 test("difficulty corpus audit is deterministic and reports human-trace coverage", () => {
   const first = auditDifficultyCorpus(tournamentOrderTemplate, { seedPrefix: "audit-fixture", sampleSize: 12 });
   const second = auditDifficultyCorpus(tournamentOrderTemplate, { seedPrefix: "audit-fixture", sampleSize: 12 });
