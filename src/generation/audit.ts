@@ -6,7 +6,7 @@ export interface DifficultyCorpusAudit {
   modelVersion: string;
   sampleSize: number;
   seedPrefix: string;
-  levelCounts: [number, number, number, number, number];
+  levelCounts: number[];
   humanTrace: { complete: number; incomplete: number };
   clues: { average: number; minimum: number; maximum: number };
 }
@@ -21,7 +21,7 @@ export function auditDifficultyCorpus(template: PuzzleTemplate, options: { sampl
   const seedPrefix = options.seedPrefix ?? "difficulty-audit";
   if (!Number.isInteger(sampleSize) || sampleSize < 1) throw new RangeError("sampleSize must be a positive integer");
 
-  const levelCounts: [number, number, number, number, number] = [0, 0, 0, 0, 0];
+  const levelCounts = Array<number>(12).fill(0);
   let complete = 0;
   let clueTotal = 0;
   let minimum = Infinity;

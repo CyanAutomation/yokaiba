@@ -23,12 +23,15 @@ export interface TemplateMetadata {
 /** Per-template thresholds make future puzzle families independently calibratable. */
 export interface DifficultyCalibration {
   modelVersion: string;
-  /** Inclusive upper bounds for levels 1–4; values above the fourth bound are level 5. */
-  scoreThresholds: [number, number, number, number];
+  /** Inclusive upper bounds for every level except the final level in this template's range. */
+  scoreThresholds: number[];
+  /** Inclusive global difficulty levels this template is calibrated to produce. */
+  levelRange: [DifficultyLevel, DifficultyLevel];
   corpus: { sampleSize: number; methodology: string };
 }
 
 export type PuzzleSpec = PuzzleTemplate;
+export type DifficultyLevel = 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8 | 9 | 10 | 11 | 12;
 
 export type ClueConstraint =
   | { kind: "matches"; subject: string; category: string; value: string }
@@ -62,8 +65,8 @@ export interface Solution {
 
 /** Public, deterministic difficulty assessment for the current puzzle. */
 export interface Difficulty {
-  level: 1 | 2 | 3 | 4 | 5;
-  label: "Very easy" | "Easy" | "Moderate" | "Hard" | "Very hard";
+  level: DifficultyLevel;
+  label: string;
   modelVersion: string;
   /** Stable inputs used to classify this puzzle; timings are deliberately excluded. */
   evidence: {
