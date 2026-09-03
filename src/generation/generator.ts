@@ -1,11 +1,11 @@
-import type { Clue, GeneratedPuzzle, PuzzleTemplate, Solution } from "../domain/types.js";
+import type { Clue, DifficultyLevel, GeneratedPuzzle, PuzzleTemplate, Solution } from "../domain/types.js";
 import type { PuzzleSolver } from "../domain/puzzle-solver.js";
 import { exhaustivePuzzleSolver } from "../constraints/solver.js";
 import { assessPuzzleDifficulty } from "./quality.js";
 import { isIjfSeniorMensWeightClass } from "../domain/ijf-weight-classes.js";
 import { renderClues } from "./clue-text.js";
 
-export const GENERATOR_VERSION = "yokaiba-generator-v3";
+export const GENERATOR_VERSION = "yokaiba-generator-v4";
 /** Version of the built-in solver used when callers do not provide one. */
 export const SOLVER_VERSION = exhaustivePuzzleSolver.version;
 
@@ -136,7 +136,7 @@ function relationalCandidates(template: PuzzleTemplate, solution: Solution, next
 }
 
 export interface GenerationOptions {
-  difficultyLevel?: 1 | 2 | 3 | 4 | 5;
+  difficultyLevel?: DifficultyLevel;
   /** Selects a deterministic clue strategy without changing the puzzle seed. */
   strategy?: number;
 }
@@ -207,7 +207,7 @@ export function generatePuzzle(template: PuzzleTemplate, seed: string, solver: P
  * Construct from one stable solution seed and explore deterministic clue-order
  * strategies. A target is unavailable rather than silently changing the seed.
  */
-export function generatePuzzleAtDifficulty(template: PuzzleTemplate, seed: string, difficultyLevel: 1 | 2 | 3 | 4 | 5, solver: PuzzleSolver = exhaustivePuzzleSolver): GeneratedPuzzle {
+export function generatePuzzleAtDifficulty(template: PuzzleTemplate, seed: string, difficultyLevel: DifficultyLevel, solver: PuzzleSolver = exhaustivePuzzleSolver): GeneratedPuzzle {
   for (let strategy = 0; strategy < 64; strategy += 1) {
     const candidate = generatePuzzle(template, seed, solver, { difficultyLevel, strategy });
     if (candidate.difficulty.level === difficultyLevel) {

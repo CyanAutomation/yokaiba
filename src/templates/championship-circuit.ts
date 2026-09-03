@@ -15,8 +15,9 @@ export const championshipCircuitTemplate: PuzzleTemplate = {
   metadata: {
     locales: { default: "en", supported: ["en"] },
     difficultyCalibration: {
-      modelVersion: "yokaiba-difficulty-v3",
-      scoreThresholds: [78, 88, 101, 116],
+      modelVersion: "yokaiba-difficulty-v4",
+      scoreThresholds: [145, 157, 168],
+      levelRange: [9, 12],
       corpus: { sampleSize: 1_000, methodology: "Seeded corpus scored with a deterministic deduction trace and solver telemetry." },
     },
   },
