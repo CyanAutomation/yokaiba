@@ -49,6 +49,10 @@ export interface Clue {
   id: string;
   constraint: ClueConstraint;
   text: string;
+  /** Stable renderer choice, allowing a puzzle's prose to be replayed exactly. */
+  phraseVariant?: string;
+  /** Version of the phrase catalogue used to render this clue. */
+  languageVersion?: string;
 }
 
 /** A complete hidden assignment. Each non-base category maps row index to value. */

@@ -3,8 +3,9 @@ import type { PuzzleSolver } from "../domain/puzzle-solver.js";
 import { exhaustivePuzzleSolver } from "../constraints/solver.js";
 import { assessPuzzleDifficulty } from "./quality.js";
 import { isIjfSeniorMensWeightClass } from "../domain/ijf-weight-classes.js";
+import { renderClues } from "./clue-text.js";
 
-export const GENERATOR_VERSION = "yokaiba-generator-v2";
+export const GENERATOR_VERSION = "yokaiba-generator-v3";
 /** Version of the built-in solver used when callers do not provide one. */
 export const SOLVER_VERSION = exhaustivePuzzleSolver.version;
 
@@ -47,30 +48,6 @@ function makeSolution(template: PuzzleTemplate, next: () => number): Solution {
   };
 }
 
-function directText(subject: string, categoryId: string, value: string) {
-  if (categoryId === "weight") return `${subject} fought in the ${value} division.`;
-  if (categoryId === "tatami") return `${subject} competed on ${value}.`;
-  if (categoryId === "placing") return `${subject} finished ${value}.`;
-  if (categoryId === "medal") return `${subject} earned ${value}.`;
-  return `${subject}'s ${categoryId.replace(/([A-Z])/g, " $1").toLowerCase()} was ${value}.`;
-}
-
-function negativeText(subject: string, categoryId: string, value: string) {
-  if (categoryId === "weight") return `${subject} did not fight in the ${value} division.`;
-  if (categoryId === "tatami") return `${subject} was not scheduled on ${value}.`;
-  if (categoryId === "placing") return `${subject} did not finish ${value}.`;
-  if (categoryId === "medal") return `${subject} did not earn ${value}.`;
-  return `${subject}'s ${categoryId.replace(/([A-Z])/g, " $1").toLowerCase()} was not ${value}.`;
-}
-
-function sameRowText(leftValue: string, rightCategoryId: string, rightValue: string) {
-  if (rightCategoryId === "tatami") return `The ${leftValue} competitor fought on ${rightValue}.`;
-  if (rightCategoryId === "medal") return `The ${leftValue} competitor earned ${rightValue}.`;
-  if (rightCategoryId === "placing") return `The ${leftValue} competitor finished ${rightValue}.`;
-  if (rightCategoryId === "weight") return `The competitor on ${leftValue} fought in the ${rightValue} division.`;
-  return `The competitor with ${leftValue} had ${rightValue} for ${rightCategoryId.replace(/([A-Z])/g, " $1").toLowerCase()}.`;
-}
-
 function directCandidates(template: PuzzleTemplate, solution: Solution, next: () => number): Clue[] {
   const base = template.categories.find(category => category.id === template.baseCategory)!;
   const candidates: Clue[] = [];
@@ -81,7 +58,7 @@ function directCandidates(template: PuzzleTemplate, solution: Solution, next: ()
       candidates.push({
         id: `matches-${category.id}-${row}`,
         constraint: { kind: "matches", subject, category: category.id, value },
-        text: directText(subject, category.id, value),
+        text: "",
       });
     }
   }
@@ -105,7 +82,7 @@ function relationalCandidates(template: PuzzleTemplate, solution: Solution, next
       candidates.push({
         id: `not-matches-${category.id}-${row}`,
         constraint: { kind: "notMatches", subject: base.values[row], category: category.id, value },
-        text: negativeText(base.values[row], category.id, value),
+        text: "",
       });
     }
     if (!category.ordered) continue;
@@ -116,13 +93,13 @@ function relationalCandidates(template: PuzzleTemplate, solution: Solution, next
         candidates.push({
           id: `before-${category.id}-${leftRow}-${rightRow}`,
           constraint: { kind: "before", left, right },
-          text: `In the ${template.title.toLowerCase()}, ${left.value} came before ${right.value}.`,
+          text: "",
         });
         if (rightRow === leftRow + 1) {
           candidates.push({
             id: `adjacent-${category.id}-${leftRow}-${rightRow}`,
             constraint: { kind: "adjacent", left, right },
-          text: `${left.value} and ${right.value} were consecutive in the ${template.title.toLowerCase()}.`,
+          text: "",
           });
         }
       }
@@ -141,7 +118,7 @@ function relationalCandidates(template: PuzzleTemplate, solution: Solution, next
         candidates.push({
           id: `same-row-${leftCategory.id}-${rightCategory.id}-${row}`,
           constraint: { kind: "sameRow", left, right },
-          text: sameRowText(left.value, rightCategory.id, right.value),
+          text: "",
         });
         for (let otherRow = row + 1; otherRow < base.values.length; otherRow += 1) {
           const distance = otherRow - row;
@@ -149,7 +126,7 @@ function relationalCandidates(template: PuzzleTemplate, solution: Solution, next
           candidates.push({
             id: `distance-${leftCategory.id}-${rightCategory.id}-${row}-${otherRow}`,
             constraint: { kind: "distance", left, right: distantRight, distance },
-            text: `${left.value} and ${distantRight.value} were ${distance} ${distance === 1 ? "place" : "places"} apart.`,
+            text: "",
           });
         }
       }
@@ -162,6 +139,14 @@ export interface GenerationOptions {
   difficultyLevel?: 1 | 2 | 3 | 4 | 5;
   /** Selects a deterministic clue strategy without changing the puzzle seed. */
   strategy?: number;
+}
+
+/** A requested difficulty cannot be met for this seed using any allowed clue order. */
+export class DifficultyUnavailableError extends Error {
+  constructor(templateId: string, seed: string, level: number) {
+    super(`difficulty level ${level} is unavailable for template ${templateId} and seed ${seed}`);
+    this.name = "DifficultyUnavailableError";
+  }
 }
 
 function prioritizeForDifficulty(candidates: readonly Clue[], difficultyLevel: GenerationOptions["difficultyLevel"], next: () => number) {
@@ -212,7 +197,7 @@ export function generatePuzzle(template: PuzzleTemplate, seed: string, solver: P
     generatorVersion: GENERATOR_VERSION,
     solverVersion: solver.version,
     spec: template,
-    clues: selected,
+    clues: renderClues(template, seed, selected),
     difficulty: assessPuzzleDifficulty(template, selected),
     solution,
   };
@@ -220,8 +205,7 @@ export function generatePuzzle(template: PuzzleTemplate, seed: string, solver: P
 
 /**
  * Construct from one stable solution seed and explore deterministic clue-order
- * strategies. This targets difficulty without silently substituting a caller's
- * seed for a different puzzle identity.
+ * strategies. A target is unavailable rather than silently changing the seed.
  */
 export function generatePuzzleAtDifficulty(template: PuzzleTemplate, seed: string, difficultyLevel: 1 | 2 | 3 | 4 | 5, solver: PuzzleSolver = exhaustivePuzzleSolver): GeneratedPuzzle {
   for (let strategy = 0; strategy < 64; strategy += 1) {
@@ -230,15 +214,5 @@ export function generatePuzzleAtDifficulty(template: PuzzleTemplate, seed: strin
       return { ...candidate, requestedDifficultyLevel: difficultyLevel, generationStrategy: strategy };
     }
   }
-  // Some small boards have no subset in a requested score band for one fixed
-  // solution. Preserve the caller's identity while using the historical seed
-  // search only as a bounded compatibility fallback.
-  for (let attempt = 0; attempt < 128; attempt += 1) {
-    const candidateSeed = `${seed}:difficulty:${difficultyLevel}:${attempt}`;
-    const candidate = generatePuzzle(template, candidateSeed, solver);
-    if (candidate.difficulty.level === difficultyLevel) {
-      return { ...candidate, requestedSeed: seed, requestedDifficultyLevel: difficultyLevel, generationStrategy: attempt };
-    }
-  }
-  throw new Error("requested difficulty is unavailable");
+  throw new DifficultyUnavailableError(template.id, seed, difficultyLevel);
 }
