@@ -169,7 +169,7 @@ components:
       in: query
       required: false
       description: Selects a reproducible puzzle at this assessed difficulty without changing the supplied seed. Returns 422 when none of the deterministic clue strategies for that seed meets the requested level.
-      schema: { type: integer, minimum: 1, maximum: 5 }
+      schema: { type: integer, minimum: 1, maximum: 12 }
     IfNoneMatch:
       name: If-None-Match
       in: header
@@ -286,7 +286,7 @@ components:
       properties:
         templateId: { type: string, minLength: 1, maxLength: 128 }
         seed: { type: string, minLength: 1, maxLength: 128 }
-        difficultyLevel: { type: integer, minimum: 1, maximum: 5 }
+        difficultyLevel: { type: integer, minimum: 1, maximum: 12 }
     Constraint:
       type: object
       required: [kind]
@@ -325,7 +325,7 @@ components:
         id: { type: string }
         requestedSeed: { type: string, description: The seed provided by the caller. }
         seed: { type: string }
-        requestedDifficultyLevel: { type: integer, minimum: 1, maximum: 5 }
+        requestedDifficultyLevel: { type: integer, minimum: 1, maximum: 12 }
         templateId: { type: string }
         generatorVersion: { type: string }
         solverVersion: { type: string }
@@ -340,9 +340,9 @@ components:
       type: object
       required: [level, label, modelVersion, evidence]
       properties:
-        level: { type: integer, minimum: 1, maximum: 5 }
-        label: { type: string, enum: [Very easy, Easy, Moderate, Hard, Very hard] }
-        modelVersion: { type: string, example: yokaiba-difficulty-v3 }
+        level: { type: integer, minimum: 1, maximum: 12 }
+        label: { type: string }
+        modelVersion: { type: string, example: yokaiba-difficulty-v4 }
         evidence:
           type: object
           required: [score, humanSolve, clueStructure, solver]
