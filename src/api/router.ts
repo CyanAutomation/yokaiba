@@ -1,4 +1,4 @@
-import { GENERATOR_VERSION, generatePuzzle, generatePuzzleAtDifficulty, SOLVER_VERSION } from "../generation/generator.js";
+import { DifficultyUnavailableError, GENERATOR_VERSION, generatePuzzle, generatePuzzleAtDifficulty, SOLVER_VERSION } from "../generation/generator.js";
 import { issuePuzzleToken, verifyPuzzleToken } from "./puzzle-token.js";
 import type { Difficulty, GeneratedPuzzle, PuzzleSpec, PuzzleTemplate, Solution } from "../domain/types.js";
 import { scenarioSummary } from "../catalogue.js";
@@ -107,6 +107,11 @@ function sameSolution(left: Solution, right: Solution): boolean {
   return categories.length === Object.keys(right.assignments).length && categories.every(category => left.assignments[category].length === right.assignments[category]?.length && left.assignments[category].every((value, index) => value === right.assignments[category][index]));
 }
 
+/** v3 changes rendered prose only; a v2 token recreates the identical solution. */
+function supportsTokenGeneratorVersion(tokenVersion: string, generatedVersion: string) {
+  return tokenVersion === generatedVersion || (tokenVersion === "yokaiba-generator-v2" && generatedVersion === "yokaiba-generator-v3");
+}
+
 async function verificationRequest(request: Request) {
   const body = await readJsonBody(request);
   if (!body || typeof body !== "object" || Array.isArray(body)) throw new TypeError("request body must be an object");
@@ -140,7 +145,7 @@ export function createRestRouter(templates: readonly PuzzleTemplate[], options: 
         const puzzle = token.requestedDifficultyLevel === undefined
           ? generatePuzzle(template, token.seed)
           : generatePuzzleAtDifficulty(template, token.seed, token.requestedDifficultyLevel);
-        if (puzzle.generatorVersion !== token.generatorVersion || puzzle.solverVersion !== token.solverVersion) throw new TypeError("puzzleToken references an unsupported puzzle version");
+        if (!supportsTokenGeneratorVersion(token.generatorVersion, puzzle.generatorVersion) || puzzle.solverVersion !== token.solverVersion) throw new TypeError("puzzleToken references an unsupported puzzle version");
         return json({ correct: sameSolution(puzzle.solution, validateAnswer(puzzle.spec, answer)) });
       } catch (error) {
         return json({ error: { code: "bad_request", message: error instanceof Error ? error.message : "invalid request" } }, 400);
@@ -154,6 +159,7 @@ export function createRestRouter(templates: readonly PuzzleTemplate[], options: 
         return json(await publicPuzzle(generateAtDifficulty(template, seed, difficultyLevel), options.puzzleTokenSecret), 200,
           request.method === "GET" ? { "cache-control": GENERATED_PUZZLE_CACHE_CONTROL } : undefined);
       } catch (error) {
+        if (error instanceof DifficultyUnavailableError) return json({ error: { code: "difficulty_unavailable", message: error.message } }, 422);
         return json({ error: { code: "bad_request", message: error instanceof Error ? error.message : "invalid request" } }, 400);
       }
     }
