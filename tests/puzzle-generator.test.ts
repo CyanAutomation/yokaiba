@@ -142,8 +142,25 @@ test("generated clue prose is natural and avoids implementation phrasing", () =>
 
   assert.ok(puzzle.clues.every(clue => !/associated with|entry associated/i.test(clue.text)));
   assert.ok(puzzle.clues.some(clue => /finished|fought|competed|bout|places?/i.test(clue.text)));
-  assert.ok(puzzle.clues.every(clue => clue.languageVersion === "yokaiba-clue-prose-v1"));
+  assert.ok(puzzle.clues.every(clue => clue.languageVersion === "yokaiba-clue-prose-v2"));
   assert.ok(puzzle.clues.every(clue => typeof clue.phraseVariant === "string"));
+});
+
+test("direct clues keep the competitor as the grammatical subject", () => {
+  const clues: Clue[] = [
+    { id: "aki-weight", constraint: { kind: "matches", subject: "Aki", category: "weight", value: "-66 kg" }, text: "" },
+    { id: "hana-tatami", constraint: { kind: "matches", subject: "Hana", category: "tatami", value: "Tatami 2" }, text: "" },
+    { id: "kenji-placing", constraint: { kind: "matches", subject: "Kenji", category: "placing", value: "1st" }, text: "" },
+  ];
+
+  const rendered = renderClues(tournamentOrderTemplate, "subject-first", clues).map(clue => clue.text);
+
+  assert.deepEqual(rendered, [
+    "Aki fought in the -66 kg division.",
+    "Hana competed on Tatami 2.",
+    "Kenji finished in 1st place.",
+  ]);
+  assert.ok(rendered.every(clue => !/\bfor\s+(Aki|Hana|Kenji)\./.test(clue)));
 });
 
 test("clue rendering is deterministic and rotates phrase variants within a puzzle", () => {
