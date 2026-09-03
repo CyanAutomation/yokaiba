@@ -404,6 +404,7 @@ test("OpenAPI documents every public REST endpoint", async () => {
   assert.match(specification, /'304':/);
   assert.match(specification, /DifficultyUnavailable:/);
   assert.match(specification, /phraseVariant:/);
+  assert.match(specification, /scoreThresholds: \{ type: array, minItems: 3, maxItems: 3, items: \{ type: number \} \}/);
 });
 
 test("REST generation redacts the hidden solution and includes reproducibility metadata", async () => {
@@ -596,13 +597,20 @@ test("REST does not disclose why a JSON request body was rejected", async () => 
 
 test("version and readiness expose deployed build and rate-limit configuration", async () => {
   const isolatedWorker = createWorker({ rateLimiter: () => false });
-  const env = { BUILD_VERSION: "0.1.0-test", BUILD_SHA: "deadbeef", REST_RATE_LIMITER: { limit: async () => ({ success: true }) } };
+  const env = {
+    BUILD_VERSION: "0.1.0-test", BUILD_SHA: "deadbeef",
+    REST_RATE_LIMITER: { limit: async () => ({ success: true }) },
+    VERIFY_RATE_LIMITER: { limit: async () => ({ success: true }) },
+  };
   const version = await isolatedWorker.fetch(new Request("https://yokaiba.test/v1/version"), env, {} as ExecutionContext);
   assert.deepEqual(await version.json(), {
     serviceVersion: "0.1.0-test", buildSha: "deadbeef", generatorVersion: "yokaiba-generator-v4", solverVersion: "yokaiba-exhaustive-v1",
   });
   const ready = await isolatedWorker.fetch(new Request("https://yokaiba.test/readyz"), env, {} as ExecutionContext);
-  assert.deepEqual(await ready.json(), { status: "ready", build: { serviceVersion: "0.1.0-test", buildSha: "deadbeef" }, rateLimitProvider: "configured" });
+  assert.deepEqual(await ready.json(), {
+    status: "ready", build: { serviceVersion: "0.1.0-test", buildSha: "deadbeef" },
+    rateLimitProvider: "configured", verifyRateLimitProvider: "configured",
+  });
 });
 
 test("solver handles the maximum supported row count", () => {
@@ -721,7 +729,10 @@ test("worker falls back to local REST rate limiting when the provider fails", as
   assert.equal(limited.headers.get("retry-after"), "60");
   assert.equal(limited.headers.get("ratelimit-remaining"), "0");
   const ready = await isolatedWorker.fetch(new Request("https://yokaiba.test/readyz"), env, {} as ExecutionContext);
-  assert.equal((await ready.json() as { rateLimitProvider: string }).rateLimitProvider, "fallback");
+  assert.deepEqual(await ready.json(), {
+    status: "ready", build: { serviceVersion: "0.1.0", buildSha: "local" },
+    rateLimitProvider: "fallback", verifyRateLimitProvider: "fallback",
+  });
 });
 
 test("worker allows supported CORS preflight headers", async () => {
@@ -800,6 +811,14 @@ test("worker returns an ETag and honors conditional public GETs", async () => {
   assert.equal(second.status, 304);
 });
 
+test("worker gives scenario discovery and version metadata explicit cache policies", async () => {
+  const scenarios = await worker.fetch(new Request("https://yokaiba.test/v1/scenarios"), {}, {} as ExecutionContext);
+  assert.equal(scenarios.headers.get("cache-control"), "public, max-age=300, s-maxage=300, must-revalidate");
+
+  const version = await worker.fetch(new Request("https://yokaiba.test/v1/version"), {}, {} as ExecutionContext);
+  assert.equal(version.headers.get("cache-control"), "no-cache");
+});
+
 test("worker directs the API root to the interactive documentation", async () => {
   const response = await worker.fetch(new Request("https://yokaiba.test/"), {}, {} as ExecutionContext);
 
@@ -818,6 +837,25 @@ test("worker applies a tighter best-effort limit to answer verification", async 
   });
   assert.equal((await isolatedWorker.fetch(request(), env, {} as ExecutionContext)).status, 400);
   assert.equal((await isolatedWorker.fetch(request(), env, {} as ExecutionContext)).status, 429);
+});
+
+test("worker uses the dedicated provider binding for answer verification", async () => {
+  const providerKeys: string[] = [];
+  const isolatedWorker = createWorker({ rateLimiter: () => { throw new Error("local fallback should not run"); } });
+  const env = {
+    PUZZLE_TOKEN_SECRET: "test-token-secret",
+    REST_RATE_LIMITER: { limit: async () => ({ success: true }) },
+    VERIFY_RATE_LIMITER: { limit: async ({ key }: { key: string }) => { providerKeys.push(key); return { success: true }; } },
+  };
+  const response = await isolatedWorker.fetch(new Request("https://yokaiba.test/v1/puzzles/verify", {
+    method: "POST",
+    headers: { "content-type": "application/json", "cf-connecting-ip": "192.0.2.94" },
+    body: JSON.stringify({ puzzleToken: "invalid", answer: {} }),
+  }), env, {} as ExecutionContext);
+
+  assert.equal(response.status, 400);
+  assert.deepEqual(providerKeys, ["192.0.2.94:/v1/puzzles/verify"]);
+  assert.equal(response.headers.get("ratelimit-remaining"), null);
 });
 
 test("worker serves self-hosted Swagger UI with complete security controls", async () => {
