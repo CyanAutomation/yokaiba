@@ -77,7 +77,21 @@ curl -X POST http://localhost:8787/v1/puzzles/generate \
 
 `templateId` and `seed` must be non-empty strings of at most 128 characters. Every response includes `X-Request-Id`, which is also included in Worker logs.
 
-Generated puzzles include `difficulty` (`level` 1–5, label, model identifier, and deterministic evidence). Each template publishes its locale metadata and its own 1,000-seed calibration strategy. Difficulty combines the deduction trace, relational/cross-category clue structure, and deterministic solver telemetry; retain `modelVersion` and `evidence` when recording scores. When `difficultyLevel` is supplied, generation first searches deterministic clue-order strategies for the requested seed. `requestedSeed` always preserves the caller input; `seed` is the replay identifier if a bounded compatibility fallback is required.
+Generated puzzles include `difficulty` (`level` 1–5, label, model identifier, and deterministic evidence). Each template publishes its locale metadata and its own 1,000-seed calibration strategy. Difficulty combines the deduction trace, relational/cross-category clue structure, and deterministic solver telemetry; retain `modelVersion` and `evidence` when recording scores. The no-guess trace is an engineering diagnostic, not a substitute for player research.
+
+When `difficultyLevel` is supplied, generation searches deterministic clue-order strategies for that exact seed. It never substitutes another seed: if no strategy reaches the requested band, the API returns `422` with `difficulty_unavailable`.
+
+Clues retain their semantic constraint while their surface text is rendered from a deterministic English phrase catalogue. `phraseVariant` and `languageVersion` are returned with every clue, so the wording is reproducible and can be audited independently of puzzle logic.
+
+### Difficulty audit and calibration
+
+Run the deterministic corpus audit before a release or after changing templates, clue selection, or scoring:
+
+```sh
+npm run audit:difficulty -- 1000
+```
+
+The report includes per-level counts, clue-count range, and completion of the bounded no-guess trace for every template. Treat it as a regression gate, not evidence of player difficulty. For player validation, record anonymized `puzzle_started`, `puzzle_completed`, `hint_used`, `mistake`, and `puzzle_abandoned` events with `templateId`, `seed`, requested/assessed difficulty, generator version, solver version, difficulty model version, elapsed time, and clue count. Recalibrate template-specific thresholds on a held-out player sample, version the model, and retain historic metadata with every outcome.
 
 They also include a **signed** `puzzleToken` when `PUZZLE_TOKEN_SECRET` is configured. The token payload is base64url-encoded, readable reproducibility metadata (including the seed), followed by an HMAC signature. It protects against tampering; it does not encrypt the seed, hide the puzzle solution from a determined caller, or make public deterministic puzzles cheat-proof. Keep it with the puzzle in the browser and submit only the player’s completed non-base category assignments:
 

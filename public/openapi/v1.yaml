@@ -105,6 +105,7 @@ paths:
         '304': { $ref: '#/components/responses/NotModified' }
         '400': { $ref: '#/components/responses/BadRequest' }
         '404': { $ref: '#/components/responses/NotFound' }
+        '422': { $ref: '#/components/responses/DifficultyUnavailable' }
         '429': { $ref: '#/components/responses/RateLimited' }
     post:
       summary: Generate a deterministic puzzle from a JSON request
@@ -126,6 +127,7 @@ paths:
               schema: { $ref: '#/components/schemas/GeneratedPuzzle' }
         '400': { $ref: '#/components/responses/BadRequest' }
         '404': { $ref: '#/components/responses/NotFound' }
+        '422': { $ref: '#/components/responses/DifficultyUnavailable' }
         '429': { $ref: '#/components/responses/RateLimited' }
   /v1/puzzles/verify:
     post:
@@ -166,7 +168,7 @@ components:
       name: difficultyLevel
       in: query
       required: false
-      description: Selects a reproducible puzzle at this assessed difficulty. requestedSeed remains the caller value; seed identifies the generated replay.
+      description: Selects a reproducible puzzle at this assessed difficulty without changing the supplied seed. Returns 422 when none of the deterministic clue strategies for that seed meets the requested level.
       schema: { type: integer, minimum: 1, maximum: 5 }
     IfNoneMatch:
       name: If-None-Match
@@ -193,6 +195,10 @@ components:
       content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } }
     NotFound:
       description: Unknown route or template
+      headers: { X-Request-Id: { $ref: '#/components/headers/RequestId' } }
+      content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } }
+    DifficultyUnavailable:
+      description: The requested seed has no clue strategy in the requested difficulty band.
       headers: { X-Request-Id: { $ref: '#/components/headers/RequestId' } }
       content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } }
     NotModified:
@@ -294,6 +300,8 @@ components:
         id: { type: string }
         constraint: { $ref: '#/components/schemas/Constraint' }
         text: { type: string }
+        phraseVariant: { type: string, description: Deterministic phrase-catalogue choice for exact replay. }
+        languageVersion: { type: string, description: Version of the clue phrase catalogue. }
     Category:
       type: object
       required: [id, label, values]
