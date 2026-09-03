@@ -149,7 +149,7 @@ export class DifficultyUnavailableError extends Error {
   }
 }
 
-function prioritizeForDifficulty(candidates: readonly Clue[], difficultyLevel: GenerationOptions["difficultyLevel"], next: () => number) {
+function prioritizeForDifficulty(candidates: readonly Clue[], difficultyLevel: GenerationOptions["difficultyLevel"], next: () => number, strategy = 0) {
   const shuffledCandidates = shuffled(candidates, next);
   if (!difficultyLevel) return shuffledCandidates;
   const eligibleCandidates = difficultyLevel >= 4
@@ -157,7 +157,17 @@ function prioritizeForDifficulty(candidates: readonly Clue[], difficultyLevel: G
     : shuffledCandidates;
   const weight = (clue: Clue) => {
     const kind = clue.constraint.kind;
-    if (difficultyLevel <= 2) return kind === "matches" ? 0 : kind === "notMatches" ? 1 : 2;
+    if (difficultyLevel === 1) return kind === "matches" ? 0 : kind === "notMatches" ? 1 : 2;
+    if (difficultyLevel === 2) {
+      // Search distinct clue-family orderings. A single ordering cannot reach
+      // the full calibrated band after redundant clues have been removed.
+      const family = kind === "matches" ? 0 : kind === "notMatches" ? 1 : 2;
+      const profiles = [
+        [0, 1, 2], [0, 2, 1], [1, 0, 2],
+        [1, 2, 0], [2, 0, 1], [2, 1, 0],
+      ];
+      return profiles[strategy % profiles.length]![family]!;
+    }
     if (difficultyLevel === 3) return kind === "matches" ? 1 : kind === "notMatches" ? 2 : 0;
     return kind === "matches" ? 3 : kind === "notMatches" ? 2 : kind === "sameRow" || kind === "distance" ? 0 : 1;
   };
@@ -179,6 +189,7 @@ export function generatePuzzle(template: PuzzleTemplate, seed: string, solver: P
     [...directCandidates(template, solution, next), ...relationalCandidates(template, solution, next)],
     options.difficultyLevel,
     random(`${template.id}:${seed}:strategy:${options.strategy ?? 0}`),
+    options.strategy ?? 0,
   );
   for (const clue of candidates) {
     if (solver.countSolutions(template, selected, 2) === 1) break;
