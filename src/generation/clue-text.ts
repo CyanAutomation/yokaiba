@@ -1,6 +1,6 @@
 import type { Clue, ClueConstraint, PuzzleTemplate } from "../domain/types.js";
 
-export const CLUE_LANGUAGE_VERSION = "yokaiba-clue-prose-v1";
+export const CLUE_LANGUAGE_VERSION = "yokaiba-clue-prose-v2";
 
 function hash(value: string): number {
   let result = 2166136261;
@@ -19,7 +19,7 @@ function termSubject(categoryId: string, value: string) {
 function subjectAction(categoryId: string, value: string) {
   if (categoryId === "weight") return `fought in the ${value} division`;
   if (categoryId === "tatami") return `competed on ${value}`;
-  if (categoryId === "placing") return `finished ${value}`;
+  if (categoryId === "placing") return `finished in ${value} place`;
   if (categoryId === "medal") return `earned ${value}`;
   return `had ${value}`;
 }
@@ -42,7 +42,7 @@ function chooseVariant(seed: string, clue: Clue, count: number, previousFamily?:
 function renderConstraint(template: PuzzleTemplate, constraint: ClueConstraint, index: number): string {
   if (constraint.kind === "matches") {
     const action = subjectAction(constraint.category, constraint.value);
-    return index === 0 ? `${constraint.subject} ${action}.` : `${action[0]!.toUpperCase()}${action.slice(1)} for ${constraint.subject}.`;
+    return `${constraint.subject} ${action}.`;
   }
   if (constraint.kind === "notMatches") {
     const action = negativeAction(constraint.category, constraint.value);
