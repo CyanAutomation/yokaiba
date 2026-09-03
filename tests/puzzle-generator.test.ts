@@ -773,6 +773,8 @@ test("worker adds CORS and request-ID headers to REST responses", async () => {
   assert.ok(response.headers.get("x-request-id"));
   assert.equal(response.headers.get("ratelimit-limit"), "60");
   assert.equal(response.headers.get("ratelimit-policy"), "60;w=60");
+  assert.equal(response.headers.get("ratelimit-remaining"), "59");
+  assert.match(response.headers.get("ratelimit-reset") ?? "", /^\d+$/);
 });
 
 test("worker exhausts the REST rate limit", async () => {
@@ -798,6 +800,14 @@ test("worker returns an ETag and honors conditional public GETs", async () => {
   assert.equal(second.status, 304);
 });
 
+test("worker directs the API root to the interactive documentation", async () => {
+  const response = await worker.fetch(new Request("https://yokaiba.test/"), {}, {} as ExecutionContext);
+
+  assert.equal(response.status, 302);
+  assert.equal(response.headers.get("location"), "https://yokaiba.test/docs");
+  assert.equal(response.headers.get("cache-control"), "no-store");
+});
+
 test("worker applies a tighter best-effort limit to answer verification", async () => {
   const isolatedWorker = createWorker();
   const env = { PUZZLE_TOKEN_SECRET: "test-token-secret", VERIFY_RATE_LIMIT: "1" };
@@ -810,16 +820,16 @@ test("worker applies a tighter best-effort limit to answer verification", async 
   assert.equal((await isolatedWorker.fetch(request(), env, {} as ExecutionContext)).status, 429);
 });
 
-test("worker serves Swagger UI with complete security controls", async () => {
+test("worker serves self-hosted Swagger UI with complete security controls", async () => {
   for (const path of ["/docs", "/docs/"]) {
     const docs = await worker.fetch(new Request(`https://yokaiba.test${path}`), {}, {} as ExecutionContext);
     assert.equal(docs.status, 200);
 
     const contentSecurityPolicy = docs.headers.get("content-security-policy") ?? "";
     assert.match(contentSecurityPolicy, /(?:^|; )default-src 'none'(?:;|$)/);
-    assert.match(contentSecurityPolicy, /(?:^|; )script-src 'self' 'unsafe-inline' https:\/\/unpkg\.com(?:;|$)/);
-    assert.match(contentSecurityPolicy, /(?:^|; )style-src 'self' 'unsafe-inline' https:\/\/unpkg\.com(?:;|$)/);
-    assert.match(contentSecurityPolicy, /(?:^|; )img-src 'self' data: https:(?:;|$)/);
+    assert.match(contentSecurityPolicy, /(?:^|; )script-src 'self' 'unsafe-inline'(?:;|$)/);
+    assert.match(contentSecurityPolicy, /(?:^|; )style-src 'self' 'unsafe-inline'(?:;|$)/);
+    assert.match(contentSecurityPolicy, /(?:^|; )img-src 'self' data:(?:;|$)/);
     assert.match(contentSecurityPolicy, /(?:^|; )connect-src 'self'(?:;|$)/);
     assert.match(contentSecurityPolicy, /(?:^|; )base-uri 'none'(?:;|$)/);
     assert.match(contentSecurityPolicy, /(?:^|; )frame-ancestors 'none'(?:;|$)/);
@@ -827,8 +837,16 @@ test("worker serves Swagger UI with complete security controls", async () => {
     assert.ok(docs.headers.get("x-request-id"));
 
     const docsDocument = await docs.text();
-    assert.match(docsDocument, /swagger-ui\.css" integrity="sha384-[A-Za-z0-9+/]+={0,2}" crossorigin="anonymous"/);
-    assert.match(docsDocument, /swagger-ui-bundle\.js" integrity="sha384-[A-Za-z0-9+/]+={0,2}" crossorigin="anonymous"/);
+    assert.match(docsDocument, /href="\/swagger-ui\/swagger-ui\.css"/);
+    assert.match(docsDocument, /src="\/swagger-ui\/swagger-ui-bundle\.js"/);
+    assert.doesNotMatch(docsDocument, /unpkg\.com/);
+  }
+});
+
+test("the self-hosted Swagger UI assets are included in the deployment bundle", async () => {
+  for (const path of ["../public/swagger-ui/swagger-ui.css", "../public/swagger-ui/swagger-ui-bundle.js"]) {
+    const asset = await readFile(new URL(path, import.meta.url), "utf8");
+    assert.ok(asset.length > 1_000);
   }
 });
 
@@ -838,7 +856,7 @@ test("worker delegates OpenAPI requests to the canonical asset path", async () =
   const assets = {
     fetch: async (request: Request) => {
       requestedUrls.push(request.url);
-      return new Response(expectedBody, { headers: { "content-type": "application/yaml" } });
+      return new Response(expectedBody, { headers: { "content-type": "text/yaml" } });
     },
   };
 
@@ -850,6 +868,6 @@ test("worker delegates OpenAPI requests to the canonical asset path", async () =
 
   assert.deepEqual(requestedUrls, ["https://yokaiba.test/openapi/v1.yaml"]);
   assert.equal(specification.status, 200);
-  assert.equal(specification.headers.get("content-type"), "application/yaml");
+  assert.equal(specification.headers.get("content-type"), "application/yaml; charset=utf-8");
   assert.equal(await specification.text(), expectedBody);
 });
