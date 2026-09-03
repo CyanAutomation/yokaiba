@@ -8,6 +8,7 @@
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "test": "node --import tsx --test tests/*.test.ts",
     "dev": "wrangler dev",
+    "audit:difficulty": "tsx scripts/audit-difficulty.mts",
     "deploy": "wrangler deploy"
   },
   "dependencies": {

@@ -6,6 +6,10 @@ import {
   exhaustivePuzzleSolver,
   evaluatePuzzleQuality,
   generatePuzzle,
+  generatePuzzleAtDifficulty,
+  DifficultyUnavailableError,
+  renderClues,
+  auditDifficultyCorpus,
   isIjfSeniorMensWeightClass,
   MAX_SUPPORTED_ROWS,
   satisfiesConstraint,
@@ -16,6 +20,7 @@ import {
   type PuzzleTemplate,
 } from "../src/index.js";
 import { championshipCircuitTemplate, createRestRouter, openDivisionTemplate, tournamentOrderTemplate } from "../src/index.js";
+import { issuePuzzleToken } from "../src/api/puzzle-token.js";
 import worker, { createRateLimiter, createWorker } from "../worker/index.js";
 
 const template: PuzzleTemplate = {
@@ -130,6 +135,48 @@ test("generated clue prose is natural and avoids implementation phrasing", () =>
 
   assert.ok(puzzle.clues.every(clue => !/associated with|entry associated/i.test(clue.text)));
   assert.ok(puzzle.clues.some(clue => /finished|fought|competed|bout|places?/i.test(clue.text)));
+  assert.ok(puzzle.clues.every(clue => clue.languageVersion === "yokaiba-clue-prose-v1"));
+  assert.ok(puzzle.clues.every(clue => typeof clue.phraseVariant === "string"));
+});
+
+test("clue rendering is deterministic and rotates phrase variants within a puzzle", () => {
+  const clues: Clue[] = [
+    { id: "weight-placing-one", constraint: { kind: "sameRow", left: { category: "weight", value: "-81 kg" }, right: { category: "placing", value: "2nd" } }, text: "" },
+    { id: "weight-placing-two", constraint: { kind: "sameRow", left: { category: "weight", value: "-73 kg" }, right: { category: "placing", value: "3rd" } }, text: "" },
+  ];
+
+  const first = renderClues(tournamentOrderTemplate, "prose-seed", clues);
+  const second = renderClues(tournamentOrderTemplate, "prose-seed", clues);
+
+  assert.deepEqual(first, second);
+  assert.match(first[0]!.text, /-81 kg/);
+  assert.match(first[0]!.text, /2nd/);
+  assert.match(first[1]!.text, /-73 kg/);
+  assert.match(first[1]!.text, /3rd/);
+  assert.notEqual(first[0]!.phraseVariant, first[1]!.phraseVariant);
+});
+
+test("targeted difficulty never substitutes a different seed", () => {
+  const twoRowTemplate: PuzzleTemplate = {
+    id: "two-row", title: "Two row", baseCategory: "person",
+    categories: [
+      { id: "person", label: "Person", values: ["Aki", "Ben"] },
+      { id: "color", label: "Color", values: ["Red", "Blue"] },
+    ],
+  };
+
+  assert.throws(() => generatePuzzleAtDifficulty(twoRowTemplate, "strict-seed", 5), DifficultyUnavailableError);
+});
+
+test("difficulty corpus audit is deterministic and reports human-trace coverage", () => {
+  const first = auditDifficultyCorpus(tournamentOrderTemplate, { seedPrefix: "audit-fixture", sampleSize: 12 });
+  const second = auditDifficultyCorpus(tournamentOrderTemplate, { seedPrefix: "audit-fixture", sampleSize: 12 });
+
+  assert.deepEqual(first, second);
+  assert.equal(first.sampleSize, 12);
+  assert.equal(first.levelCounts.reduce((total, count) => total + count, 0), 12);
+  assert.ok(first.humanTrace.incomplete >= 0);
+  assert.ok(first.clues.average > 0);
 });
 
 test("expert target generation favors relational deductions over direct facts", () => {
@@ -348,6 +395,8 @@ test("OpenAPI documents every public REST endpoint", async () => {
   assert.match(specification, /X-Request-Id:/);
   assert.match(specification, /Access-Control-Allow-Origin:/);
   assert.match(specification, /'304':/);
+  assert.match(specification, /DifficultyUnavailable:/);
+  assert.match(specification, /phraseVariant:/);
 });
 
 test("REST generation redacts the hidden solution and includes reproducibility metadata", async () => {
@@ -398,19 +447,23 @@ test("REST scenario catalogue includes category values needed to render a game",
   }]);
 });
 
-test("REST can deterministically select every calibrated difficulty level", async () => {
+test("REST reports unavailable difficulty without changing the requested seed", async () => {
   for (const template of [tournamentOrderTemplate, openDivisionTemplate]) {
     const route = createRestRouter([template]);
     for (const level of [1, 2, 3, 4, 5]) {
       const path = `https://yokaiba.test/v1/puzzles/generate?templateId=${template.id}&seed=level-picker&difficultyLevel=${level}`;
       const first = await route(new Request(path));
       const second = await route(new Request(path));
-      assert.equal(first.status, 200);
-      const firstBody = await first.json() as { seed: string; requestedSeed?: string };
+      assert.ok([200, 422].includes(first.status));
+      const firstBody = await first.json() as { seed?: string; requestedSeed?: string; difficulty?: { level: number }; error?: { code: string } };
       assert.deepEqual(firstBody, await second.json());
-      assert.equal(firstBody.requestedSeed, "level-picker");
-      const replay = await route(new Request(path));
-      assert.equal((await replay.json() as { difficulty: { level: number } }).difficulty.level, level);
+      if (first.status === 200) {
+        assert.equal(firstBody.seed, "level-picker");
+        assert.equal(firstBody.requestedSeed, "level-picker");
+        assert.equal(firstBody.difficulty?.level, level);
+      } else {
+        assert.equal(firstBody.error?.code, "difficulty_unavailable");
+      }
     }
   }
 });
@@ -438,6 +491,20 @@ test("REST verifies a complete submitted answer without exposing the solution", 
   }));
   assert.equal(incorrect.status, 200);
   assert.deepEqual(await incorrect.json(), { correct: false });
+});
+
+test("REST accepts a v2 token when verifying this prose-only generator upgrade", async () => {
+  const route = createRestRouter([tournamentOrderTemplate], { puzzleTokenSecret: "test-token-secret" });
+  const puzzle = generatePuzzle(tournamentOrderTemplate, "v2-token-compatibility");
+  const v2Token = await issuePuzzleToken({ ...puzzle, generatorVersion: "yokaiba-generator-v2" }, "test-token-secret");
+  const response = await route(new Request("https://yokaiba.test/v1/puzzles/verify", {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ puzzleToken: v2Token, answer: puzzle.solution }),
+  }));
+
+  assert.equal(response.status, 200);
+  assert.deepEqual(await response.json(), { correct: true });
 });
 
 async function verificationSetup() {
@@ -525,7 +592,7 @@ test("version and readiness expose deployed build and rate-limit configuration",
   const env = { BUILD_VERSION: "0.1.0-test", BUILD_SHA: "deadbeef", REST_RATE_LIMITER: { limit: async () => ({ success: true }) } };
   const version = await isolatedWorker.fetch(new Request("https://yokaiba.test/v1/version"), env, {} as ExecutionContext);
   assert.deepEqual(await version.json(), {
-    serviceVersion: "0.1.0-test", buildSha: "deadbeef", generatorVersion: "yokaiba-generator-v2", solverVersion: "yokaiba-exhaustive-v1",
+    serviceVersion: "0.1.0-test", buildSha: "deadbeef", generatorVersion: "yokaiba-generator-v3", solverVersion: "yokaiba-exhaustive-v1",
   });
   const ready = await isolatedWorker.fetch(new Request("https://yokaiba.test/readyz"), env, {} as ExecutionContext);
   assert.deepEqual(await ready.json(), { status: "ready", build: { serviceVersion: "0.1.0-test", buildSha: "deadbeef" }, rateLimitProvider: "configured" });

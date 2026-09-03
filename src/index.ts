@@ -4,6 +4,8 @@ export * from "./domain/puzzle-solver.js";
 export * from "./constraints/solver.js";
 export * from "./generation/generator.js";
 export * from "./generation/quality.js";
+export * from "./generation/clue-text.js";
+export * from "./generation/audit.js";
 export * from "./catalogue.js";
 export * from "./templates/tournament-order.js";
 export * from "./templates/open-division.js";
