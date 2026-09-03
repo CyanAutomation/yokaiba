@@ -37,7 +37,7 @@ npm run dev
 
 ## REST API
 
-The complete contract is published at [`/openapi/v1.yaml`](https://yokaiba.scheimann.workers.dev/openapi/v1.yaml), with an interactive [Swagger UI](https://yokaiba.scheimann.workers.dev/docs). The repository source is [public/openapi/v1.yaml](public/openapi/v1.yaml). Public endpoints are:
+The API root redirects to the interactive [Swagger UI](https://yokaiba.scheimann.workers.dev/docs), and the complete contract is published at [`/openapi/v1.yaml`](https://yokaiba.scheimann.workers.dev/openapi/v1.yaml). The repository source is [public/openapi/v1.yaml](public/openapi/v1.yaml). Swagger UI is bundled from the pinned `swagger-ui-dist` development dependency and served from this Worker, so the documentation page has no runtime CDN dependency. Run `npm run vendor:swagger-ui` after updating that dependency.
 
 - `GET /healthz`
 - `GET /readyz`
@@ -45,6 +45,25 @@ The complete contract is published at [`/openapi/v1.yaml`](https://yokaiba.schei
 - `GET /v1/version`
 - `GET` or `POST /v1/puzzles/generate`
 - `POST /v1/puzzles/verify`
+
+### 60-second browser quick start
+
+1. Fetch `/v1/scenarios` and use its categories to build the empty game grid.
+2. Generate a deterministic puzzle with a template ID and a player/session seed.
+3. Render `clues` and retain the returned `puzzleToken` with the in-progress game.
+4. When the board is complete, send the non-base assignments and token to `/v1/puzzles/verify`.
+
+```js
+const baseUrl = "https://yokaiba.scheimann.workers.dev";
+const scenarios = await fetch(`${baseUrl}/v1/scenarios`).then(response => response.json());
+const templateId = scenarios.scenarios[0].id;
+const seed = crypto.randomUUID();
+const puzzle = await fetch(`${baseUrl}/v1/puzzles/generate?${new URLSearchParams({ templateId, seed })}`)
+  .then(response => response.json());
+
+// Render puzzle.spec.categories as the board and puzzle.clues as the clue list.
+// Keep puzzle.puzzleToken; submit it with completed assignments to /v1/puzzles/verify.
+```
 
 `GET /v1/scenarios` includes each scenario's base category and complete board
 categories, allowing clients to build their selection and game UI without first
@@ -127,7 +146,7 @@ npx wrangler secret put PUZZLE_TOKEN_SECRET
 
 Allowed origins receive `GET, POST, OPTIONS` CORS headers. Public GET responses also provide an ETag and return `304 Not Modified` for a matching `If-None-Match` request.
 
-The Worker uses a best-effort per-isolate REST rate limit (60 requests/minute by default; configure `REST_RATE_LIMIT`) when no provider binding is available. Answer verification has a tighter 10 requests/minute per-isolate limit (`VERIFY_RATE_LIMIT`). REST responses publish `RateLimit-Limit` and `RateLimit-Policy`; rate-limited responses additionally publish `RateLimit-Remaining: 0` and `Retry-After`.
+The Worker uses a best-effort per-isolate REST rate limit (60 requests/minute by default; configure `REST_RATE_LIMIT`) when no provider binding is available. Answer verification has a tighter 10 requests/minute per-isolate limit (`VERIFY_RATE_LIMIT`). REST responses publish `RateLimit-Limit` and `RateLimit-Policy`. When the Worker applies the local fallback, it also publishes `RateLimit-Remaining` and Unix-second `RateLimit-Reset`; the Cloudflare binding reports only allow/deny, so those two quota fields are absent while it is enforcing requests. Rate-limited responses always publish `RateLimit-Remaining: 0` and `Retry-After`.
 
 For production, configure a Cloudflare Rate Limiting binding named `REST_RATE_LIMITER`; it is keyed by client IP and route and provides enforcement across isolates. `/readyz` reports whether that binding is configured for the active isolate. A binding exception logs the structured `rate_limit_provider_failure` event and switches readiness to `fallback`, so configure an alert for that event. Keep the in-memory fallback for local development and temporary binding failures.
 

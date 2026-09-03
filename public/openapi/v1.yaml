@@ -63,6 +63,10 @@ paths:
             Access-Control-Allow-Origin: { $ref: '#/components/headers/AccessControlAllowOrigin' }
             ETag: { $ref: '#/components/headers/Etag' }
             X-Request-Id: { $ref: '#/components/headers/RequestId' }
+            RateLimit-Limit: { $ref: '#/components/headers/RateLimitLimit' }
+            RateLimit-Policy: { $ref: '#/components/headers/RateLimitPolicy' }
+            RateLimit-Remaining: { $ref: '#/components/headers/RateLimitRemaining' }
+            RateLimit-Reset: { $ref: '#/components/headers/RateLimitReset' }
           content:
             application/json:
               schema: { $ref: '#/components/schemas/ScenarioList' }
@@ -78,6 +82,10 @@ paths:
             Access-Control-Allow-Origin: { $ref: '#/components/headers/AccessControlAllowOrigin' }
             ETag: { $ref: '#/components/headers/Etag' }
             X-Request-Id: { $ref: '#/components/headers/RequestId' }
+            RateLimit-Limit: { $ref: '#/components/headers/RateLimitLimit' }
+            RateLimit-Policy: { $ref: '#/components/headers/RateLimitPolicy' }
+            RateLimit-Remaining: { $ref: '#/components/headers/RateLimitRemaining' }
+            RateLimit-Reset: { $ref: '#/components/headers/RateLimitReset' }
           content:
             application/json:
               schema: { $ref: '#/components/schemas/Version' }
@@ -99,6 +107,10 @@ paths:
             Cache-Control: { $ref: '#/components/headers/CacheControl' }
             ETag: { $ref: '#/components/headers/Etag' }
             X-Request-Id: { $ref: '#/components/headers/RequestId' }
+            RateLimit-Limit: { $ref: '#/components/headers/RateLimitLimit' }
+            RateLimit-Policy: { $ref: '#/components/headers/RateLimitPolicy' }
+            RateLimit-Remaining: { $ref: '#/components/headers/RateLimitRemaining' }
+            RateLimit-Reset: { $ref: '#/components/headers/RateLimitReset' }
           content:
             application/json:
               schema: { $ref: '#/components/schemas/GeneratedPuzzle' }
@@ -120,8 +132,10 @@ paths:
           headers:
             Access-Control-Allow-Origin: { $ref: '#/components/headers/AccessControlAllowOrigin' }
             X-Request-Id: { $ref: '#/components/headers/RequestId' }
-            RateLimit-Limit: { schema: { type: integer, minimum: 1 } }
-            RateLimit-Policy: { schema: { type: string, example: 60;w=60 } }
+            RateLimit-Limit: { $ref: '#/components/headers/RateLimitLimit' }
+            RateLimit-Policy: { $ref: '#/components/headers/RateLimitPolicy' }
+            RateLimit-Remaining: { $ref: '#/components/headers/RateLimitRemaining' }
+            RateLimit-Reset: { $ref: '#/components/headers/RateLimitReset' }
           content:
             application/json:
               schema: { $ref: '#/components/schemas/GeneratedPuzzle' }
@@ -146,6 +160,10 @@ paths:
           headers:
             Access-Control-Allow-Origin: { $ref: '#/components/headers/AccessControlAllowOrigin' }
             X-Request-Id: { $ref: '#/components/headers/RequestId' }
+            RateLimit-Limit: { $ref: '#/components/headers/RateLimitLimit' }
+            RateLimit-Policy: { $ref: '#/components/headers/RateLimitPolicy' }
+            RateLimit-Remaining: { $ref: '#/components/headers/RateLimitRemaining' }
+            RateLimit-Reset: { $ref: '#/components/headers/RateLimitReset' }
           content:
             application/json:
               schema: { $ref: '#/components/schemas/PuzzleVerificationResult' }
@@ -188,6 +206,16 @@ components:
     RequestId:
       schema: { type: string, format: uuid }
       description: Correlation ID for support and Worker logs.
+    RateLimitLimit:
+      schema: { type: integer, minimum: 1 }
+    RateLimitPolicy:
+      schema: { type: string, example: 60;w=60 }
+    RateLimitRemaining:
+      schema: { type: integer, minimum: 0 }
+      description: Remaining requests in the current window when locally enforced; absent for the Cloudflare binding.
+    RateLimitReset:
+      schema: { type: integer, minimum: 0 }
+      description: Unix-second window reset time when locally enforced; absent for the Cloudflare binding.
   responses:
     BadRequest:
       description: Invalid request input
@@ -210,8 +238,10 @@ components:
       description: Too many requests
       headers:
         Retry-After: { schema: { type: integer, minimum: 1 } }
-        RateLimit-Limit: { schema: { type: integer, minimum: 1 } }
-        RateLimit-Policy: { schema: { type: string, example: 60;w=60 } }
+        RateLimit-Limit: { $ref: '#/components/headers/RateLimitLimit' }
+        RateLimit-Policy: { $ref: '#/components/headers/RateLimitPolicy' }
+        RateLimit-Remaining: { $ref: '#/components/headers/RateLimitRemaining' }
+        RateLimit-Reset: { $ref: '#/components/headers/RateLimitReset' }
         X-Request-Id: { $ref: '#/components/headers/RequestId' }
       content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } }
     NotConfigured:
