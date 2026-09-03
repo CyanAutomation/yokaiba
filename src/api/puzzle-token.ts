@@ -1,4 +1,4 @@
-import type { GeneratedPuzzle } from "../domain/types.js";
+import type { DifficultyLevel, GeneratedPuzzle } from "../domain/types.js";
 
 const encoder = new TextEncoder();
 const decoder = new TextDecoder();
@@ -9,7 +9,7 @@ export interface PuzzleTokenPayload {
   seed: string;
   generatorVersion: string;
   solverVersion: string;
-  requestedDifficultyLevel?: 1 | 2 | 3 | 4 | 5;
+  requestedDifficultyLevel?: DifficultyLevel;
 }
 
 function base64UrlEncode(value: Uint8Array): string {
@@ -63,7 +63,7 @@ export async function verifyPuzzleToken(token: string, secret: string): Promise<
     if (!value || typeof value !== "object" || Array.isArray(value)) return undefined;
     const payload = value as Record<string, unknown>;
     if (payload.version !== 2 || typeof payload.templateId !== "string" || typeof payload.seed !== "string" || typeof payload.generatorVersion !== "string" || typeof payload.solverVersion !== "string") return undefined;
-    if (payload.requestedDifficultyLevel !== undefined && (typeof payload.requestedDifficultyLevel !== "number" || !Number.isInteger(payload.requestedDifficultyLevel) || payload.requestedDifficultyLevel < 1 || payload.requestedDifficultyLevel > 5)) return undefined;
+    if (payload.requestedDifficultyLevel !== undefined && (typeof payload.requestedDifficultyLevel !== "number" || !Number.isInteger(payload.requestedDifficultyLevel) || payload.requestedDifficultyLevel < 1 || payload.requestedDifficultyLevel > 12)) return undefined;
     return payload as unknown as PuzzleTokenPayload;
   } catch {
     return undefined;

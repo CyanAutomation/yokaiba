@@ -1,13 +1,14 @@
-import type { Clue, Difficulty, DifficultyCalibration, PuzzleSpec } from "../domain/types.js";
+import type { Clue, Difficulty, DifficultyCalibration, DifficultyLevel, PuzzleSpec } from "../domain/types.js";
 import type { PuzzleSolver } from "../domain/puzzle-solver.js";
 import { exhaustivePuzzleSolver, solveWithTelemetry } from "../constraints/solver.js";
 
 const COST: Record<Clue["constraint"]["kind"], number> = { matches: 1, notMatches: 1, before: 3, adjacent: 3, sameRow: 3, distance: 4 };
 
-export const DIFFICULTY_MODEL_VERSION = "yokaiba-difficulty-v3";
+export const DIFFICULTY_MODEL_VERSION = "yokaiba-difficulty-v4";
 const defaultCalibration: DifficultyCalibration = {
   modelVersion: DIFFICULTY_MODEL_VERSION,
-  scoreThresholds: [68, 73, 79, 88],
+  scoreThresholds: [68, 73, 79, 88, 98, 108, 118, 128, 138, 148, 158],
+  levelRange: [1, 12],
   corpus: { sampleSize: 1_000, methodology: "Seeded corpus scored with the no-guess trace and deterministic solver telemetry." },
 };
 
@@ -34,10 +35,13 @@ export function assessPuzzleDifficulty(spec: PuzzleSpec, clues: readonly Clue[])
     + Math.min(10, humanSolve.deductionPasses)
     + Math.min(24, Math.floor(Math.log2(telemetry.nodesVisited + 1)) * 2)
     + Math.min(16, Math.floor(telemetry.constraintChecks / 8));
-  const [levelOne, levelTwo, levelThree, levelFour] = calibration.scoreThresholds;
-  const level: Difficulty["level"] = score <= levelOne ? 1 : score <= levelTwo ? 2 : score <= levelThree ? 3 : score <= levelFour ? 4 : 5;
-  const labels: Record<Difficulty["level"], Difficulty["label"]> = {
-    1: "Very easy", 2: "Easy", 3: "Moderate", 4: "Hard", 5: "Very hard",
+  const [minimumLevel, maximumLevel] = calibration.levelRange;
+  if (minimumLevel > maximumLevel || calibration.scoreThresholds.length !== maximumLevel - minimumLevel) throw new Error("difficulty calibration thresholds must cover its level range");
+  const offset = calibration.scoreThresholds.findIndex(threshold => score <= threshold);
+  const level = (offset < 0 ? maximumLevel : minimumLevel + offset) as DifficultyLevel;
+  const labels: Record<DifficultyLevel, string> = {
+    1: "Very easy", 2: "Easy", 3: "Gentle", 4: "Comfortable", 5: "Moderate", 6: "Challenging",
+    7: "Tricky", 8: "Hard", 9: "Very hard", 10: "Expert", 11: "Master", 12: "Extreme",
   };
   return {
     level,
