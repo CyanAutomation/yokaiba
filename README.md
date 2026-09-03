@@ -76,7 +76,7 @@ replay. The currently supported five-row templates are `open-division-v2` and
 `championship-circuit-v2`; both use the IJF sequence `-60 kg`, `-66 kg`,
 `-73 kg`, `-81 kg`, `-90 kg`.
 
-For browser games, use the cacheable GET form. Deterministic responses are cached for five minutes and then revalidated, so a generator release cannot be held indefinitely by a stale browser or edge cache.
+For browser games, use the cacheable GET form. Deterministic puzzles and the scenario catalogue are cached for five minutes and then revalidated, so a generator release cannot be held indefinitely by a stale browser or edge cache. `/v1/version` uses `Cache-Control: no-cache`, allowing clients to retain its ETag while always revalidating deployment metadata.
 
 ```js
 const baseUrl = "https://yokaiba.scheimann.workers.dev";
@@ -146,9 +146,9 @@ npx wrangler secret put PUZZLE_TOKEN_SECRET
 
 Allowed origins receive `GET, POST, OPTIONS` CORS headers. Public GET responses also provide an ETag and return `304 Not Modified` for a matching `If-None-Match` request.
 
-The Worker uses a best-effort per-isolate REST rate limit (60 requests/minute by default; configure `REST_RATE_LIMIT`) when no provider binding is available. Answer verification has a tighter 10 requests/minute per-isolate limit (`VERIFY_RATE_LIMIT`). REST responses publish `RateLimit-Limit` and `RateLimit-Policy`. When the Worker applies the local fallback, it also publishes `RateLimit-Remaining` and Unix-second `RateLimit-Reset`; the Cloudflare binding reports only allow/deny, so those two quota fields are absent while it is enforcing requests. Rate-limited responses always publish `RateLimit-Remaining: 0` and `Retry-After`.
+The Worker uses a best-effort per-isolate REST rate limit (60 requests/minute by default; configure `REST_RATE_LIMIT`) when no provider binding is available. Answer verification has a separate tighter 10 requests/minute fallback (`VERIFY_RATE_LIMIT`). REST responses publish `RateLimit-Limit` and `RateLimit-Policy`. When the Worker applies the local fallback, it also publishes `RateLimit-Remaining` and Unix-second `RateLimit-Reset`; the Cloudflare binding reports only allow/deny, so those two quota fields are absent while it is enforcing requests. Rate-limited responses always publish `RateLimit-Remaining: 0` and `Retry-After`.
 
-For production, configure a Cloudflare Rate Limiting binding named `REST_RATE_LIMITER`; it is keyed by client IP and route and provides enforcement across isolates. `/readyz` reports whether that binding is configured for the active isolate. A binding exception logs the structured `rate_limit_provider_failure` event and switches readiness to `fallback`, so configure an alert for that event. Keep the in-memory fallback for local development and temporary binding failures.
+For production, configure both Cloudflare Rate Limiting bindings: `REST_RATE_LIMITER` for general REST traffic and `VERIFY_RATE_LIMITER` for answer verification. Each is keyed by client IP and route and provides enforcement across isolates; their namespaces must remain distinct because their limits differ. `/readyz` reports `rateLimitProvider` and `verifyRateLimitProvider` separately. A binding exception logs the structured `rate_limit_provider_failure` event and switches the affected readiness field to `fallback`, so configure an alert for that event. Keep the in-memory fallback for local development and temporary binding failures.
 
 ## MCP and deployment
 

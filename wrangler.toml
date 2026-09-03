@@ -18,7 +18,7 @@ run_worker_first = ["/docs", "/docs/", "/openapi/*"]
 # REST_ALLOWED_ORIGINS is a comma-separated list of exact browser origins that
 # may call the public REST API. It is intentionally unset by default.
 # PUZZLE_TOKEN_SECRET signs browser puzzle tokens used by /v1/puzzles/verify.
-# VERIFY_RATE_LIMIT optionally sets the per-isolate verification attempts per minute (default 10).
+# VERIFY_RATE_LIMIT is the local fallback for verification attempts per minute (default 10).
 
 [[ratelimits]]
 name = "REST_RATE_LIMITER"
@@ -26,4 +26,14 @@ namespace_id = "870282"
 
   [ratelimits.simple]
   limit = 60
+  period = 60
+
+[[ratelimits]]
+name = "VERIFY_RATE_LIMITER"
+# This namespace must remain distinct from REST_RATE_LIMITER so verification has
+# its own 10/minute provider-enforced counter.
+namespace_id = "870283"
+
+  [ratelimits.simple]
+  limit = 10
   period = 60
