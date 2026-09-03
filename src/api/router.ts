@@ -64,7 +64,7 @@ function generationParameters(value: Record<string, unknown>) {
   if (value.templateId.length > MAX_GENERATION_FIELD_LENGTH) throw new TypeError(`templateId must be at most ${MAX_GENERATION_FIELD_LENGTH} characters`);
   if (value.seed.length > MAX_GENERATION_FIELD_LENGTH) throw new TypeError(`seed must be at most ${MAX_GENERATION_FIELD_LENGTH} characters`);
   const difficultyLevel = value.difficultyLevel;
-  if (difficultyLevel !== undefined && (typeof difficultyLevel !== "number" || !Number.isInteger(difficultyLevel) || difficultyLevel < 1 || difficultyLevel > 5)) throw new TypeError("difficultyLevel must be an integer from 1 to 5");
+  if (difficultyLevel !== undefined && (typeof difficultyLevel !== "number" || !Number.isInteger(difficultyLevel) || difficultyLevel < 1 || difficultyLevel > 12)) throw new TypeError("difficultyLevel must be an integer from 1 to 12");
   return { templateId: value.templateId, seed: value.seed, ...(difficultyLevel === undefined ? {} : { difficultyLevel: difficultyLevel as Difficulty["level"] }) };
 }
 
@@ -107,9 +107,9 @@ function sameSolution(left: Solution, right: Solution): boolean {
   return categories.length === Object.keys(right.assignments).length && categories.every(category => left.assignments[category].length === right.assignments[category]?.length && left.assignments[category].every((value, index) => value === right.assignments[category][index]));
 }
 
-/** v3 changes rendered prose only; a v2 token recreates the identical solution. */
+/** v3/v4 preserve puzzle-solution semantics for a v2 token. */
 function supportsTokenGeneratorVersion(tokenVersion: string, generatedVersion: string) {
-  return tokenVersion === generatedVersion || (tokenVersion === "yokaiba-generator-v2" && generatedVersion === "yokaiba-generator-v3");
+  return tokenVersion === generatedVersion || (tokenVersion === "yokaiba-generator-v2" && (generatedVersion === "yokaiba-generator-v3" || generatedVersion === "yokaiba-generator-v4"));
 }
 
 async function verificationRequest(request: Request) {

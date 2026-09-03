@@ -7,7 +7,7 @@ Yokaiba creates deterministic, uniquely solvable judo logic-grid puzzles for gam
 - A 4×4 tournament-order scenario, a 5×5 open-division scenario, a denser 5×5 Championship Circuit scenario, and a portable TypeScript constraint solver.
 - Deterministic generation: the same template ID, seed, generator version, and solver version reproduce the same puzzle.
 - Minimal clue sets with direct, negative, ordering, adjacency, same-row, and exact-distance clues. The hidden solution is never returned over REST or MCP.
-- Server-side browser-answer verification using signed puzzle tokens, plus a deterministic 1–5 difficulty assessment with published human-trace and solver-search evidence.
+- Server-side browser-answer verification using signed puzzle tokens, plus a deterministic 1–12 difficulty assessment with published human-trace and solver-search evidence.
 - A Cloudflare Worker with public REST and an API-key-protected Streamable HTTP MCP endpoint.
 
 ## Solver implementations
@@ -77,7 +77,7 @@ curl -X POST http://localhost:8787/v1/puzzles/generate \
 
 `templateId` and `seed` must be non-empty strings of at most 128 characters. Every response includes `X-Request-Id`, which is also included in Worker logs.
 
-Generated puzzles include `difficulty` (`level` 1–5, label, model identifier, and deterministic evidence). Each template publishes its locale metadata and its own 1,000-seed calibration strategy. Difficulty combines the deduction trace, relational/cross-category clue structure, and deterministic solver telemetry; retain `modelVersion` and `evidence` when recording scores. The no-guess trace is an engineering diagnostic, not a substitute for player research.
+Generated puzzles include `difficulty` (`level` 1–12, label, model identifier, and deterministic evidence). Tournament Order is calibrated to levels 1–4, Open Division to 5–8, and Championship Circuit to 9–12. Each template publishes its locale metadata and its own 1,000-seed calibration strategy. Difficulty combines the deduction trace, relational/cross-category clue structure, and deterministic solver telemetry; retain `modelVersion` and `evidence` when recording scores. The no-guess trace is an engineering diagnostic, not a substitute for player research.
 
 When `difficultyLevel` is supplied, generation searches deterministic clue-order strategies for that exact seed. It never substitutes another seed: if no strategy reaches the requested band, the API returns `422` with `difficulty_unavailable`.
 
