@@ -61,6 +61,7 @@ paths:
           description: Curated puzzle scenarios
           headers:
             Access-Control-Allow-Origin: { $ref: '#/components/headers/AccessControlAllowOrigin' }
+            Cache-Control: { $ref: '#/components/headers/CacheControl' }
             ETag: { $ref: '#/components/headers/Etag' }
             X-Request-Id: { $ref: '#/components/headers/RequestId' }
             RateLimit-Limit: { $ref: '#/components/headers/RateLimitLimit' }
@@ -80,6 +81,7 @@ paths:
           description: Current versions
           headers:
             Access-Control-Allow-Origin: { $ref: '#/components/headers/AccessControlAllowOrigin' }
+            Cache-Control: { $ref: '#/components/headers/CacheControl' }
             ETag: { $ref: '#/components/headers/Etag' }
             X-Request-Id: { $ref: '#/components/headers/RequestId' }
             RateLimit-Limit: { $ref: '#/components/headers/RateLimitLimit' }
@@ -198,8 +200,8 @@ components:
       schema: { type: string, format: uri }
       description: Echoes an explicitly allowlisted browser origin; absent for other origins.
     CacheControl:
-      schema: { type: string, example: public, max-age=300, s-maxage=300, must-revalidate }
-      description: Short-lived cache policy; clients must revalidate after expiry.
+      schema: { type: string }
+      description: Endpoint-specific cache policy. Scenario and generated-puzzle responses are revalidated after five minutes; version metadata uses no-cache.
     Etag:
       schema: { type: string }
       description: Content-derived validator for conditional GET requests.
@@ -257,11 +259,12 @@ components:
         build: { $ref: '#/components/schemas/Build' }
     Readiness:
       type: object
-      required: [status, build, rateLimitProvider]
+      required: [status, build, rateLimitProvider, verifyRateLimitProvider]
       properties:
         status: { type: string, const: ready }
         build: { $ref: '#/components/schemas/Build' }
         rateLimitProvider: { type: string, enum: [configured, fallback] }
+        verifyRateLimitProvider: { type: string, enum: [configured, fallback] }
     Build:
       type: object
       required: [serviceVersion, buildSha]
@@ -291,7 +294,7 @@ components:
           required: [modelVersion, scoreThresholds, corpus]
           properties:
             modelVersion: { type: string }
-            scoreThresholds: { type: array, minItems: 4, maxItems: 4, items: { type: number } }
+            scoreThresholds: { type: array, minItems: 3, maxItems: 3, items: { type: number } }
             corpus: { type: object, additionalProperties: true }
     Scenario:
       type: object

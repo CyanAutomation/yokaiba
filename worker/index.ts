@@ -23,8 +23,10 @@ interface Env {
   REST_RATE_LIMIT?: string;
   /** Optional best-effort verification attempts per minute; defaults to 10. */
   VERIFY_RATE_LIMIT?: string;
-  /** Optional Cloudflare Rate Limiting binding for production-wide REST enforcement. */
+  /** Optional Cloudflare Rate Limiting binding for production-wide general REST enforcement. */
   REST_RATE_LIMITER?: { limit(options: { key: string }): Promise<{ success: boolean }> };
+  /** Optional Cloudflare Rate Limiting binding for production-wide answer-verification enforcement. */
+  VERIFY_RATE_LIMITER?: { limit(options: { key: string }): Promise<{ success: boolean }> };
   /** Static public assets, including Swagger UI and the canonical OpenAPI document. */
   ASSETS?: { fetch(request: Request): Promise<Response> };
 }
@@ -168,20 +170,41 @@ async function staticAsset(request: Request, env: Env, assetPath: string, conten
   return new Response(asset.body, { status: asset.status, statusText: asset.statusText, headers });
 }
 
-async function restRateLimitDecision(rateLimited: RateLimiter, request: Request, env: Env, onProviderFailure: () => void): Promise<RateLimitDecision> {
-  if (new URL(request.url).pathname === "/v1/puzzles/verify") return asRateLimitDecision(rateLimited(request, env.VERIFY_RATE_LIMIT ?? "10", "verify"));
-  if (env.REST_RATE_LIMITER) {
+async function providerRateLimitDecision(
+  provider: Env["REST_RATE_LIMITER"] | undefined,
+  request: Request,
+  onProviderFailure: () => void,
+): Promise<RateLimitDecision | undefined> {
+  if (provider) {
     try {
       const url = new URL(request.url);
       const path = url.pathname;
       const client = request.headers.get("cf-connecting-ip") ?? "anonymous";
-      return { limited: !(await env.REST_RATE_LIMITER.limit({ key: `${client}:${path}` })).success };
+      return { limited: !(await provider.limit({ key: `${client}:${path}` })).success };
     } catch {
-      // Retain the local fallback if a provider binding is temporarily unavailable.
       onProviderFailure();
       console.error(JSON.stringify({ event: "rate_limit_provider_failure", path: new URL(request.url).pathname }));
     }
   }
+  return undefined;
+}
+
+async function restRateLimitDecision(
+  rateLimited: RateLimiter,
+  request: Request,
+  env: Env,
+  onRestProviderFailure: () => void,
+  onVerifyProviderFailure: () => void,
+): Promise<RateLimitDecision> {
+  const verification = new URL(request.url).pathname === "/v1/puzzles/verify";
+  const providerDecision = await providerRateLimitDecision(
+    verification ? env.VERIFY_RATE_LIMITER : env.REST_RATE_LIMITER,
+    request,
+    verification ? onVerifyProviderFailure : onRestProviderFailure,
+  );
+  if (providerDecision) return providerDecision;
+  // Retain the local fallback if the relevant provider binding is unavailable.
+  if (verification) return asRateLimitDecision(rateLimited(request, env.VERIFY_RATE_LIMIT ?? "10", "verify"));
   return asRateLimitDecision(rateLimited(request, env.REST_RATE_LIMIT ?? "60", "rest"));
 }
 
@@ -194,6 +217,7 @@ function allowedOrigin(request: Request, hostnames: string[]) {
 export function createWorker(options: WorkerOptions = {}) {
   const rateLimited = options.rateLimiter ?? createRateLimiter(options.localRateLimitStore, options.clock);
   let rateLimitProviderFailed = false;
+  let verifyRateLimitProviderFailed = false;
   return {
     async fetch(request: Request, env: Env, ctx: ExecutionContext): Promise<Response> {
       const startedAt = Date.now();
@@ -227,7 +251,11 @@ export function createWorker(options: WorkerOptions = {}) {
       const build = { serviceVersion: env.BUILD_VERSION ?? "0.1.0", buildSha: env.BUILD_SHA ?? "local" };
       if (path === "/") return finish(new Response(null, { status: 302, headers: { location: new URL("/docs", request.url).toString(), "cache-control": "no-store" } }));
       if (path === "/healthz") return finish(json({ status: "ok", build }));
-      if (path === "/readyz") return finish(json({ status: "ready", build, rateLimitProvider: env.REST_RATE_LIMITER && !rateLimitProviderFailed ? "configured" : "fallback" }));
+      if (path === "/readyz") return finish(json({
+        status: "ready", build,
+        rateLimitProvider: env.REST_RATE_LIMITER && !rateLimitProviderFailed ? "configured" : "fallback",
+        verifyRateLimitProvider: env.VERIFY_RATE_LIMITER && !verifyRateLimitProviderFailed ? "configured" : "fallback",
+      }));
       if (path === "/docs" || path === "/docs/") return finish(swaggerUiResponse());
       if (path === "/openapi/v1.yaml") return finish(await staticAsset(request, env, "/openapi/v1.yaml", "application/yaml; charset=utf-8"));
       if (restRequest && request.method === "OPTIONS") {
@@ -236,7 +264,13 @@ export function createWorker(options: WorkerOptions = {}) {
         if (!responseCorsHeaders || !["GET", "POST"].includes(requestedMethod?.toUpperCase() ?? "") || requestedHeaders.some(header => header !== "content-type")) return finish(json({ error: { code: "forbidden", message: "Origin is not allowed" } }, 403));
         return finish(new Response(null, { status: 204 }));
       }
-      if (restRequest) rateLimitDecision = await restRateLimitDecision(rateLimited, request, env, () => { rateLimitProviderFailed = true; });
+      if (restRequest) rateLimitDecision = await restRateLimitDecision(
+        rateLimited,
+        request,
+        env,
+        () => { rateLimitProviderFailed = true; },
+        () => { verifyRateLimitProviderFailed = true; },
+      );
       if (rateLimitDecision?.limited) {
         return finish(new Response(JSON.stringify({ error: { code: "rate_limited", message: "Too many requests" } }), {
           status: 429,
