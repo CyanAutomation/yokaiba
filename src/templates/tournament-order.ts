@@ -14,8 +14,9 @@ export const tournamentOrderTemplate: PuzzleTemplate = {
   metadata: {
     locales: { default: "en", supported: ["en"] },
     difficultyCalibration: {
-      modelVersion: "yokaiba-difficulty-v3",
-      scoreThresholds: [85, 100, 115, 130],
+      modelVersion: "yokaiba-difficulty-v4",
+      scoreThresholds: [105, 118, 130],
+      levelRange: [1, 4],
       corpus: { sampleSize: 1_000, methodology: "Seeded corpus scored with the no-guess trace and deterministic solver telemetry." },
     },
   },

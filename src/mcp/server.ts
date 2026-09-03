@@ -17,13 +17,13 @@ export function createYokaibaMcpHandler(templates: readonly PuzzleTemplate[]) {
     }, async () => textResult({ scenarios: templates.map(scenarioSummary) }));
     server.registerTool("generate_puzzle", {
       description: "Generate a deterministic, uniquely solvable judo logic-grid puzzle.",
-      inputSchema: { templateId: z.string().min(1), seed: z.string().min(1), difficultyLevel: z.number().int().min(1).max(5).optional() },
+      inputSchema: { templateId: z.string().min(1), seed: z.string().min(1), difficultyLevel: z.number().int().min(1).max(12).optional() },
     }, async ({ templateId, seed, difficultyLevel }) => {
       const template = byId.get(templateId);
       if (!template) return { content: [{ type: "text" as const, text: `Unknown templateId: ${templateId}` }], isError: true };
       const { solution: _solution, generationStrategy: _strategy, ...puzzle } = difficultyLevel === undefined
         ? generatePuzzle(template, seed)
-        : generatePuzzleAtDifficulty(template, seed, difficultyLevel as 1 | 2 | 3 | 4 | 5);
+        : generatePuzzleAtDifficulty(template, seed, difficultyLevel as import("../domain/types.js").DifficultyLevel);
       return textResult(puzzle);
     });
     return server;

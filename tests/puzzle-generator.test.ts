@@ -90,6 +90,13 @@ test("Championship Circuit provides an expert-sized board with three non-base ca
   assert.equal(championshipCircuitTemplate.categories.length, 4);
   assert.ok(championshipCircuitTemplate.categories.every(category => category.values.length === 5));
   assert.deepEqual(championshipCircuitTemplate.categories.find(category => category.id === "weight")?.values, ["-60 kg", "-66 kg", "-73 kg", "-81 kg", "-90 kg"]);
+  assert.deepEqual(championshipCircuitTemplate.metadata!.difficultyCalibration.levelRange, [9, 12]);
+});
+
+test("templates partition the global 1–12 difficulty scale into course bands", () => {
+  assert.deepEqual(tournamentOrderTemplate.metadata!.difficultyCalibration.levelRange, [1, 4]);
+  assert.deepEqual(openDivisionTemplate.metadata!.difficultyCalibration.levelRange, [5, 8]);
+  assert.deepEqual(championshipCircuitTemplate.metadata!.difficultyCalibration.levelRange, [9, 12]);
 });
 
 test("IJF-template puzzle payloads never use the invalid +81 kg division", () => {
@@ -180,7 +187,7 @@ test("difficulty corpus audit is deterministic and reports human-trace coverage"
 });
 
 test("expert target generation favors relational deductions over direct facts", () => {
-  const puzzle = generatePuzzle(championshipCircuitTemplate, "expert-relational", undefined, { difficultyLevel: 5, strategy: 0 });
+  const puzzle = generatePuzzle(championshipCircuitTemplate, "expert-relational", undefined, { difficultyLevel: 12, strategy: 0 });
 
   assert.equal(countSolutions(puzzle.spec, puzzle.clues, 2), 1);
   assert.ok(puzzle.clues.every(clue => clue.constraint.kind !== "matches"));
@@ -370,7 +377,7 @@ test("difficulty is reproducible and publishes deterministic human and solver ev
   const fixtures = ["recalibrate-7", "recalibrate-18", "recalibrate-3", "recalibrate-1", "recalibrate-0"];
   for (const seed of fixtures) {
     const difficulty = generatePuzzle(tournamentOrderTemplate, seed).difficulty;
-    assert.equal(difficulty.modelVersion, "yokaiba-difficulty-v3");
+    assert.equal(difficulty.modelVersion, "yokaiba-difficulty-v4");
     assert.ok(difficulty.evidence.score > 0);
     assert.ok(difficulty.evidence.solver.nodesVisited > 0);
     assert.ok(difficulty.evidence.solver.constraintChecks > 0);
@@ -414,9 +421,8 @@ test("REST generation redacts the hidden solution and includes reproducibility m
   assert.equal("solution" in body, false);
   assert.equal(typeof body.puzzleToken, "string");
   const difficulty = body.difficulty as { level: number; label: string; modelVersion: string; evidence: { score: number } };
-  assert.ok([1, 2, 3, 4, 5].includes(difficulty.level));
-  assert.ok(["Very easy", "Easy", "Moderate", "Hard", "Very hard"].includes(difficulty.label));
-  assert.equal(difficulty.modelVersion, "yokaiba-difficulty-v3");
+  assert.ok(Array.from({ length: 12 }, (_value, index) => index + 1).includes(difficulty.level));
+  assert.equal(difficulty.modelVersion, "yokaiba-difficulty-v4");
   assert.equal(typeof difficulty.evidence.score, "number");
   assert.ok(Array.isArray(body.clues));
 });
@@ -450,7 +456,8 @@ test("REST scenario catalogue includes category values needed to render a game",
 test("REST reports unavailable difficulty without changing the requested seed", async () => {
   for (const template of [tournamentOrderTemplate, openDivisionTemplate]) {
     const route = createRestRouter([template]);
-    for (const level of [1, 2, 3, 4, 5]) {
+    const [minimumLevel, maximumLevel] = template.metadata!.difficultyCalibration.levelRange;
+    for (let level = minimumLevel; level <= maximumLevel; level += 1) {
       const path = `https://yokaiba.test/v1/puzzles/generate?templateId=${template.id}&seed=level-picker&difficultyLevel=${level}`;
       const first = await route(new Request(path));
       const second = await route(new Request(path));
@@ -592,7 +599,7 @@ test("version and readiness expose deployed build and rate-limit configuration",
   const env = { BUILD_VERSION: "0.1.0-test", BUILD_SHA: "deadbeef", REST_RATE_LIMITER: { limit: async () => ({ success: true }) } };
   const version = await isolatedWorker.fetch(new Request("https://yokaiba.test/v1/version"), env, {} as ExecutionContext);
   assert.deepEqual(await version.json(), {
-    serviceVersion: "0.1.0-test", buildSha: "deadbeef", generatorVersion: "yokaiba-generator-v3", solverVersion: "yokaiba-exhaustive-v1",
+    serviceVersion: "0.1.0-test", buildSha: "deadbeef", generatorVersion: "yokaiba-generator-v4", solverVersion: "yokaiba-exhaustive-v1",
   });
   const ready = await isolatedWorker.fetch(new Request("https://yokaiba.test/readyz"), env, {} as ExecutionContext);
   assert.deepEqual(await ready.json(), { status: "ready", build: { serviceVersion: "0.1.0-test", buildSha: "deadbeef" }, rateLimitProvider: "configured" });
