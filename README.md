@@ -42,19 +42,21 @@ The API root redirects to the interactive [Swagger UI](https://yokaiba.scheimann
 - `GET /healthz`
 - `GET /readyz`
 - `GET /v1/scenarios`
+- `GET /v1/capabilities`
 - `GET /v1/version`
 - `GET` or `POST /v1/puzzles/generate`
 - `POST /v1/puzzles/verify`
 
 ### 60-second browser quick start
 
-1. Fetch `/v1/scenarios` and use its categories to build the empty game grid.
+1. Fetch `/v1/capabilities` to detect supported features, then `/v1/scenarios` to build the empty game grid.
 2. Generate a deterministic puzzle with a template ID and a player/session seed.
 3. Render `clues` and retain the returned `puzzleToken` with the in-progress game.
 4. When the board is complete, send the non-base assignments and token to `/v1/puzzles/verify`.
 
 ```js
 const baseUrl = "https://yokaiba.scheimann.workers.dev";
+const capabilities = await fetch(`${baseUrl}/v1/capabilities`).then(response => response.json());
 const scenarios = await fetch(`${baseUrl}/v1/scenarios`).then(response => response.json());
 const templateId = scenarios.scenarios[0].id;
 const seed = crypto.randomUUID();
@@ -98,7 +100,21 @@ curl -X POST http://localhost:8787/v1/puzzles/generate \
 
 Generated puzzles include `difficulty` (`level` 1–12, label, model identifier, and deterministic evidence). Tournament Order is calibrated to levels 1–4, Open Division to 5–8, and Championship Circuit to 9–12. Each template publishes its locale metadata and its own 1,000-seed calibration strategy. Difficulty combines the deduction trace, relational/cross-category clue structure, and deterministic solver telemetry; retain `modelVersion` and `evidence` when recording scores. The no-guess trace is an engineering diagnostic, not a substitute for player research.
 
-When `difficultyLevel` is supplied, generation searches deterministic clue-order strategies for that exact seed. It never substitutes another seed: if no strategy reaches the requested band, the API returns `422` with `difficulty_unavailable`.
+When `difficultyLevel` is supplied, generation searches deterministic clue-order strategies for that exact seed. It never substitutes another seed: if no strategy reaches the requested band, the API returns `422` with `difficulty_unavailable` and `availableDifficultyLevels`. Those alternatives are levels observed while trying every strategy for the requested band, rather than a costly exhaustive seed-wide search. Clients can suggest one of them or generate a fresh seed. Deterministic `422` GET responses use the same five-minute revalidated cache policy as successful generation, preventing repeated expensive misses.
+
+For a production browser client, handle validation, unavailable-difficulty, rate-limit, and conditional-cache responses explicitly:
+
+```js
+async function getPuzzle({ templateId, seed, difficultyLevel, etag }) {
+  const params = new URLSearchParams({ templateId, seed, ...(difficultyLevel ? { difficultyLevel: String(difficultyLevel) } : {}) });
+  const response = await fetch(`${baseUrl}/v1/puzzles/generate?${params}`, { headers: etag ? { "If-None-Match": etag } : {} });
+  if (response.status === 304) return { notModified: true, etag };
+  if (response.status === 422) return { unavailable: await response.json() };
+  if (response.status === 429) throw new Error(`Try again after ${response.headers.get("Retry-After") ?? "a moment"}.`);
+  if (!response.ok) throw new Error(`Puzzle request failed: ${response.status} (${response.headers.get("X-Request-Id") ?? "no request ID"})`);
+  return { puzzle: await response.json(), etag: response.headers.get("ETag") };
+}
+```
 
 Clues retain their semantic constraint while their surface text is rendered from a deterministic English phrase catalogue. `phraseVariant` and `languageVersion` are returned with every clue, so the wording is reproducible and can be audited independently of puzzle logic.
 
@@ -146,7 +162,7 @@ npx wrangler secret put PUZZLE_TOKEN_SECRET
 
 Allowed origins receive `GET, POST, OPTIONS` CORS headers. Public GET responses also provide an ETag and return `304 Not Modified` for a matching `If-None-Match` request.
 
-The Worker uses a best-effort per-isolate REST rate limit (60 requests/minute by default; configure `REST_RATE_LIMIT`) when no provider binding is available. Answer verification has a separate tighter 10 requests/minute fallback (`VERIFY_RATE_LIMIT`). REST responses publish `RateLimit-Limit` and `RateLimit-Policy`. When the Worker applies the local fallback, it also publishes `RateLimit-Remaining` and Unix-second `RateLimit-Reset`; the Cloudflare binding reports only allow/deny, so those two quota fields are absent while it is enforcing requests. Rate-limited responses always publish `RateLimit-Remaining: 0` and `Retry-After`.
+The Worker uses a best-effort per-isolate REST rate limit (60 requests/minute by default; configure `REST_RATE_LIMIT`) when no provider binding is available. Answer verification has a separate tighter 10 requests/minute fallback (`VERIFY_RATE_LIMIT`). REST responses publish `RateLimit-Limit` and `RateLimit-Policy`. When the Worker applies the local fallback, it also publishes `RateLimit-Remaining` and Unix-second `RateLimit-Reset`; the Cloudflare binding reports only allow/deny, so those two quota fields are absent while it is enforcing requests. Rate-limited responses always publish `RateLimit-Remaining: 0` and `Retry-After`. Each Worker isolate also keeps a bounded, five-minute LRU response cache for deterministic GET generation as a second layer behind edge caching; verification and POST generation are never retained there.
 
 For production, configure both Cloudflare Rate Limiting bindings: `REST_RATE_LIMITER` for general REST traffic and `VERIFY_RATE_LIMITER` for answer verification. Each is keyed by client IP and route and provides enforcement across isolates; their namespaces must remain distinct because their limits differ. `/readyz` reports `rateLimitProvider` and `verifyRateLimitProvider` separately. A binding exception logs the structured `rate_limit_provider_failure` event and switches the affected readiness field to `fallback`, so configure an alert for that event. Keep the in-memory fallback for local development and temporary binding failures.
 

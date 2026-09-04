@@ -21,7 +21,7 @@ import {
 } from "../src/index.js";
 import { championshipCircuitTemplate, createRestRouter, openDivisionTemplate, tournamentOrderTemplate } from "../src/index.js";
 import { issuePuzzleToken } from "../src/api/puzzle-token.js";
-import worker, { createRateLimiter, createWorker } from "../worker/index.js";
+import worker, { createRateLimiter, createWorker, type GeneratedPuzzleCache } from "../worker/index.js";
 
 const template: PuzzleTemplate = {
   id: "test-tournament",
@@ -417,7 +417,7 @@ test("difficulty is reproducible and publishes deterministic human and solver ev
 
 test("OpenAPI documents every public REST endpoint", async () => {
   const specification = await readFile(new URL("../public/openapi/v1.yaml", import.meta.url), "utf8");
-  for (const path of ["/healthz", "/readyz", "/docs", "/openapi/v1.yaml", "/v1/scenarios", "/v1/version", "/v1/puzzles/generate", "/v1/puzzles/verify"]) {
+  for (const path of ["/healthz", "/readyz", "/docs", "/openapi/v1.yaml", "/v1/scenarios", "/v1/capabilities", "/v1/version", "/v1/puzzles/generate", "/v1/puzzles/verify"]) {
     assert.match(specification, new RegExp(`^  ${path.replace(/[/.]/g, "\\$&")}:`, "m"));
   }
   assert.match(specification, /GeneratedPuzzle:/);
@@ -479,7 +479,7 @@ test("REST scenario catalogue includes category values needed to render a game",
   }]);
 });
 
-test("REST reports unavailable difficulty without changing the requested seed", async () => {
+test("REST reports unavailable difficulty, reachable alternatives, and keeps the requested seed", async () => {
   for (const template of [tournamentOrderTemplate, openDivisionTemplate]) {
     const route = createRestRouter([template]);
     const [minimumLevel, maximumLevel] = template.metadata!.difficultyCalibration.levelRange;
@@ -488,7 +488,7 @@ test("REST reports unavailable difficulty without changing the requested seed", 
       const first = await route(new Request(path));
       const second = await route(new Request(path));
       assert.ok([200, 422].includes(first.status));
-      const firstBody = await first.json() as { seed?: string; requestedSeed?: string; difficulty?: { level: number }; error?: { code: string } };
+      const firstBody = await first.json() as { seed?: string; requestedSeed?: string; templateId?: string; requestedDifficultyLevel?: number; difficulty?: { level: number }; error?: { code: string }; availableDifficultyLevels?: number[] };
       assert.deepEqual(firstBody, await second.json());
       if (first.status === 200) {
         assert.equal(firstBody.seed, "level-picker");
@@ -496,9 +496,31 @@ test("REST reports unavailable difficulty without changing the requested seed", 
         assert.equal(firstBody.difficulty?.level, level);
       } else {
         assert.equal(firstBody.error?.code, "difficulty_unavailable");
+        assert.equal(firstBody.templateId, template.id);
+        assert.equal(firstBody.requestedDifficultyLevel, level);
+        assert.equal(first.headers.get("cache-control"), "public, max-age=300, s-maxage=300, must-revalidate");
+        assert.ok(firstBody.availableDifficultyLevels?.every(available => available >= minimumLevel && available <= maximumLevel));
+        assert.equal(firstBody.availableDifficultyLevels?.includes(level), false);
       }
     }
   }
+});
+
+test("REST capabilities expose client-safe feature flags and catalogue metadata", async () => {
+  const route = createRestRouter([tournamentOrderTemplate, openDivisionTemplate]);
+  const response = await route(new Request("https://yokaiba.test/v1/capabilities"));
+
+  assert.equal(response.status, 200);
+  assert.equal(response.headers.get("cache-control"), "public, max-age=300, s-maxage=300, must-revalidate");
+  assert.deepEqual(await response.json(), {
+    apiVersion: "v1",
+    features: { answerVerification: false, conditionalGet: true, difficultySelection: true },
+    locales: ["en"],
+    scenarios: [
+      { id: "tournament-order-v1", difficultyLevels: [1, 2, 3, 4] },
+      { id: "open-division-v2", difficultyLevels: [5, 6, 7, 8] },
+    ],
+  });
 });
 
 test("REST verifies a complete submitted answer without exposing the solution", async () => {
@@ -834,6 +856,39 @@ test("worker returns an ETag and honors conditional public GETs", async () => {
   assert.match(etag ?? "", /^"yokaiba-v1-[a-f0-9]{64}"$/);
   const second = await worker.fetch(new Request(url, { headers: { origin: "https://game.example", "if-none-match": etag!, "cf-connecting-ip": "192.0.2.89" } }), env, {} as ExecutionContext);
   assert.equal(second.status, 304);
+});
+
+test("worker memoizes deterministic GET generation within a bounded local cache", async () => {
+  let now = 1_000;
+  const cache: GeneratedPuzzleCache = new Map();
+  const isolatedWorker = createWorker({ generatedPuzzleCache: cache, clock: () => now });
+  const request = () => new Request("https://yokaiba.test/v1/puzzles/generate?templateId=tournament-order-v1&seed=memoized", {
+    headers: { "cf-connecting-ip": "192.0.2.91" },
+  });
+
+  const first = await isolatedWorker.fetch(request(), {}, {} as ExecutionContext);
+  assert.equal(first.status, 200);
+  assert.equal(cache.size, 1);
+  const [key, entry] = [...cache.entries()][0]!;
+  entry.response = new Response(JSON.stringify({ id: "served-from-memory" }), { headers: { "content-type": "application/json" } });
+  cache.set(key, entry);
+
+  assert.deepEqual(await (await isolatedWorker.fetch(request(), {}, {} as ExecutionContext)).json(), { id: "served-from-memory" });
+  now += 300_000;
+  assert.notDeepEqual(await (await isolatedWorker.fetch(request(), {}, {} as ExecutionContext)).json(), { id: "served-from-memory" });
+});
+
+test("worker caches and conditionally revalidates deterministic unavailable-difficulty responses", async () => {
+  const isolatedWorker = createWorker();
+  const url = "https://yokaiba.test/v1/puzzles/generate?templateId=open-division-v2&seed=review-20260904&difficultyLevel=7";
+  const first = await isolatedWorker.fetch(new Request(url, { headers: { "cf-connecting-ip": "192.0.2.92" } }), {}, {} as ExecutionContext);
+
+  assert.equal(first.status, 422);
+  assert.equal(first.headers.get("cache-control"), "public, max-age=300, s-maxage=300, must-revalidate");
+  const etag = first.headers.get("etag");
+  assert.match(etag ?? "", /^"yokaiba-v1-[a-f0-9]{64}"$/);
+  const revalidated = await isolatedWorker.fetch(new Request(url, { headers: { "cf-connecting-ip": "192.0.2.92", "if-none-match": etag! } }), {}, {} as ExecutionContext);
+  assert.equal(revalidated.status, 304);
 });
 
 test("worker gives scenario discovery and version metadata explicit cache policies", async () => {
