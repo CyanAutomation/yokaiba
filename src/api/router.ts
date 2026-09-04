@@ -25,6 +25,21 @@ export interface RestRouterOptions {
   buildSha?: string;
 }
 
+function publicCapabilities(templates: readonly PuzzleTemplate[], puzzleTokenSecret?: string) {
+  const locales = new Set<string>();
+  const scenarios = templates.map(template => {
+    for (const locale of template.metadata?.locales.supported ?? []) locales.add(locale);
+    const [minimumLevel, maximumLevel] = template.metadata?.difficultyCalibration.levelRange ?? [1, 12];
+    return { id: template.id, difficultyLevels: Array.from({ length: maximumLevel - minimumLevel + 1 }, (_value, index) => minimumLevel + index) };
+  });
+  return {
+    apiVersion: "v1",
+    features: { answerVerification: Boolean(puzzleTokenSecret), conditionalGet: true, difficultySelection: true },
+    locales: [...locales].sort(),
+    scenarios,
+  };
+}
+
 /** Read bounded bytes instead of trusting a spoofable or absent Content-Length header. */
 async function readJsonBody(request: Request): Promise<unknown> {
   const declaredLength = Number(request.headers.get("content-length"));
@@ -135,6 +150,7 @@ export function createRestRouter(templates: readonly PuzzleTemplate[], options: 
     }
     const path = url.pathname;
     if (request.method === "GET" && path === "/v1/scenarios") return json({ scenarios: templates.map(scenarioSummary) }, 200, { "cache-control": SCENARIOS_CACHE_CONTROL });
+    if (request.method === "GET" && path === "/v1/capabilities") return json(publicCapabilities(templates, options.puzzleTokenSecret), 200, { "cache-control": SCENARIOS_CACHE_CONTROL });
     if (request.method === "GET" && path === "/v1/version") return json({ serviceVersion: options.serviceVersion ?? "0.1.0", buildSha: options.buildSha ?? "local", generatorVersion: GENERATOR_VERSION, solverVersion: SOLVER_VERSION }, 200, { "cache-control": VERSION_CACHE_CONTROL });
     if (request.method === "POST" && path === "/v1/puzzles/verify") {
       if (!options.puzzleTokenSecret) return json({ error: { code: "not_configured", message: "puzzle verification is not configured" } }, 503);
@@ -161,7 +177,12 @@ export function createRestRouter(templates: readonly PuzzleTemplate[], options: 
         return json(await publicPuzzle(generateAtDifficulty(template, seed, difficultyLevel), options.puzzleTokenSecret), 200,
           request.method === "GET" ? { "cache-control": GENERATED_PUZZLE_CACHE_CONTROL } : undefined);
       } catch (error) {
-        if (error instanceof DifficultyUnavailableError) return json({ error: { code: "difficulty_unavailable", message: error.message } }, 422);
+        if (error instanceof DifficultyUnavailableError) return json({
+          error: { code: "difficulty_unavailable", message: error.message },
+          templateId: error.templateId,
+          requestedDifficultyLevel: error.requestedDifficultyLevel,
+          availableDifficultyLevels: error.availableDifficultyLevels,
+        }, 422, request.method === "GET" ? { "cache-control": GENERATED_PUZZLE_CACHE_CONTROL } : undefined);
         return json({ error: { code: "bad_request", message: error instanceof Error ? error.message : "invalid request" } }, 400);
       }
     }

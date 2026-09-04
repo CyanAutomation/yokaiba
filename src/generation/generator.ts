@@ -143,9 +143,21 @@ export interface GenerationOptions {
 
 /** A requested difficulty cannot be met for this seed using any allowed clue order. */
 export class DifficultyUnavailableError extends Error {
-  constructor(templateId: string, seed: string, level: number) {
+  /**
+   * Levels actually observed while trying every deterministic strategy for the
+   * requested band. They are useful alternatives, but intentionally are not
+   * advertised as an exhaustive seed-wide search across every target band.
+   */
+  readonly availableDifficultyLevels: readonly DifficultyLevel[];
+  readonly templateId: string;
+  readonly requestedDifficultyLevel: DifficultyLevel;
+
+  constructor(templateId: string, seed: string, level: number, availableDifficultyLevels: readonly DifficultyLevel[] = []) {
     super(`difficulty level ${level} is unavailable for template ${templateId} and seed ${seed}`);
     this.name = "DifficultyUnavailableError";
+    this.templateId = templateId;
+    this.requestedDifficultyLevel = level as DifficultyLevel;
+    this.availableDifficultyLevels = availableDifficultyLevels;
   }
 }
 
@@ -219,11 +231,13 @@ export function generatePuzzle(template: PuzzleTemplate, seed: string, solver: P
  * strategies. A target is unavailable rather than silently changing the seed.
  */
 export function generatePuzzleAtDifficulty(template: PuzzleTemplate, seed: string, difficultyLevel: DifficultyLevel, solver: PuzzleSolver = exhaustivePuzzleSolver): GeneratedPuzzle {
+  const observedLevels = new Set<DifficultyLevel>();
   for (let strategy = 0; strategy < 64; strategy += 1) {
     const candidate = generatePuzzle(template, seed, solver, { difficultyLevel, strategy });
+    observedLevels.add(candidate.difficulty.level);
     if (candidate.difficulty.level === difficultyLevel) {
       return { ...candidate, requestedDifficultyLevel: difficultyLevel, generationStrategy: strategy };
     }
   }
-  throw new DifficultyUnavailableError(template.id, seed, difficultyLevel);
+  throw new DifficultyUnavailableError(template.id, seed, difficultyLevel, [...observedLevels].sort((left, right) => left - right));
 }
