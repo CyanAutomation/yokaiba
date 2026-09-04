@@ -78,9 +78,38 @@ export interface WorkerOptions {
   localRateLimitStore?: RateLimitStore;
   clock?: () => number;
   rateLimiter?: RateLimiter;
+  generatedPuzzleCache?: GeneratedPuzzleCache;
 }
 const RATE_WINDOW_MS = 60_000;
 const MAX_RATE_LIMIT_KEYS = 10_000;
+const GENERATED_PUZZLE_CACHE_TTL_MS = 300_000;
+const MAX_GENERATED_PUZZLE_CACHE_ENTRIES = 128;
+
+export interface GeneratedPuzzleCacheEntry { expiresAt: number; response: Response; }
+export type GeneratedPuzzleCache = Map<string, GeneratedPuzzleCacheEntry>;
+
+function generatedPuzzleCacheKey(request: Request, puzzleTokenSecret: string | undefined): string {
+  return `${request.url}\u0000${puzzleTokenSecret ?? ""}`;
+}
+
+function cachedGeneratedPuzzle(cache: GeneratedPuzzleCache, key: string, now: number): Response | undefined {
+  const entry = cache.get(key);
+  if (!entry) return undefined;
+  if (entry.expiresAt <= now) {
+    cache.delete(key);
+    return undefined;
+  }
+  // Refresh insertion order so the oldest entry is evicted first.
+  cache.delete(key);
+  cache.set(key, entry);
+  return entry.response.clone();
+}
+
+function cacheGeneratedPuzzle(cache: GeneratedPuzzleCache, key: string, response: Response, now: number): void {
+  if (response.status !== 200 && response.status !== 422) return;
+  cache.set(key, { expiresAt: now + GENERATED_PUZZLE_CACHE_TTL_MS, response: response.clone() });
+  while (cache.size > MAX_GENERATED_PUZZLE_CACHE_ENTRIES) cache.delete(cache.keys().next().value as string);
+}
 
 export function createRateLimiter(rateLimits: RateLimitStore = new Map(), clock: () => number = Date.now): RateLimiter {
   return (request, rawLimit, scope) => {
@@ -138,12 +167,34 @@ async function contentEtag(response: Response): Promise<string> {
 }
 
 async function cachePublicGet(response: Response, request: Request): Promise<Response> {
-  if (request.method !== "GET" || response.status !== 200) return response;
+  if (request.method !== "GET" || (response.status !== 200 && response.status !== 422)) return response;
   const etag = await contentEtag(response);
   const headers = new Headers(response.headers);
   headers.set("etag", etag);
   if (weaklyMatchesEtag(request.headers.get("if-none-match"), etag)) return new Response(null, { status: 304, headers });
   return new Response(response.body, { status: response.status, statusText: response.statusText, headers });
+}
+
+/** Emits privacy-preserving calibration telemetry: never log a caller seed or answer. */
+function observeDifficultyGeneration(response: Response, ctx: ExecutionContext): void {
+  if (response.status !== 200 && response.status !== 422) return;
+  const task = response.clone().json().then(body => {
+    if (!body || typeof body !== "object" || Array.isArray(body)) return;
+    const record = body as Record<string, unknown>;
+    const difficulty = record.difficulty;
+    const error = record.error;
+    const outcome = response.status === 200 ? "generated" : "unavailable";
+    console.log(JSON.stringify({
+      event: "difficulty_generation",
+      outcome,
+      templateId: typeof record.templateId === "string" ? record.templateId : undefined,
+      requestedDifficultyLevel: typeof record.requestedDifficultyLevel === "number" ? record.requestedDifficultyLevel : undefined,
+      assessedDifficultyLevel: difficulty && typeof difficulty === "object" && typeof (difficulty as Record<string, unknown>).level === "number" ? (difficulty as Record<string, unknown>).level : undefined,
+      modelVersion: difficulty && typeof difficulty === "object" && typeof (difficulty as Record<string, unknown>).modelVersion === "string" ? (difficulty as Record<string, unknown>).modelVersion : undefined,
+      errorCode: error && typeof error === "object" && typeof (error as Record<string, unknown>).code === "string" ? (error as Record<string, unknown>).code : undefined,
+    }));
+  }).catch(() => undefined);
+  if (typeof ctx.waitUntil === "function") ctx.waitUntil(task); else void task;
 }
 
 function swaggerUiResponse(): Response {
@@ -215,7 +266,9 @@ function allowedOrigin(request: Request, hostnames: string[]) {
 }
 
 export function createWorker(options: WorkerOptions = {}) {
-  const rateLimited = options.rateLimiter ?? createRateLimiter(options.localRateLimitStore, options.clock);
+  const clock = options.clock ?? Date.now;
+  const rateLimited = options.rateLimiter ?? createRateLimiter(options.localRateLimitStore, clock);
+  const generatedPuzzleCache = options.generatedPuzzleCache ?? new Map<string, GeneratedPuzzleCacheEntry>();
   let rateLimitProviderFailed = false;
   let verifyRateLimitProviderFailed = false;
   return {
@@ -277,7 +330,17 @@ export function createWorker(options: WorkerOptions = {}) {
           headers: { "content-type": "application/json; charset=utf-8", "retry-after": "60" },
         }));
       }
-      if (path !== "/mcp") return finish(await cachePublicGet(await createRestRouter(templates, { puzzleTokenSecret: env.PUZZLE_TOKEN_SECRET, ...build })(request), request));
+      if (path !== "/mcp") {
+        const cacheKey = request.method === "GET" && path === "/v1/puzzles/generate"
+          ? generatedPuzzleCacheKey(request, env.PUZZLE_TOKEN_SECRET)
+          : undefined;
+        const restResponse = cacheKey
+          ? cachedGeneratedPuzzle(generatedPuzzleCache, cacheKey, clock()) ?? await createRestRouter(templates, { puzzleTokenSecret: env.PUZZLE_TOKEN_SECRET, ...build })(request)
+          : await createRestRouter(templates, { puzzleTokenSecret: env.PUZZLE_TOKEN_SECRET, ...build })(request);
+        if (cacheKey) cacheGeneratedPuzzle(generatedPuzzleCache, cacheKey, restResponse, clock());
+        if (path === "/v1/puzzles/generate") observeDifficultyGeneration(restResponse, ctx);
+        return finish(await cachePublicGet(restResponse, request));
+      }
       if (asRateLimitDecision(rateLimited(request, env.MCP_RATE_LIMIT, "mcp")).limited) {
         return finish(new Response(JSON.stringify({ error: { code: "rate_limited", message: "Too many requests" } }), {
           status: 429,
