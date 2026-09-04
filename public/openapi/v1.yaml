@@ -73,6 +73,27 @@ paths:
               schema: { $ref: '#/components/schemas/ScenarioList' }
         '304': { $ref: '#/components/responses/NotModified' }
         '429': { $ref: '#/components/responses/RateLimited' }
+  /v1/capabilities:
+    get:
+      summary: Discover public API features and scenario difficulty bands
+      description: Cacheable client-startup metadata. `answerVerification` reports whether signed puzzle-token verification is enabled on this deployment.
+      responses:
+        '200':
+          description: Public feature flags, locales, and supported scenario difficulty bands
+          headers:
+            Access-Control-Allow-Origin: { $ref: '#/components/headers/AccessControlAllowOrigin' }
+            Cache-Control: { $ref: '#/components/headers/CacheControl' }
+            ETag: { $ref: '#/components/headers/Etag' }
+            X-Request-Id: { $ref: '#/components/headers/RequestId' }
+            RateLimit-Limit: { $ref: '#/components/headers/RateLimitLimit' }
+            RateLimit-Policy: { $ref: '#/components/headers/RateLimitPolicy' }
+            RateLimit-Remaining: { $ref: '#/components/headers/RateLimitRemaining' }
+            RateLimit-Reset: { $ref: '#/components/headers/RateLimitReset' }
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Capabilities' }
+        '304': { $ref: '#/components/responses/NotModified' }
+        '429': { $ref: '#/components/responses/RateLimited' }
   /v1/version:
     get:
       summary: Return service and reproducibility versions
@@ -228,9 +249,12 @@ components:
       headers: { X-Request-Id: { $ref: '#/components/headers/RequestId' } }
       content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } }
     DifficultyUnavailable:
-      description: The requested seed has no clue strategy in the requested difficulty band.
-      headers: { X-Request-Id: { $ref: '#/components/headers/RequestId' } }
-      content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } }
+      description: The requested seed has no clue strategy in the requested difficulty band. `availableDifficultyLevels` lists levels observed while trying every strategy for this requested band; it is an actionable alternative list, not a full seed-wide availability search.
+      headers:
+        Cache-Control: { $ref: '#/components/headers/CacheControl' }
+        ETag: { $ref: '#/components/headers/Etag' }
+        X-Request-Id: { $ref: '#/components/headers/RequestId' }
+      content: { application/json: { schema: { $ref: '#/components/schemas/DifficultyUnavailableError' } } }
     NotModified:
       description: The representation matches the supplied ETag.
       headers:
@@ -279,6 +303,27 @@ components:
         buildSha: { type: string }
         generatorVersion: { type: string }
         solverVersion: { type: string }
+    Capabilities:
+      type: object
+      required: [apiVersion, features, locales, scenarios]
+      properties:
+        apiVersion: { type: string, const: v1 }
+        features:
+          type: object
+          required: [answerVerification, conditionalGet, difficultySelection]
+          properties:
+            answerVerification: { type: boolean }
+            conditionalGet: { type: boolean, const: true }
+            difficultySelection: { type: boolean, const: true }
+        locales: { type: array, items: { type: string }, uniqueItems: true }
+        scenarios:
+          type: array
+          items:
+            type: object
+            required: [id, difficultyLevels]
+            properties:
+              id: { type: string }
+              difficultyLevels: { type: array, items: { type: integer, minimum: 1, maximum: 12 }, uniqueItems: true }
     TemplateMetadata:
       type: object
       required: [locales, difficultyCalibration]
@@ -415,3 +460,20 @@ components:
           type: object
           required: [code, message]
           properties: { code: { type: string }, message: { type: string } }
+    DifficultyUnavailableError:
+      type: object
+      required: [error, templateId, requestedDifficultyLevel, availableDifficultyLevels]
+      properties:
+        error:
+          type: object
+          required: [code, message]
+          properties:
+            code: { type: string, const: difficulty_unavailable }
+            message: { type: string }
+        templateId: { type: string }
+        requestedDifficultyLevel: { type: integer, minimum: 1, maximum: 12 }
+        availableDifficultyLevels:
+          type: array
+          description: Alternative levels observed while trying all deterministic strategies for the requested level.
+          items: { type: integer, minimum: 1, maximum: 12 }
+          uniqueItems: true
