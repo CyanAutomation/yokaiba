@@ -30,6 +30,10 @@ if (!Array.isArray(puzzleBody.clues) || "solution" in puzzleBody) throw new Erro
 if (!etag) throw new Error("cacheable puzzle response did not include an ETag");
 
 const cached = await fetch(new URL(puzzlePath, baseUrl), { headers: { "if-none-match": etag } });
-if (cached.status !== 304) throw new Error(`conditional puzzle request returned ${cached.status}, expected 304`);
+if (cached.status !== 304) {
+  const body = await cached.text();
+  const requestId = cached.headers.get("x-request-id") ?? "missing";
+  throw new Error(`conditional puzzle request returned ${cached.status}, expected 304 (x-request-id: ${requestId}; body: ${JSON.stringify(body)})`);
+}
 
 console.log(`Yokaiba deployment smoke test passed for ${baseUrl.origin}`);
