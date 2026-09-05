@@ -1,4 +1,4 @@
-name: Kaseki Doc Sweep
+name: Kaseki Docs Sweep
 
 on:
   workflow_dispatch:
