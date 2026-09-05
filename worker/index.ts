@@ -79,6 +79,7 @@ export interface WorkerOptions {
   clock?: () => number;
   rateLimiter?: RateLimiter;
   generatedPuzzleCache?: GeneratedPuzzleCache;
+  generatePuzzleResponse?: (request: Request) => Response | Promise<Response>;
 }
 const RATE_WINDOW_MS = 60_000;
 const MAX_RATE_LIMIT_KEYS = 10_000;
@@ -331,12 +332,15 @@ export function createWorker(options: WorkerOptions = {}) {
         }));
       }
       if (path !== "/mcp") {
+        const routeRequest = () => path === "/v1/puzzles/generate" && options.generatePuzzleResponse
+          ? options.generatePuzzleResponse(request)
+          : createRestRouter(templates, { puzzleTokenSecret: env.PUZZLE_TOKEN_SECRET, ...build })(request);
         const cacheKey = request.method === "GET" && path === "/v1/puzzles/generate"
           ? generatedPuzzleCacheKey(request, env.PUZZLE_TOKEN_SECRET)
           : undefined;
         const restResponse = cacheKey
-          ? cachedGeneratedPuzzle(generatedPuzzleCache, cacheKey, clock()) ?? await createRestRouter(templates, { puzzleTokenSecret: env.PUZZLE_TOKEN_SECRET, ...build })(request)
-          : await createRestRouter(templates, { puzzleTokenSecret: env.PUZZLE_TOKEN_SECRET, ...build })(request);
+          ? cachedGeneratedPuzzle(generatedPuzzleCache, cacheKey, clock()) ?? await routeRequest()
+          : await routeRequest();
         if (cacheKey) cacheGeneratedPuzzle(generatedPuzzleCache, cacheKey, restResponse, clock());
         if (path === "/v1/puzzles/generate") observeDifficultyGeneration(restResponse, ctx);
         return finish(await cachePublicGet(restResponse, request));
