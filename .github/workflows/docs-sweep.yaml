@@ -107,15 +107,39 @@ jobs:
               }'
           )"
           
-          response="$(
-            curl --fail-with-body --silent --show-error \
+          response_file="$(mktemp)"
+
+          http_status="$(
+            curl --silent --show-error \
               --retry 3 --retry-all-errors --max-time 60 \
+              --output "$response_file" \
+              --write-out '%{http_code}' \
               --request POST "$KASEKI_BASE_URL/api/runs" \
               --header "Authorization: Bearer $KASEKI_API_TOKEN" \
               --header "Content-Type: application/json" \
               --data "$payload"
           )"
 
+          if [[ ! "$http_status" =~ ^2 ]]; then
+            echo "::error title=Kaseki submission failed::Kaseki returned HTTP $http_status"
+            echo "Kaseki response (HTTP $http_status):"
+            cat "$response_file"
+
+            {
+              echo "## Kaseki submission failed"
+              echo
+              echo "Kaseki returned HTTP \`$http_status\`."
+              echo
+              echo "### Response"
+              echo '```json'
+              jq . "$response_file" 2>/dev/null || cat "$response_file"
+              echo '```'
+            } >> "$GITHUB_STEP_SUMMARY"
+
+            exit 1
+          fi
+
+          response="$(<"$response_file")"
           echo "$response" | jq .
           run_id="$(echo "$response" | jq -er '.id')"
           echo "run_id=$run_id" >> "$GITHUB_OUTPUT"
