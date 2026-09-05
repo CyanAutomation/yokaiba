@@ -1,15 +1,10 @@
 import type { Clue, ClueConstraint, PuzzleTemplate } from "../domain/types.js";
+import { hash } from "../domain/hash.js";
 
 export const CLUE_LANGUAGE_VERSION = "yokaiba-clue-prose-v3";
 
 function capitalise(value: string) {
   return `${value[0]!.toUpperCase()}${value.slice(1)}`;
-}
-
-function hash(value: string): number {
-  let result = 2166136261;
-  for (const character of value) result = Math.imul(result ^ (character.codePointAt(0) ?? 0), 16777619);
-  return result >>> 0;
 }
 
 function termSubject(categoryId: string, value: string) {

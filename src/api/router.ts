@@ -1,5 +1,6 @@
 import { DifficultyUnavailableError, GENERATOR_VERSION, generatePuzzle, generatePuzzleAtDifficulty, SOLVER_VERSION } from "../generation/generator.js";
 import { issuePuzzleToken, verifyPuzzleToken } from "./puzzle-token.js";
+import { json } from "./json-response.js";
 import type { Difficulty, GeneratedPuzzle, PuzzleSpec, PuzzleTemplate, Solution } from "../domain/types.js";
 import { scenarioSummary } from "../catalogue.js";
 
@@ -13,10 +14,7 @@ const GENERATED_PUZZLE_CACHE_CONTROL = "public, max-age=300, s-maxage=300, must-
 export const SCENARIOS_CACHE_CONTROL = "public, max-age=300, s-maxage=300, must-revalidate";
 export const VERSION_CACHE_CONTROL = "no-cache";
 
-const json = (body: unknown, status = 200, headers?: HeadersInit) => new Response(JSON.stringify(body), {
-  status,
-  headers: { "content-type": "application/json; charset=utf-8", ...headers },
-});
+// JSON response builder provided by ./json-response.ts
 
 export interface RestRouterOptions {
   /** Required to issue tamper-proof puzzle tokens for server-side verification. */
