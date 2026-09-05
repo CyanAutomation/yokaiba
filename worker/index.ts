@@ -86,8 +86,24 @@ const MAX_RATE_LIMIT_KEYS = 10_000;
 const GENERATED_PUZZLE_CACHE_TTL_MS = 300_000;
 const MAX_GENERATED_PUZZLE_CACHE_ENTRIES = 128;
 
-export interface GeneratedPuzzleCacheEntry { expiresAt: number; response: Response; }
+export interface GeneratedPuzzleCacheEntry {
+  readonly expiresAt: number;
+  readonly status: number;
+  readonly statusText: string;
+  readonly headers: ReadonlyArray<readonly [string, string]>;
+  readonly body: ArrayBuffer;
+}
 export type GeneratedPuzzleCache = Map<string, GeneratedPuzzleCacheEntry>;
+
+function responseFromGeneratedPuzzleSnapshot(entry: GeneratedPuzzleCacheEntry): Response {
+  // Copy the bytes so each response owns its body and the cached snapshot is never
+  // transferred to, or consumed by, a request context.
+  return new Response(entry.body.slice(0), {
+    status: entry.status,
+    statusText: entry.statusText,
+    headers: entry.headers.map(([name, value]) => [name, value]),
+  });
+}
 
 function generatedPuzzleCacheKey(request: Request, puzzleTokenSecret: string | undefined): string {
   return `${request.url}\u0000${puzzleTokenSecret ?? ""}`;
@@ -103,13 +119,21 @@ function cachedGeneratedPuzzle(cache: GeneratedPuzzleCache, key: string, now: nu
   // Refresh insertion order so the oldest entry is evicted first.
   cache.delete(key);
   cache.set(key, entry);
-  return entry.response.clone();
+  return responseFromGeneratedPuzzleSnapshot(entry);
 }
 
-function cacheGeneratedPuzzle(cache: GeneratedPuzzleCache, key: string, response: Response, now: number): void {
-  if (response.status !== 200 && response.status !== 422) return;
-  cache.set(key, { expiresAt: now + GENERATED_PUZZLE_CACHE_TTL_MS, response: response.clone() });
+async function cacheGeneratedPuzzle(cache: GeneratedPuzzleCache, key: string, response: Response, now: number): Promise<Response> {
+  if (response.status !== 200 && response.status !== 422) return response;
+  const entry: GeneratedPuzzleCacheEntry = {
+    expiresAt: now + GENERATED_PUZZLE_CACHE_TTL_MS,
+    status: response.status,
+    statusText: response.statusText,
+    headers: [...response.headers].map(([name, value]) => [name, value] as const),
+    body: await response.arrayBuffer(),
+  };
+  cache.set(key, entry);
   while (cache.size > MAX_GENERATED_PUZZLE_CACHE_ENTRIES) cache.delete(cache.keys().next().value as string);
+  return responseFromGeneratedPuzzleSnapshot(entry);
 }
 
 export function createRateLimiter(rateLimits: RateLimitStore = new Map(), clock: () => number = Date.now): RateLimiter {
@@ -338,12 +362,16 @@ export function createWorker(options: WorkerOptions = {}) {
         const cacheKey = request.method === "GET" && path === "/v1/puzzles/generate"
           ? generatedPuzzleCacheKey(request, env.PUZZLE_TOKEN_SECRET)
           : undefined;
-        const restResponse = cacheKey
-          ? cachedGeneratedPuzzle(generatedPuzzleCache, cacheKey, clock()) ?? await routeRequest()
-          : await routeRequest();
-        if (cacheKey) cacheGeneratedPuzzle(generatedPuzzleCache, cacheKey, restResponse, clock());
-        if (path === "/v1/puzzles/generate") observeDifficultyGeneration(restResponse, ctx);
-        return finish(await cachePublicGet(restResponse, request));
+        let responseForRequest: Response;
+        if (cacheKey) {
+          const cachedResponse = cachedGeneratedPuzzle(generatedPuzzleCache, cacheKey, clock());
+          responseForRequest = cachedResponse
+            ?? await cacheGeneratedPuzzle(generatedPuzzleCache, cacheKey, await routeRequest(), clock());
+        } else {
+          responseForRequest = await routeRequest();
+        }
+        if (path === "/v1/puzzles/generate") observeDifficultyGeneration(responseForRequest, ctx);
+        return finish(await cachePublicGet(responseForRequest, request));
       }
       if (asRateLimitDecision(rateLimited(request, env.MCP_RATE_LIMIT, "mcp")).limited) {
         return finish(new Response(JSON.stringify({ error: { code: "rate_limited", message: "Too many requests" } }), {
