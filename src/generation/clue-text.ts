@@ -1,6 +1,10 @@
 import type { Clue, ClueConstraint, PuzzleTemplate } from "../domain/types.js";
 
-export const CLUE_LANGUAGE_VERSION = "yokaiba-clue-prose-v2";
+export const CLUE_LANGUAGE_VERSION = "yokaiba-clue-prose-v3";
+
+function capitalise(value: string) {
+  return `${value[0]!.toUpperCase()}${value.slice(1)}`;
+}
 
 function hash(value: string): number {
   let result = 2166136261;
@@ -46,7 +50,7 @@ function renderConstraint(template: PuzzleTemplate, constraint: ClueConstraint, 
   }
   if (constraint.kind === "notMatches") {
     const action = negativeAction(constraint.category, constraint.value);
-    return index === 0 ? `${constraint.subject} did not ${action}.` : `${constraint.subject} was not the competitor to ${action}.`;
+    return `${constraint.subject} did not ${action}.`;
   }
   if (constraint.kind === "sameRow") {
     const subject = termSubject(constraint.left.category, constraint.left.value);
@@ -59,19 +63,23 @@ function renderConstraint(template: PuzzleTemplate, constraint: ClueConstraint, 
     return `${subject[0]!.toUpperCase()}${subject.slice(1)} had ${constraint.right.value}.`;
   }
   if (constraint.kind === "before") {
+    const left = termSubject(constraint.left.category, constraint.left.value);
+    const right = termSubject(constraint.right.category, constraint.right.value);
     return index === 0
-      ? `In the ${template.title.toLowerCase()}, ${constraint.left.value} came before ${constraint.right.value}.`
-      : `${constraint.left.value} was earlier than ${constraint.right.value} in the ${template.title.toLowerCase()}.`;
+      ? `In the ${template.title.toLowerCase()}, ${left} came before ${right}.`
+      : `${capitalise(left)} was earlier than ${right} in the ${template.title.toLowerCase()}.`;
   }
   if (constraint.kind === "adjacent") {
     return index === 0
       ? `${constraint.left.value} and ${constraint.right.value} were consecutive in the ${template.title.toLowerCase()}.`
       : `In the ${template.title.toLowerCase()}, ${constraint.left.value} was next to ${constraint.right.value}.`;
   }
-  const places = constraint.distance === 1 ? "place" : "places";
+  const left = termSubject(constraint.left.category, constraint.left.value);
+  const right = termSubject(constraint.right.category, constraint.right.value);
+  const positions = constraint.distance === 1 ? "one position" : `${constraint.distance} positions`;
   return index === 0
-    ? `${constraint.left.value} and ${constraint.right.value} were ${constraint.distance} ${places} apart.`
-    : `Exactly ${constraint.distance} ${places} separated ${constraint.left.value} from ${constraint.right.value}.`;
+    ? `${capitalise(left)} was ${positions} away from ${right}.`
+    : `Exactly ${positions} separated ${left} from ${right}.`;
 }
 
 /** Render semantic constraints through a deterministic, bounded phrase catalogue. */
