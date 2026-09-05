@@ -85,55 +85,10 @@ const MAX_RATE_LIMIT_KEYS = 10_000;
 const GENERATED_PUZZLE_CACHE_TTL_MS = 300_000;
 const MAX_GENERATED_PUZZLE_CACHE_ENTRIES = 128;
 
-export interface GeneratedPuzzleCacheEntry {
-  readonly expiresAt: number;
-  readonly status: number;
-  readonly statusText: string;
-  readonly headers: ReadonlyArray<readonly [string, string]>;
-  readonly body: ArrayBuffer;
-}
+import type { GeneratedPuzzleCacheEntry } from "./cache.js";
+import { generatedPuzzleCacheKey, cachedGeneratedPuzzle, cacheGeneratedPuzzle, cachePublicGet } from "./cache.js";
+
 export type GeneratedPuzzleCache = Map<string, GeneratedPuzzleCacheEntry>;
-
-function responseFromGeneratedPuzzleSnapshot(entry: GeneratedPuzzleCacheEntry): Response {
-  // Copy the bytes so each response owns its body and the cached snapshot is never
-  // transferred to, or consumed by, a request context.
-  return new Response(entry.body.slice(0), {
-    status: entry.status,
-    statusText: entry.statusText,
-    headers: entry.headers.map(([name, value]) => [name, value]),
-  });
-}
-
-function generatedPuzzleCacheKey(request: Request, puzzleTokenSecret: string | undefined): string {
-  return `${request.url}\u0000${puzzleTokenSecret ?? ""}`;
-}
-
-function cachedGeneratedPuzzle(cache: GeneratedPuzzleCache, key: string, now: number): Response | undefined {
-  const entry = cache.get(key);
-  if (!entry) return undefined;
-  if (entry.expiresAt <= now) {
-    cache.delete(key);
-    return undefined;
-  }
-  // Refresh insertion order so the oldest entry is evicted first.
-  cache.delete(key);
-  cache.set(key, entry);
-  return responseFromGeneratedPuzzleSnapshot(entry);
-}
-
-async function cacheGeneratedPuzzle(cache: GeneratedPuzzleCache, key: string, response: Response, now: number): Promise<Response> {
-  if (response.status !== 200 && response.status !== 422) return response;
-  const entry: GeneratedPuzzleCacheEntry = {
-    expiresAt: now + GENERATED_PUZZLE_CACHE_TTL_MS,
-    status: response.status,
-    statusText: response.statusText,
-    headers: [...response.headers].map(([name, value]) => [name, value] as const),
-    body: await response.arrayBuffer(),
-  };
-  cache.set(key, entry);
-  while (cache.size > MAX_GENERATED_PUZZLE_CACHE_ENTRIES) cache.delete(cache.keys().next().value as string);
-  return responseFromGeneratedPuzzleSnapshot(entry);
-}
 
 export function createRateLimiter(rateLimits: RateLimitStore = new Map(), clock: () => number = Date.now): RateLimiter {
   return (request, rawLimit, scope) => {
@@ -185,19 +140,7 @@ function weaklyMatchesEtag(ifNoneMatch: string | null, etag: string): boolean {
   return ifNoneMatch.split(",").map(value => value.trim()).some(value => value === "*" || value.replace(/^W\//, "") === etag);
 }
 
-async function contentEtag(response: Response): Promise<string> {
-  const digest = await crypto.subtle.digest("SHA-256", await response.clone().arrayBuffer());
-  return `"yokaiba-v1-${[...new Uint8Array(digest)].map(byte => byte.toString(16).padStart(2, "0")).join("")}"`;
-}
-
-async function cachePublicGet(response: Response, request: Request): Promise<Response> {
-  if (request.method !== "GET" || (response.status !== 200 && response.status !== 422)) return response;
-  const etag = await contentEtag(response);
-  const headers = new Headers(response.headers);
-  headers.set("etag", etag);
-  if (weaklyMatchesEtag(request.headers.get("if-none-match"), etag)) return new Response(null, { status: 304, headers });
-  return new Response(response.body, { status: response.status, statusText: response.statusText, headers });
-}
+// `contentEtag` and `cachePublicGet` were moved to ./cache.ts and are imported above.
 
 /** Emits privacy-preserving calibration telemetry: never log a caller seed or answer. */
 function observeDifficultyGeneration(response: Response, ctx: ExecutionContext): void {
