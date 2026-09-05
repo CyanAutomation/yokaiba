@@ -226,15 +226,24 @@ test("the beginner curriculum can generate every calibrated difficulty from one 
   }
 });
 
-test("difficulty corpus audit is deterministic and reports human-trace coverage", () => {
-  const first = auditDifficultyCorpus(tournamentOrderTemplate, { seedPrefix: "audit-fixture", sampleSize: 12 });
-  const second = auditDifficultyCorpus(tournamentOrderTemplate, { seedPrefix: "audit-fixture", sampleSize: 12 });
+test("difficulty corpus audit aggregates human-trace and clue statistics", () => {
+  const report = auditDifficultyCorpus(tournamentOrderTemplate, { seedPrefix: "aggregation-0", sampleSize: 2 });
 
-  assert.deepEqual(first, second);
-  assert.equal(first.sampleSize, 12);
-  assert.equal(first.levelCounts.reduce((total, count) => total + count, 0), 12);
-  assert.ok(first.humanTrace.incomplete >= 0);
-  assert.ok(first.clues.average > 0);
+  assert.equal(report.sampleSize, 2);
+  assert.deepEqual(report.humanTrace, { complete: 1, incomplete: 1 });
+  assert.deepEqual(report.clues, { average: 8.5, minimum: 8, maximum: 9 });
+  assert.equal(report.levelCounts[1], 1);
+  assert.equal(report.levelCounts[3], 1);
+  assert.ok(report.levelCounts.every((count, index) => index === 1 || index === 3 ? count === 1 : count === 0));
+});
+
+test("difficulty corpus audit serialization is deterministic", () => {
+  const options = { seedPrefix: "audit-determinism", sampleSize: 1 };
+
+  assert.equal(
+    JSON.stringify(auditDifficultyCorpus(tournamentOrderTemplate, options)),
+    JSON.stringify(auditDifficultyCorpus(tournamentOrderTemplate, options)),
+  );
 });
 
 test("expert target generation favors relational deductions over direct facts", () => {
