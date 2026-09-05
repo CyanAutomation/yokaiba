@@ -21,7 +21,7 @@ import {
 } from "../src/index.js";
 import { championshipCircuitTemplate, createRestRouter, openDivisionTemplate, tournamentOrderTemplate } from "../src/index.js";
 import { issuePuzzleToken } from "../src/api/puzzle-token.js";
-import worker, { createRateLimiter, createWorker } from "../worker/index.js";
+import worker, { createRateLimiter, createWorker, type GeneratedPuzzleCache } from "../worker/index.js";
 
 const template: PuzzleTemplate = {
   id: "test-tournament",
@@ -896,8 +896,10 @@ test("worker returns an ETag and honors conditional public GETs", async () => {
 test("worker memoizes deterministic GET generation within the local cache TTL", async () => {
   let now = 1_000;
   let generationCalls = 0;
+  const generatedPuzzleCache: GeneratedPuzzleCache = new Map();
   const isolatedWorker = createWorker({
     clock: () => now,
+    generatedPuzzleCache,
     generatePuzzleResponse: () => {
       generationCalls += 1;
       return new Response(JSON.stringify({ generationCalls }), {
@@ -912,8 +914,20 @@ test("worker memoizes deterministic GET generation within the local cache TTL", 
   const first = await isolatedWorker.fetch(request(), {}, {} as ExecutionContext);
   assert.equal(first.status, 200);
   assert.deepEqual(await first.json(), { generationCalls: 1 });
+  const snapshot = [...generatedPuzzleCache.values()][0]!;
+  assert.equal("response" in snapshot, false);
+  assert.equal(snapshot.status, 200);
+  assert.equal(new TextDecoder().decode(snapshot.body), JSON.stringify({ generationCalls: 1 }));
 
-  assert.deepEqual(await (await isolatedWorker.fetch(request(), {}, {} as ExecutionContext)).json(), { generationCalls: 1 });
+  const cached = await isolatedWorker.fetch(request(), {}, {} as ExecutionContext);
+  const etag = cached.headers.get("etag");
+  assert.deepEqual(await cached.json(), { generationCalls: 1 });
+  assert.equal(generationCalls, 1);
+  const revalidated = await isolatedWorker.fetch(new Request(request(), { headers: {
+    "cf-connecting-ip": "192.0.2.91",
+    "if-none-match": etag!,
+  } }), {}, {} as ExecutionContext);
+  assert.equal(revalidated.status, 304);
   assert.equal(generationCalls, 1);
   now += 300_000;
   assert.deepEqual(await (await isolatedWorker.fetch(request(), {}, {} as ExecutionContext)).json(), { generationCalls: 2 });
@@ -922,8 +936,10 @@ test("worker memoizes deterministic GET generation within the local cache TTL", 
 
 test("worker bounds the documented local generation cache capacity", async () => {
   let generationCalls = 0;
+  const generatedPuzzleCache: GeneratedPuzzleCache = new Map();
   const isolatedWorker = createWorker({
     rateLimiter: () => false,
+    generatedPuzzleCache,
     generatePuzzleResponse: () => {
       generationCalls += 1;
       return new Response(JSON.stringify({ generationCalls }), {
@@ -937,6 +953,8 @@ test("worker bounds the documented local generation cache capacity", async () =>
     assert.equal((await isolatedWorker.fetch(request(seed), {}, {} as ExecutionContext)).status, 200);
   }
   assert.equal(generationCalls, 129);
+  assert.equal(generatedPuzzleCache.size, 128);
+  assert.ok([...generatedPuzzleCache.values()].every(entry => !("response" in entry) && entry.body instanceof ArrayBuffer));
 
   await isolatedWorker.fetch(request(128), {}, {} as ExecutionContext);
   assert.equal(generationCalls, 129);
@@ -945,7 +963,8 @@ test("worker bounds the documented local generation cache capacity", async () =>
 });
 
 test("worker caches and conditionally revalidates deterministic unavailable-difficulty responses", async () => {
-  const isolatedWorker = createWorker();
+  const generatedPuzzleCache: GeneratedPuzzleCache = new Map();
+  const isolatedWorker = createWorker({ generatedPuzzleCache });
   const url = "https://yokaiba.test/v1/puzzles/generate?templateId=open-division-v2&seed=review-20260904&difficultyLevel=7";
   const first = await isolatedWorker.fetch(new Request(url, { headers: { "cf-connecting-ip": "192.0.2.92" } }), {}, {} as ExecutionContext);
 
@@ -953,6 +972,10 @@ test("worker caches and conditionally revalidates deterministic unavailable-diff
   assert.equal(first.headers.get("cache-control"), "public, max-age=300, s-maxage=300, must-revalidate");
   const etag = first.headers.get("etag");
   assert.match(etag ?? "", /^"yokaiba-v1-[a-f0-9]{64}"$/);
+  const snapshot = [...generatedPuzzleCache.values()][0]!;
+  assert.equal(snapshot.status, 422);
+  assert.equal("response" in snapshot, false);
+  assert.ok(snapshot.body.byteLength > 0);
   const revalidated = await isolatedWorker.fetch(new Request(url, { headers: { "cf-connecting-ip": "192.0.2.92", "if-none-match": etag! } }), {}, {} as ExecutionContext);
   assert.equal(revalidated.status, 304);
 });
