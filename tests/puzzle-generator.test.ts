@@ -142,7 +142,7 @@ test("generated clue prose is natural and avoids implementation phrasing", () =>
 
   assert.ok(puzzle.clues.every(clue => !/associated with|entry associated/i.test(clue.text)));
   assert.ok(puzzle.clues.some(clue => /finished|fought|competed|bout|places?/i.test(clue.text)));
-  assert.ok(puzzle.clues.every(clue => clue.languageVersion === "yokaiba-clue-prose-v2"));
+  assert.ok(puzzle.clues.every(clue => clue.languageVersion === "yokaiba-clue-prose-v3"));
   assert.ok(puzzle.clues.every(clue => typeof clue.phraseVariant === "string"));
 });
 
@@ -161,6 +161,32 @@ test("direct clues keep the competitor as the grammatical subject", () => {
     "Kenji finished in 1st place.",
   ]);
   assert.ok(rendered.every(clue => !/\bfor\s+(Aki|Hana|Kenji)\./.test(clue)));
+});
+
+test("negative clues remain direct and grammatical across every phrase variant", () => {
+  const clues: Clue[] = [
+    { id: "not-tatami", constraint: { kind: "notMatches", subject: "Sora", category: "tatami", value: "Tatami 3" }, text: "" },
+    { id: "not-placing", constraint: { kind: "notMatches", subject: "Aki", category: "placing", value: "2nd" }, text: "" },
+    { id: "not-weight", constraint: { kind: "notMatches", subject: "Kenji", category: "weight", value: "-81 kg" }, text: "" },
+  ];
+
+  for (const seed of ["alpha", "beta", "gamma", "delta", "epsilon", "zeta"]) {
+    const rendered = renderClues(tournamentOrderTemplate, seed, clues).map(clue => clue.text);
+    assert.ok(rendered.every(clue => !/was not the competitor to/i.test(clue)));
+    assert.ok(rendered.every(clue => /^(Sora|Aki|Kenji) did not /.test(clue)));
+  }
+});
+
+test("relational clues name the competitors without mid-sentence capitalization", () => {
+  const clues: Clue[] = [
+    { id: "placing-order", constraint: { kind: "before", left: { category: "placing", value: "2nd" }, right: { category: "placing", value: "4th" } }, text: "" },
+    { id: "tatami-distance", constraint: { kind: "distance", left: { category: "tatami", value: "Tatami 4" }, right: { category: "placing", value: "3rd" }, distance: 1 }, text: "" },
+  ];
+
+  const rendered = renderClues(tournamentOrderTemplate, "alpha", clues).map(clue => clue.text);
+  assert.ok(rendered.every(clue => !/In the .*?, The competitor/.test(clue)));
+  assert.ok(rendered.includes("In the tournament order, the competitor who finished 2nd came before the competitor who finished 4th."));
+  assert.ok(rendered.some(clue => /one position (away from|separated .* from) the competitor who finished 3rd/i.test(clue)));
 });
 
 test("clue rendering is deterministic and rotates phrase variants within a puzzle", () => {
