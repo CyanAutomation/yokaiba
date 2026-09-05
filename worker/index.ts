@@ -4,6 +4,7 @@ import { tournamentOrderTemplate } from "../src/templates/tournament-order.js";
 import { openDivisionTemplate } from "../src/templates/open-division.js";
 import { championshipCircuitTemplate } from "../src/templates/championship-circuit.js";
 import { hostHeaderValidationResponse } from "@modelcontextprotocol/server";
+import { json } from "../src/api/json-response.js";
 
 interface Env {
   /** Matches Budokon's API-key secret name and protects the MCP endpoint. */
@@ -34,9 +35,7 @@ interface Env {
 const templates = [tournamentOrderTemplate, openDivisionTemplate, championshipCircuitTemplate];
 const mcp = createYokaibaMcpHandler(templates);
 
-function json(value: unknown, status = 200) {
-  return new Response(JSON.stringify(value), { status, headers: { "content-type": "application/json; charset=utf-8" } });
-}
+// JSON response builder provided by src/api/json-response.ts
 
 const encoder = new TextEncoder();
 

@@ -4,31 +4,13 @@ import { exhaustivePuzzleSolver } from "../constraints/solver.js";
 import { assessPuzzleDifficulty } from "./quality.js";
 import { isIjfSeniorMensWeightClass } from "../domain/ijf-weight-classes.js";
 import { renderClues } from "./clue-text.js";
+import { random, shuffled } from "./rng.js";
 
 export const GENERATOR_VERSION = "yokaiba-generator-v4";
 /** Version of the built-in solver used when callers do not provide one. */
 export const SOLVER_VERSION = exhaustivePuzzleSolver.version;
 
-function hash(seed: string): number {
-  let value = 2166136261;
-  for (const character of seed) { const code = character.codePointAt(0); if (code !== undefined) { value ^= code; value = Math.imul(value, 16777619); } }
-  return value >>> 0;
-}
-
-function random(seed: string) {
-  let state = hash(seed);
-  if (state === 0) state = 2166136261;
-  return () => { state ^= state << 13; state ^= state >>> 17; state ^= state << 5; return (state >>> 0) / 2 ** 32; };
-}
-
-function shuffled<T>(values: readonly T[], next: () => number): T[] {
-  const copy = [...values];
-  for (let index = copy.length - 1; index > 0; index -= 1) {
-    const target = Math.floor(next() * (index + 1));
-    [copy[index], copy[target]] = [copy[target], copy[index]];
-  }
-  return copy;
-}
+// RNG and shuffle are provided by ./rng.ts
 
 function validateTemplate(template: PuzzleTemplate) {
   const base = template.categories.find(category => category.id === template.baseCategory);
