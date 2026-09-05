@@ -21,7 +21,7 @@ import {
 } from "../src/index.js";
 import { championshipCircuitTemplate, createRestRouter, openDivisionTemplate, tournamentOrderTemplate } from "../src/index.js";
 import { issuePuzzleToken } from "../src/api/puzzle-token.js";
-import worker, { createRateLimiter, createWorker, type GeneratedPuzzleCache } from "../worker/index.js";
+import worker, { createRateLimiter, createWorker } from "../worker/index.js";
 
 const template: PuzzleTemplate = {
   id: "test-tournament",
@@ -884,24 +884,55 @@ test("worker returns an ETag and honors conditional public GETs", async () => {
   assert.equal(second.status, 304);
 });
 
-test("worker memoizes deterministic GET generation within a bounded local cache", async () => {
+test("worker memoizes deterministic GET generation within the local cache TTL", async () => {
   let now = 1_000;
-  const cache: GeneratedPuzzleCache = new Map();
-  const isolatedWorker = createWorker({ generatedPuzzleCache: cache, clock: () => now });
+  let generationCalls = 0;
+  const isolatedWorker = createWorker({
+    clock: () => now,
+    generatePuzzleResponse: () => {
+      generationCalls += 1;
+      return new Response(JSON.stringify({ generationCalls }), {
+        headers: { "content-type": "application/json" },
+      });
+    },
+  });
   const request = () => new Request("https://yokaiba.test/v1/puzzles/generate?templateId=tournament-order-v1&seed=memoized", {
     headers: { "cf-connecting-ip": "192.0.2.91" },
   });
 
   const first = await isolatedWorker.fetch(request(), {}, {} as ExecutionContext);
   assert.equal(first.status, 200);
-  assert.equal(cache.size, 1);
-  const [key, entry] = [...cache.entries()][0]!;
-  entry.response = new Response(JSON.stringify({ id: "served-from-memory" }), { headers: { "content-type": "application/json" } });
-  cache.set(key, entry);
+  assert.deepEqual(await first.json(), { generationCalls: 1 });
 
-  assert.deepEqual(await (await isolatedWorker.fetch(request(), {}, {} as ExecutionContext)).json(), { id: "served-from-memory" });
+  assert.deepEqual(await (await isolatedWorker.fetch(request(), {}, {} as ExecutionContext)).json(), { generationCalls: 1 });
+  assert.equal(generationCalls, 1);
   now += 300_000;
-  assert.notDeepEqual(await (await isolatedWorker.fetch(request(), {}, {} as ExecutionContext)).json(), { id: "served-from-memory" });
+  assert.deepEqual(await (await isolatedWorker.fetch(request(), {}, {} as ExecutionContext)).json(), { generationCalls: 2 });
+  assert.equal(generationCalls, 2);
+});
+
+test("worker bounds the documented local generation cache capacity", async () => {
+  let generationCalls = 0;
+  const isolatedWorker = createWorker({
+    rateLimiter: () => false,
+    generatePuzzleResponse: () => {
+      generationCalls += 1;
+      return new Response(JSON.stringify({ generationCalls }), {
+        headers: { "content-type": "application/json" },
+      });
+    },
+  });
+  const request = (seed: number) => new Request(`https://yokaiba.test/v1/puzzles/generate?templateId=tournament-order-v1&seed=capacity-${seed}`);
+
+  for (let seed = 0; seed < 129; seed += 1) {
+    assert.equal((await isolatedWorker.fetch(request(seed), {}, {} as ExecutionContext)).status, 200);
+  }
+  assert.equal(generationCalls, 129);
+
+  await isolatedWorker.fetch(request(128), {}, {} as ExecutionContext);
+  assert.equal(generationCalls, 129);
+  await isolatedWorker.fetch(request(0), {}, {} as ExecutionContext);
+  assert.equal(generationCalls, 130);
 });
 
 test("worker caches and conditionally revalidates deterministic unavailable-difficulty responses", async () => {
