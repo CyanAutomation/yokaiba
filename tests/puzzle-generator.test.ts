@@ -1045,10 +1045,13 @@ test("worker serves self-hosted Swagger UI with complete security controls", asy
 });
 
 test("the self-hosted Swagger UI assets are included in the deployment bundle", async () => {
-  for (const path of ["../public/swagger-ui/swagger-ui.css", "../public/swagger-ui/swagger-ui-bundle.js"]) {
-    const asset = await readFile(new URL(path, import.meta.url), "utf8");
-    assert.ok(asset.length > 1_000);
-  }
+  const stylesheet = await readFile(new URL("../public/swagger-ui/swagger-ui.css", import.meta.url), "utf8");
+  const bundle = await readFile(new URL("../public/swagger-ui/swagger-ui-bundle.js", import.meta.url), "utf8");
+  const wranglerConfiguration = await readFile(new URL("../wrangler.toml", import.meta.url), "utf8");
+
+  assert.match(stylesheet, /^\.swagger-ui\{/);
+  assert.match(bundle, /\bSwaggerUIBundle\b/);
+  assert.match(wranglerConfiguration, /\[assets\]\s+directory\s*=\s*"\.\/public"/);
 });
 
 test("worker delegates OpenAPI requests to the canonical asset path", async () => {
