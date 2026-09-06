@@ -547,7 +547,10 @@ test("OpenAPI documents every public REST endpoint", async () => {
         resolveLocalRef(specification, schema);
       }
       if ("requestSchema" in expected) {
-        const schema = operation.requestBody.content["application/json"].schema;
+        const schema = operation.requestBody?.content?.["application/json"]?.schema;
+        assert.ok(schema, `${method.toUpperCase()} ${path} must have request body schema`);
+        assert.equal(operation.requestBody.required, true);
+        assert.equal(schema.$ref, `#/components/schemas/${expected.requestSchema}`);
         assert.equal(operation.requestBody.required, true);
         assert.equal(schema.$ref, `#/components/schemas/${expected.requestSchema}`);
         resolveLocalRef(specification, schema);
