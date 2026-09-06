@@ -536,9 +536,11 @@ test("OpenAPI documents every public REST endpoint", async () => {
       assert.deepEqual(Object.keys(operation.responses), expected.statuses, `${method.toUpperCase()} ${path} response statuses`);
       const success = operation.responses["200"];
       for (const header of expected.headers) {
-        assert.ok(success.headers?.[header], `${method.toUpperCase()} ${path} must document ${header}`);
-        resolveLocalRef(specification, success.headers[header]);
-      }
+        const headerDef = success.headers?.[header];
+        assert.ok(headerDef, `${method.toUpperCase()} ${path} must document ${header}`);
+        if (typeof headerDef === "object" && "$ref" in headerDef) {
+          resolveLocalRef(specification, headerDef);
+        }
       if ("schema" in expected) {
         const schema = success.content?.["application/json"]?.schema;
         assert.ok(schema, `${method.toUpperCase()} ${path} must have application/json schema`);
