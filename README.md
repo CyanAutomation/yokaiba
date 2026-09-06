@@ -81,7 +81,7 @@ replay. The currently supported five-row templates are `open-division-v2` and
 `championship-circuit-v2`; both use the IJF sequence `-60 kg`, `-66 kg`,
 `-73 kg`, `-81 kg`, `-90 kg`.
 
-For browser games, use the cacheable GET form. Deterministic puzzle and scenario catalogue GET endpoints return public `Cache-Control` headers with a 300-second max-age and `must-revalidate`, so browsers and edge caches always check the origin before serving stored responses. `/v1/version` uses `Cache-Control: no-cache`, allowing clients to retain its ETag while always revalidating deployment metadata.
+For browser games, use the cacheable GET form. Deterministic puzzle and scenario catalogue GET endpoints return public `Cache-Control` headers with a 300-second max-age and `must-revalidate`. Browsers and edge caches may serve a fresh stored response for up to 300 seconds; once it is stale, they must revalidate before reuse. `/v1/version` uses `Cache-Control: no-cache`, allowing clients to retain its ETag while always revalidating deployment metadata.
 
 ```js
 const baseUrl = "https://yokaiba.scheimann.workers.dev";
