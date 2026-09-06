@@ -229,21 +229,15 @@ test("the beginner curriculum can generate every calibrated difficulty from one 
 test("difficulty corpus audit aggregates human-trace and clue statistics", () => {
   const report = auditDifficultyCorpus(tournamentOrderTemplate, { seedPrefix: "aggregation-0", sampleSize: 2 });
 
-  assert.equal(report.sampleSize, 2);
-  assert.deepEqual(report.humanTrace, { complete: 1, incomplete: 1 });
-  assert.deepEqual(report.clues, { average: 8.5, minimum: 8, maximum: 9 });
-  assert.equal(report.levelCounts[1], 1);
-  assert.equal(report.levelCounts[3], 1);
-  assert.ok(report.levelCounts.every((count, index) => index === 1 || index === 3 ? count === 1 : count === 0));
-});
-
-test("difficulty corpus audit serialization is deterministic", () => {
-  const options = { seedPrefix: "audit-determinism", sampleSize: 1 };
-
-  assert.equal(
-    JSON.stringify(auditDifficultyCorpus(tournamentOrderTemplate, options)),
-    JSON.stringify(auditDifficultyCorpus(tournamentOrderTemplate, options)),
-  );
+  assert.deepEqual(report, {
+    templateId: "tournament-order-v1",
+    modelVersion: "yokaiba-difficulty-v4",
+    sampleSize: 2,
+    seedPrefix: "aggregation-0",
+    levelCounts: [0, 1, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0],
+    humanTrace: { complete: 1, incomplete: 1 },
+    clues: { average: 8.5, minimum: 8, maximum: 9 },
+  });
 });
 
 test("expert target generation favors relational deductions over direct facts", () => {
