@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { createRequire } from "node:module";
 import { readFile } from "node:fs/promises";
 import test from "node:test";
 import {
@@ -22,6 +23,51 @@ import {
 import { championshipCircuitTemplate, createRestRouter, openDivisionTemplate, tournamentOrderTemplate } from "../src/index.js";
 import { issuePuzzleToken } from "../src/api/puzzle-token.js";
 import worker, { createRateLimiter, createWorker, type GeneratedPuzzleCache } from "../worker/index.js";
+
+type OpenApiObject = Record<string, any>;
+
+function parseOpenApiYaml(source: string): OpenApiObject {
+  // Swagger UI is the project's OpenAPI implementation and bundles the same
+  // YAML parser it uses when loading the public contract in the browser.
+  Object.assign(globalThis, { self: globalThis });
+  const require = createRequire(import.meta.url);
+  const SwaggerUI = require("swagger-ui-dist/swagger-ui-bundle.js");
+  const actions = SwaggerUI.plugins.Spec({ getSystem: () => ({}) }).statePlugins.spec.actions;
+  let parsed: OpenApiObject | undefined;
+  let parseError: unknown;
+  actions.parseToJson(source)({
+    specActions: { updateJsonSpec: (value: OpenApiObject) => { parsed = value; } },
+    specSelectors: { specStr: () => source },
+    errActions: {
+      clear: () => undefined,
+      newSpecErr: (error: unknown) => { parseError = error; },
+    },
+  });
+  assert.ifError(parseError);
+  assert.ok(parsed, "Swagger UI must parse the OpenAPI YAML into an object");
+  assert.equal(parsed.openapi, "3.1.0", "the parsed document must be OpenAPI 3.1");
+  assert.ok(parsed.info?.title && parsed.info?.version, "OpenAPI info is required");
+  assert.ok(parsed.paths && parsed.components?.schemas, "OpenAPI paths and component schemas are required");
+  return parsed;
+}
+
+function resolveLocalRef(document: OpenApiObject, value: OpenApiObject): OpenApiObject {
+  assert.equal(typeof value?.$ref, "string", "expected an OpenAPI reference object");
+  const reference = value.$ref as string;
+  assert.match(reference, /^#\//, "only local OpenAPI references are expected");
+  const target = reference.slice(2).split("/").reduce<unknown>((current, token) => {
+    assert.ok(current && typeof current === "object" && token in current, `unresolved OpenAPI reference: ${reference}`);
+    return (current as OpenApiObject)[token];
+  }, document);
+  assert.ok(target && typeof target === "object", `invalid OpenAPI reference target: ${reference}`);
+  return target as OpenApiObject;
+}
+
+function validateOpenApiReferences(document: OpenApiObject, value: unknown = document): void {
+  if (!value || typeof value !== "object") return;
+  if ("$ref" in value) resolveLocalRef(document, value as OpenApiObject);
+  for (const child of Object.values(value)) validateOpenApiReferences(document, child);
+}
 
 const template: PuzzleTemplate = {
   id: "test-tournament",
@@ -464,20 +510,70 @@ test("difficulty is reproducible and publishes deterministic human and solver ev
 });
 
 test("OpenAPI documents every public REST endpoint", async () => {
-  const specification = await readFile(new URL("../public/openapi/v1.yaml", import.meta.url), "utf8");
-  for (const path of ["/healthz", "/readyz", "/docs", "/openapi/v1.yaml", "/v1/scenarios", "/v1/capabilities", "/v1/version", "/v1/puzzles/generate", "/v1/puzzles/verify"]) {
-    assert.match(specification, new RegExp(`^  ${path.replace(/[/.]/g, "\\$&")}:`, "m"));
+  const source = await readFile(new URL("../public/openapi/v1.yaml", import.meta.url), "utf8");
+  const specification = parseOpenApiYaml(source);
+  validateOpenApiReferences(specification);
+  const endpoints = {
+    "/healthz": { get: { statuses: ["200"], schema: "Health", headers: ["X-Request-Id"] } },
+    "/readyz": { get: { statuses: ["200"], schema: "Readiness", headers: ["X-Request-Id"] } },
+    "/docs": { get: { statuses: ["200"], headers: ["X-Request-Id"] } },
+    "/openapi/v1.yaml": { get: { statuses: ["200"], headers: ["X-Request-Id"] } },
+    "/v1/scenarios": { get: { statuses: ["200", "304", "429"], schema: "ScenarioList", headers: ["Access-Control-Allow-Origin", "Cache-Control", "ETag", "X-Request-Id"] } },
+    "/v1/capabilities": { get: { statuses: ["200", "304", "429"], schema: "Capabilities", headers: ["Access-Control-Allow-Origin", "Cache-Control", "ETag", "X-Request-Id"] } },
+    "/v1/version": { get: { statuses: ["200", "304", "429"], schema: "Version", headers: ["Access-Control-Allow-Origin", "Cache-Control", "ETag", "X-Request-Id"] } },
+    "/v1/puzzles/generate": {
+      get: { statuses: ["200", "304", "400", "404", "422", "429"], schema: "GeneratedPuzzle", headers: ["Access-Control-Allow-Origin", "Cache-Control", "ETag", "X-Request-Id"] },
+      post: { statuses: ["200", "400", "404", "422", "429"], schema: "GeneratedPuzzle", requestSchema: "GenerationRequest", headers: ["Access-Control-Allow-Origin", "X-Request-Id"] },
+    },
+    "/v1/puzzles/verify": { post: { statuses: ["200", "400", "429", "503"], schema: "PuzzleVerificationResult", requestSchema: "PuzzleVerificationRequest", headers: ["Access-Control-Allow-Origin", "X-Request-Id"] } },
+  } as const;
+
+  assert.deepEqual(Object.keys(specification.paths), Object.keys(endpoints));
+  for (const [path, expectedMethods] of Object.entries(endpoints)) {
+    const pathItem = specification.paths[path];
+    assert.ok(pathItem, `missing OpenAPI path: ${path}`);
+    assert.deepEqual(Object.keys(pathItem), Object.keys(expectedMethods), `${path} must expose only its supported methods`);
+    for (const [method, expected] of Object.entries(expectedMethods)) {
+      const operation = pathItem[method];
+      assert.deepEqual(Object.keys(operation.responses), expected.statuses, `${method.toUpperCase()} ${path} response statuses`);
+      const success = operation.responses["200"];
+      for (const header of expected.headers) {
+        const headerDef = success.headers?.[header];
+        assert.ok(headerDef, `${method.toUpperCase()} ${path} must document ${header}`);
+        if (typeof headerDef === "object" && "$ref" in headerDef) {
+          resolveLocalRef(specification, headerDef);
+        }
+      if ("schema" in expected) {
+        const schema = success.content?.["application/json"]?.schema;
+        assert.ok(schema, `${method.toUpperCase()} ${path} must have application/json schema`);
+        assert.equal(schema.$ref, `#/components/schemas/${expected.schema}`);
+        assert.equal(schema.$ref, `#/components/schemas/${expected.schema}`);
+        resolveLocalRef(specification, schema);
+      }
+      if ("requestSchema" in expected) {
+        const schema = operation.requestBody?.content?.["application/json"]?.schema;
+        assert.ok(schema, `${method.toUpperCase()} ${path} must have request body schema`);
+        assert.equal(operation.requestBody.required, true);
+        assert.equal(schema.$ref, `#/components/schemas/${expected.requestSchema}`);
+        assert.equal(operation.requestBody.required, true);
+        assert.equal(schema.$ref, `#/components/schemas/${expected.requestSchema}`);
+        resolveLocalRef(specification, schema);
+      }
+      for (const response of Object.values(operation.responses) as OpenApiObject[]) {
+        if (response.$ref) resolveLocalRef(specification, response);
+      }
+    }
   }
-  assert.match(specification, /GeneratedPuzzle:/);
-  assert.match(specification, /PuzzleVerificationRequest:/);
-  assert.match(specification, /Difficulty:/);
-  assert.match(specification, /Error:/);
-  assert.match(specification, /X-Request-Id:/);
-  assert.match(specification, /Access-Control-Allow-Origin:/);
-  assert.match(specification, /'304':/);
-  assert.match(specification, /DifficultyUnavailable:/);
-  assert.match(specification, /phraseVariant:/);
-  assert.match(specification, /scoreThresholds: \{ type: array, minItems: 3, maxItems: 3, items: \{ type: number \} \}/);
+
+  const schemas = specification.components.schemas;
+  for (const name of ["GeneratedPuzzle", "PuzzleVerificationRequest", "Difficulty", "Error", "DifficultyUnavailableError"]) assert.ok(schemas[name]);
+  assert.ok(schemas.Clue.properties.phraseVariant);
+  assert.deepEqual(schemas.TemplateMetadata.properties.difficultyCalibration.properties.scoreThresholds, {
+    type: "array",
+    minItems: 3,
+    maxItems: 3,
+    items: { type: "number" },
+  });
 });
 
 test("REST generation redacts the hidden solution and includes reproducibility metadata", async () => {
