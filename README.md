@@ -81,7 +81,7 @@ replay. The currently supported five-row templates are `open-division-v2` and
 `championship-circuit-v2`; both use the IJF sequence `-60 kg`, `-66 kg`,
 `-73 kg`, `-81 kg`, `-90 kg`.
 
-For browser games, use the cacheable GET form. Deterministic puzzles and the scenario catalogue are cached for five minutes and then revalidated, so a generator release cannot be held indefinitely by a stale browser or edge cache. `/v1/version` uses `Cache-Control: no-cache`, allowing clients to retain its ETag while always revalidating deployment metadata.
+For browser games, use the cacheable GET form. Deterministic puzzle and scenario catalogue GET endpoints return public `Cache-Control` headers with a 300-second max-age and `must-revalidate`, so browsers and edge caches always check the origin before serving stored responses. `/v1/version` uses `Cache-Control: no-cache`, allowing clients to retain its ETag while always revalidating deployment metadata.
 
 ```js
 const baseUrl = "https://yokaiba.scheimann.workers.dev";
@@ -103,7 +103,7 @@ curl -X POST http://localhost:8787/v1/puzzles/generate \
 
 Generated puzzles include `difficulty` (`level` 1–12, label, model identifier, and deterministic evidence). Tournament Order is calibrated to levels 1–4, Open Division to 5–8, and Championship Circuit to 9–12. Each template publishes its locale metadata and its own 1,000-seed calibration strategy. Difficulty combines the deduction trace, relational/cross-category clue structure, and deterministic solver telemetry; retain `modelVersion` and `evidence` when recording scores. The no-guess trace is an engineering diagnostic, not a substitute for player research.
 
-When `difficultyLevel` is supplied, generation searches deterministic clue-order strategies for that exact seed. It never substitutes another seed: if no strategy reaches the requested band, the API returns `422` with `difficulty_unavailable` and `availableDifficultyLevels`. Those alternatives are levels observed while trying every strategy for the requested band, rather than a costly exhaustive seed-wide search. Clients can suggest one of them or generate a fresh seed. Deterministic `422` GET responses use the same five-minute revalidated cache policy as successful generation, preventing repeated expensive misses.
+When `difficultyLevel` is supplied, generation searches deterministic clue-order strategies for that exact seed. It never substitutes another seed: if no strategy reaches the requested band, the API returns `422` with `difficulty_unavailable` and `availableDifficultyLevels`. Those alternatives are levels observed while trying every strategy for the requested band, rather than a costly exhaustive seed-wide search. Clients can suggest one of them or generate a fresh seed. Deterministic `422` GET responses use the same public `Cache-Control` headers with `must-revalidate` as successful generation, preventing repeated expensive misses.
 
 For a production browser client, handle validation, unavailable-difficulty, rate-limit, and conditional-cache responses explicitly:
 
