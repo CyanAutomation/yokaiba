@@ -21,8 +21,11 @@ each generated puzzle so deterministic replay remains auditable.
 
 For local solver profiling, `solveWithTelemetry(spec, clues, limit)` returns
 the normal solutions together with visited permutation nodes, evaluated ready
-constraints, and elapsed milliseconds. It is diagnostic-only; the default
-`solve` and `countSolutions` APIs retain the same exhaustive-solver contract.
+constraints, and elapsed milliseconds. Telemetry, including the exact counter
+values, is diagnostic-only and is not part of the public solver contract; the
+default `solve` and `countSolutions` APIs retain the same exhaustive-solver
+contract. Tests and profiling tools can pass a fourth `now` function to
+`solveWithTelemetry` when deterministic elapsed timing is required.
 
 ## Develop and verify
 
