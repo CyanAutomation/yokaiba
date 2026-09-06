@@ -29,9 +29,16 @@ type OpenApiObject = Record<string, any>;
 function parseOpenApiYaml(source: string): OpenApiObject {
   // Swagger UI is the project's OpenAPI implementation and bundles the same
   // YAML parser it uses when loading the public contract in the browser.
-  Object.assign(globalThis, { self: globalThis });
   const require = createRequire(import.meta.url);
-  const SwaggerUI = require("swagger-ui-dist/swagger-ui-bundle.js");
+  const originalSelf = Object.getOwnPropertyDescriptor(globalThis, "self");
+  let SwaggerUI: OpenApiObject;
+  try {
+    Object.defineProperty(globalThis, "self", { value: globalThis, configurable: true });
+    SwaggerUI = require("swagger-ui-dist/swagger-ui-bundle.js");
+  } finally {
+    if (originalSelf) Object.defineProperty(globalThis, "self", originalSelf);
+    else Reflect.deleteProperty(globalThis, "self");
+  }
   const actions = SwaggerUI.plugins.Spec({ getSystem: () => ({}) }).statePlugins.spec.actions;
   let parsed: OpenApiObject | undefined;
   let parseError: unknown;
@@ -540,22 +547,20 @@ test("OpenAPI documents every public REST endpoint", async () => {
       for (const header of expected.headers) {
         const headerDef = success.headers?.[header];
         assert.ok(headerDef, `${method.toUpperCase()} ${path} must document ${header}`);
-        if (typeof headerDef === "object" && "$ref" in headerDef) {
+        if (typeof headerDef === "object" && headerDef !== null && "$ref" in headerDef) {
           resolveLocalRef(specification, headerDef);
         }
+      }
       if ("schema" in expected) {
-        const schema = success.content?.["application/json"]?.schema;
+        const schema = success?.content?.["application/json"]?.schema;
         assert.ok(schema, `${method.toUpperCase()} ${path} must have application/json schema`);
-        assert.equal(schema.$ref, `#/components/schemas/${expected.schema}`);
         assert.equal(schema.$ref, `#/components/schemas/${expected.schema}`);
         resolveLocalRef(specification, schema);
       }
       if ("requestSchema" in expected) {
         const schema = operation.requestBody?.content?.["application/json"]?.schema;
         assert.ok(schema, `${method.toUpperCase()} ${path} must have request body schema`);
-        assert.equal(operation.requestBody.required, true);
-        assert.equal(schema.$ref, `#/components/schemas/${expected.requestSchema}`);
-        assert.equal(operation.requestBody.required, true);
+        assert.equal(operation.requestBody?.required, true);
         assert.equal(schema.$ref, `#/components/schemas/${expected.requestSchema}`);
         resolveLocalRef(specification, schema);
       }
