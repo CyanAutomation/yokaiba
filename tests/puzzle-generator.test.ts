@@ -95,6 +95,17 @@ function createRecordingSolver(countSolutions: PuzzleSolver["countSolutions"]) {
   return { calls, solver };
 }
 
+test("Open Division publishes its documented five-row template contract", () => {
+  assert.equal(openDivisionTemplate.id, "open-division-v2");
+  assert.equal(openDivisionTemplate.baseCategory, "judoka");
+  assert.ok(openDivisionTemplate.categories.every(category => category.values.length === 5));
+  assert.deepEqual(openDivisionTemplate.metadata!.locales, { default: "en", supported: ["en"] });
+
+  const weightCategory = openDivisionTemplate.categories.find(category => category.id === "weight");
+  assert.ok(weightCategory);
+  assert.ok(weightCategory.values.every(isIjfSeniorMensWeightClass));
+});
+
 test("templates partition the global 1–12 difficulty scale into course bands", () => {
   assert.deepEqual(tournamentOrderTemplate.metadata!.difficultyCalibration.levelRange, [1, 4]);
   assert.deepEqual(openDivisionTemplate.metadata!.difficultyCalibration.levelRange, [5, 8]);
@@ -507,7 +518,15 @@ test("REST scenario catalogue publishes valid boards for every template", async 
   const response = await route(new Request("https://yokaiba.test/v1/scenarios"));
 
   assert.equal(response.status, 200);
-  const body = await response.json() as { scenarios: Array<{ id: string; baseCategory: string; categories: Array<{ id: string; values: string[] }> }> };
+  const body = await response.json() as {
+    scenarios: Array<{
+      id: string;
+      title: string;
+      baseCategory: string;
+      categories: Array<{ id: string; values: string[] }>;
+      metadata?: PuzzleTemplate["metadata"];
+    }>;
+  };
   assert.equal(body.scenarios.length, templates.length);
 
   for (const template of templates) {
@@ -516,6 +535,13 @@ test("REST scenario catalogue publishes valid boards for every template", async 
 
     const scenario = body.scenarios.find(candidate => candidate.id === template.id);
     assert.ok(scenario, `${template.id} must be present in the catalogue`);
+    assert.deepEqual(scenario, {
+      id: template.id,
+      title: template.title,
+      baseCategory: template.baseCategory,
+      categories: template.categories,
+      ...(template.metadata ? { metadata: template.metadata } : {}),
+    });
     const categoryIds = scenario.categories.map(category => category.id);
     assert.equal(new Set(categoryIds).size, categoryIds.length, `${scenario.id} category IDs must be unique`);
 
