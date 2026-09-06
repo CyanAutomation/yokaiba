@@ -95,15 +95,13 @@ function createRecordingSolver(countSolutions: PuzzleSolver["countSolutions"]) {
   return { calls, solver };
 }
 
-test("Open Division publishes its documented five-row template contract", () => {
-  assert.equal(openDivisionTemplate.id, "open-division-v2");
-  assert.equal(openDivisionTemplate.baseCategory, "judoka");
-  assert.ok(openDivisionTemplate.categories.every(category => category.values.length === 5));
-  assert.deepEqual(openDivisionTemplate.metadata!.locales, { default: "en", supported: ["en"] });
-
-  const weightCategory = openDivisionTemplate.categories.find(category => category.id === "weight");
-  assert.ok(weightCategory);
-  assert.ok(weightCategory.values.every(isIjfSeniorMensWeightClass));
+test("Championship Circuit publishes its documented five-row expert board", () => {
+  assert.equal(championshipCircuitTemplate.id, "championship-circuit-v2");
+  assert.ok(championshipCircuitTemplate.categories.every(category => category.values.length === 5));
+  assert.equal(
+    championshipCircuitTemplate.categories.filter(category => category.id !== championshipCircuitTemplate.baseCategory).length,
+    3,
+  );
 });
 
 test("templates partition the global 1–12 difficulty scale into course bands", () => {
