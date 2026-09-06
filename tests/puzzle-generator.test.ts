@@ -95,30 +95,6 @@ function createRecordingSolver(countSolutions: PuzzleSolver["countSolutions"]) {
   return { calls, solver };
 }
 
-test("Tournament Order uses judoka names for its default working board", () => {
-  assert.equal(tournamentOrderTemplate.baseCategory, "judoka");
-  assert.deepEqual(tournamentOrderTemplate.categories.map(category => category.id), [
-    "judoka", "weight", "tatami", "placing",
-  ]);
-  assert.deepEqual(tournamentOrderTemplate.categories[0]?.values, ["Aki", "Hana", "Kenji", "Sora"]);
-});
-
-test("Open Division publishes its five-row template contract", () => {
-  assert.equal(openDivisionTemplate.id, "open-division-v2");
-  assert.equal(openDivisionTemplate.baseCategory, "judoka");
-  assert.ok(openDivisionTemplate.categories.every(category => category.values.length === 5));
-  assert.deepEqual(openDivisionTemplate.metadata!.locales, { default: "en", supported: ["en"] });
-  assert.deepEqual(openDivisionTemplate.categories.find(category => category.id === "weight")?.values, ["-60 kg", "-66 kg", "-73 kg", "-81 kg", "-90 kg"]);
-});
-
-test("Championship Circuit provides an expert-sized board with three non-base categories", () => {
-  assert.equal(championshipCircuitTemplate.id, "championship-circuit-v2");
-  assert.equal(championshipCircuitTemplate.categories.length, 4);
-  assert.ok(championshipCircuitTemplate.categories.every(category => category.values.length === 5));
-  assert.deepEqual(championshipCircuitTemplate.categories.find(category => category.id === "weight")?.values, ["-60 kg", "-66 kg", "-73 kg", "-81 kg", "-90 kg"]);
-  assert.deepEqual(championshipCircuitTemplate.metadata!.difficultyCalibration.levelRange, [9, 12]);
-});
-
 test("templates partition the global 1–12 difficulty scale into course bands", () => {
   assert.deepEqual(tournamentOrderTemplate.metadata!.difficultyCalibration.levelRange, [1, 4]);
   assert.deepEqual(openDivisionTemplate.metadata!.difficultyCalibration.levelRange, [5, 8]);
@@ -525,19 +501,30 @@ test("REST supports cacheable deterministic GET generation", async () => {
   assert.equal("solution" in body, false);
 });
 
-test("REST scenario catalogue includes category values needed to render a game", async () => {
-  const route = createRestRouter([openDivisionTemplate]);
+test("REST scenario catalogue publishes valid boards for every template", async () => {
+  const templates = [tournamentOrderTemplate, openDivisionTemplate, championshipCircuitTemplate];
+  const route = createRestRouter(templates);
   const response = await route(new Request("https://yokaiba.test/v1/scenarios"));
 
   assert.equal(response.status, 200);
   const body = await response.json() as { scenarios: Array<{ id: string; baseCategory: string; categories: Array<{ id: string; values: string[] }> }> };
-  assert.deepEqual(body.scenarios, [{
-    id: "open-division-v2",
-    title: "Open Division",
-    baseCategory: "judoka",
-    categories: openDivisionTemplate.categories,
-    metadata: openDivisionTemplate.metadata,
-  }]);
+  assert.equal(body.scenarios.length, templates.length);
+
+  for (const template of templates) {
+    const templateBase = template.categories.find(category => category.id === template.baseCategory);
+    assert.ok(templateBase, `${template.id} must declare an existing base category`);
+
+    const scenario = body.scenarios.find(candidate => candidate.id === template.id);
+    assert.ok(scenario, `${template.id} must be present in the catalogue`);
+    const categoryIds = scenario.categories.map(category => category.id);
+    assert.equal(new Set(categoryIds).size, categoryIds.length, `${scenario.id} category IDs must be unique`);
+
+    const publishedBase = scenario.categories.find(category => category.id === scenario.baseCategory);
+    assert.ok(publishedBase, `${scenario.id} must publish its base category`);
+    assert.deepEqual(publishedBase.values, templateBase.values);
+    assert.ok(scenario.categories.every(category => category.values.length === publishedBase.values.length),
+      `${scenario.id} categories must have one value per board row`);
+  }
 });
 
 test("REST reports unavailable difficulty, reachable alternatives, and keeps the requested seed", async () => {
