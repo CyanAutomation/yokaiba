@@ -69,6 +69,32 @@ const noGuessSolveFixture: Clue[] = [
   { id: "aki-not-second", constraint: { kind: "notMatches", subject: "Aki", category: "placing", value: "2nd" }, text: "Aki did not finish second." },
 ];
 
+type SolverCall = {
+  method: "solve" | "countSolutions";
+  specId: string;
+  clueIds: string[];
+  limit: number | undefined;
+};
+
+function createRecordingSolver(countSolutions: PuzzleSolver["countSolutions"]) {
+  const calls: SolverCall[] = [];
+  const record = (method: SolverCall["method"], specId: string, clues: readonly Clue[], limit: number | undefined) => {
+    calls.push({ method, specId, clueIds: clues.map(clue => clue.id), limit });
+  };
+  const solver: PuzzleSolver = {
+    version: "contract-test-v1",
+    solve: (spec, clues, limit) => {
+      record("solve", spec.id, clues, limit);
+      return [];
+    },
+    countSolutions: (spec, clues, limit) => {
+      record("countSolutions", spec.id, clues, limit);
+      return countSolutions(spec, clues, limit);
+    },
+  };
+  return { calls, solver };
+}
+
 test("Tournament Order uses judoka names for its default working board", () => {
   assert.equal(tournamentOrderTemplate.baseCategory, "judoka");
   assert.deepEqual(tournamentOrderTemplate.categories.map(category => category.id), [
@@ -354,22 +380,28 @@ test("solver telemetry reports searched nodes, evaluated constraints, and elapse
   assert.ok(result.solutions.every(solution => satisfiesConstraint(solverFixtureSpec, solution, clue.constraint)));
 });
 
-test("generation and quality evaluation use an injected solver and record its version", () => {
-  const calls: string[] = [];
-  const solver: PuzzleSolver = {
-    version: "contract-test-v1",
-    solve: (spec, clues, limit) => exhaustivePuzzleSolver.solve(spec, clues, limit),
-    countSolutions: (spec, clues, limit) => {
-      calls.push(`count:${clues.length}:${limit}`);
-      return exhaustivePuzzleSolver.countSolutions(spec, clues, limit);
-    },
-  };
+test("generation uses the injected solver and records its version", () => {
+  const { calls, solver } = createRecordingSolver(() => 1);
   const puzzle = generatePuzzle(template, "injected-solver", solver);
-  const quality = evaluatePuzzleQuality(puzzle.spec, puzzle.clues, solver);
 
   assert.equal(puzzle.solverVersion, "contract-test-v1");
+  assert.deepEqual(calls, [
+    { method: "countSolutions", specId: "test-tournament", clueIds: [], limit: 2 },
+    { method: "countSolutions", specId: "test-tournament", clueIds: [], limit: 2 },
+  ]);
+});
+
+test("quality evaluation makes exact uniqueness and redundancy solver calls", () => {
+  const { calls, solver } = createRecordingSolver((_spec, clues) => clues.length === 2 ? 1 : 2);
+  const quality = evaluatePuzzleQuality(qualityFixtureSpec, noGuessSolveFixture, solver);
+
   assert.equal(quality.unique, true);
-  assert.ok(calls.length > 0);
+  assert.deepEqual(quality.redundantClueIds, []);
+  assert.deepEqual(calls, [
+    { method: "countSolutions", specId: "quality-fixture", clueIds: ["aki-red", "aki-not-second"], limit: 2 },
+    { method: "countSolutions", specId: "quality-fixture", clueIds: ["aki-not-second"], limit: 2 },
+    { method: "countSolutions", specId: "quality-fixture", clueIds: ["aki-red"], limit: 2 },
+  ]);
 });
 
 test("the generated clue set is minimal for uniqueness", () => {
