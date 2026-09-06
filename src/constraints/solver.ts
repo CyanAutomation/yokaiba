@@ -74,9 +74,9 @@ interface CandidateDimension {
 }
 
 export interface SolverTelemetry {
-  /** Permutation assignments considered by the depth-first search. */
+  /** Diagnostic count of permutation assignments considered; its exact value is not part of the solver's public contract. */
   readonly nodesVisited: number;
-  /** Compiled constraints actually evaluated; not constraints deferred as unready. */
+  /** Diagnostic count of compiled constraints evaluated, excluding those deferred as unready; its exact value is not contractual. */
   readonly constraintChecks: number;
   /** Wall-clock time spent inside the solve call. */
   readonly elapsedMs: number;
@@ -156,8 +156,13 @@ function compileConstraints(spec: PuzzleSpec, clues: readonly Clue[]): CompiledC
 }
 
 /** Exhaustive, deterministic solver. Intended for the MVP's deliberately small grids. */
-export function solveWithTelemetry(spec: PuzzleSpec, clues: readonly Clue[], limit = Number.POSITIVE_INFINITY): SolveWithTelemetryResult {
-  const startedAt = performance.now();
+export function solveWithTelemetry(
+  spec: PuzzleSpec,
+  clues: readonly Clue[],
+  limit = Number.POSITIVE_INFINITY,
+  now: () => number = () => performance.now(),
+): SolveWithTelemetryResult {
+  const startedAt = now();
   const base = category(spec, spec.baseCategory);
   const originalDimensions = spec.categories.filter(item => item.id !== spec.baseCategory);
   if (base.values.length < MIN_SUPPORTED_ROWS || base.values.length > MAX_SUPPORTED_ROWS) {
@@ -207,7 +212,7 @@ export function solveWithTelemetry(spec: PuzzleSpec, clues: readonly Clue[], lim
     }
   };
   if (limit > 0 && check(rootConstraints)) visit(0);
-  return { solutions: results, telemetry: { nodesVisited, constraintChecks, elapsedMs: performance.now() - startedAt } };
+  return { solutions: results, telemetry: { nodesVisited, constraintChecks, elapsedMs: now() - startedAt } };
 }
 
 /** Solve using the exhaustive baseline without retaining telemetry. */

@@ -351,17 +351,19 @@ test("solver telemetry reports searched nodes, evaluated constraints, and elapse
     constraint: { kind: "matches", subject: "Aki", category: "pet", value: "Cat" },
     text: "Aki has Cat.",
   };
-  const result = solveWithTelemetry(solverFixtureSpec, [clue], 2);
+  let currentTime = 1_000;
+  const advancingClock = () => {
+    const reading = currentTime;
+    currentTime += 25;
+    return reading;
+  };
+  const result = solveWithTelemetry(solverFixtureSpec, [clue], 2, advancingClock);
 
   assert.equal(result.solutions.length, 2);
-  for (const counter of [result.telemetry.nodesVisited, result.telemetry.constraintChecks]) {
-    assert.ok(Number.isFinite(counter));
-    assert.ok(Number.isInteger(counter));
-    assert.ok(counter >= 0);
-  }
-  assert.ok(result.telemetry.constraintChecks > 0);
-  assert.ok(Number.isFinite(result.telemetry.elapsedMs));
-  assert.ok(result.telemetry.elapsedMs >= 0);
+  assert.equal(result.telemetry.nodesVisited, 3);
+  assert.equal(result.telemetry.constraintChecks, 1);
+  assert.ok(result.telemetry.nodesVisited > result.telemetry.constraintChecks);
+  assert.equal(result.telemetry.elapsedMs, 25);
   assert.ok(result.solutions.every(solution => satisfiesConstraint(solverFixtureSpec, solution, clue.constraint)));
 });
 
