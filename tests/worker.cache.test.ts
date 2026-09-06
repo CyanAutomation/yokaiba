@@ -33,20 +33,61 @@ test("createRateLimiter enforces small limits and reports remaining/reset", () =
   assert.deepEqual(atReset, { limited: false, remaining: 1, resetAt: 1_120 });
 });
 
-test("generated puzzle cache stores and returns snapshots", async () => {
+test("generated puzzle cache stores an immutable response snapshot through its TTL", async () => {
   const cache = new Map();
   const req = new Request("https://example.com/v1/puzzles/generate");
   const key = generatedPuzzleCacheKey(req, undefined);
-  const now = Date.now();
-  const response = new Response("ok", { status: 200 });
+  const storedAt = 1_700_000_000_000;
+  const bodyBytes = new TextEncoder().encode('{"puzzle":"representative"}');
+  const response = new Response(bodyBytes, {
+    status: 422,
+    statusText: "Unprocessable Content",
+    headers: {
+      "content-type": "application/json; charset=utf-8",
+      "x-generation-seed": "fixed-seed",
+    },
+  });
 
-  const cached = await cacheGeneratedPuzzle(cache, key, response, now);
-  assert.equal(cached.status, 200);
-  const read = await cached.text();
-  assert.equal(read, "ok");
+  const returned = await cacheGeneratedPuzzle(cache, key, response, storedAt);
+  const cached = cachedGeneratedPuzzle(cache, key, storedAt);
+  assert.ok(cached);
+  assert.notStrictEqual(returned, response);
+  assert.notStrictEqual(cached, response);
+  assert.notStrictEqual(cached, returned);
 
-  const hit = cachedGeneratedPuzzle(cache, key, now);
-  assert.ok(hit);
-  const hitText = await hit!.text();
-  assert.equal(hitText, "ok");
+  const entry = cache.get(key);
+  assert.ok(entry);
+  assert.ok(entry.body instanceof ArrayBuffer);
+  assert.ok(Array.isArray(entry.headers));
+  assert.notStrictEqual(entry, response);
+
+  // Mutating the inputs and the first materialized response cannot alter the
+  // byte/header snapshot used to materialize later cache hits.
+  bodyBytes.fill(0);
+  response.headers.set("x-generation-seed", "changed-original");
+
+  const expectedHeaders = {
+    "content-type": "application/json; charset=utf-8",
+    "x-generation-seed": "fixed-seed",
+  };
+  assert.equal(await returned.text(), '{"puzzle":"representative"}');
+  assert.equal(returned.status, 422);
+  assert.equal(returned.statusText, "Unprocessable Content");
+  assert.equal(returned.headers.get("content-type"), expectedHeaders["content-type"]);
+  assert.equal(returned.headers.get("x-generation-seed"), expectedHeaders["x-generation-seed"]);
+
+  returned.headers.set("x-generation-seed", "changed-returned");
+
+  assert.equal(cached.status, 422);
+  assert.equal(cached.statusText, "Unprocessable Content");
+  assert.equal(cached.headers.get("content-type"), expectedHeaders["content-type"]);
+  assert.equal(cached.headers.get("x-generation-seed"), expectedHeaders["x-generation-seed"]);
+  assert.equal(await cached.text(), '{"puzzle":"representative"}');
+
+  const immediatelyBeforeExpiry = cachedGeneratedPuzzle(cache, key, storedAt + 300_000 - 1);
+  assert.ok(immediatelyBeforeExpiry);
+  assert.equal(await immediatelyBeforeExpiry.text(), '{"puzzle":"representative"}');
+
+  assert.equal(cachedGeneratedPuzzle(cache, key, storedAt + 300_000), undefined);
+  assert.equal(cache.has(key), false);
 });
