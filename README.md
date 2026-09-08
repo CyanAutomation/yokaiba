@@ -167,7 +167,7 @@ Allowed origins receive `GET, POST, OPTIONS` CORS headers. Public GET responses 
 
 The Worker uses a best-effort per-isolate REST rate limit (60 requests/minute by default; configure `REST_RATE_LIMIT`) when no provider binding is available. Answer verification has a separate tighter 10 requests/minute fallback (`VERIFY_RATE_LIMIT`). REST responses publish `RateLimit-Limit` and `RateLimit-Policy`. When the Worker applies the local fallback, it also publishes `RateLimit-Remaining` and Unix-second `RateLimit-Reset`; the Cloudflare binding reports only allow/deny, so those two quota fields are absent while it is enforcing requests. Rate-limited responses always publish `RateLimit-Remaining: 0` and `Retry-After`. Each Worker isolate also keeps a bounded, five-minute LRU response cache for deterministic GET generation as a second layer behind edge caching; verification and POST generation are never retained there.
 
-For production, configure both Cloudflare Rate Limiting bindings: `REST_RATE_LIMITER` for general REST traffic and `VERIFY_RATE_LIMITER` for answer verification. Each is keyed by client IP and route and provides enforcement across isolates; their namespaces must remain distinct because their limits differ. `/readyz` reports `rateLimitProvider` and `verifyRateLimitProvider` separately. A binding exception logs the structured `rate_limit_provider_failure` event and switches the affected readiness field to `fallback`, so configure an alert for that event. Keep the in-memory fallback for local development and temporary binding failures.
+For production, configure the Cloudflare Rate Limiting bindings in `wrangler.toml`: `REST_RATE_LIMITER` for general REST traffic, `VERIFY_RATE_LIMITER` for answer verification, and the three MCP bindings described below. Their namespaces must remain distinct because their limits differ. `/readyz` reports every provider separately. A binding exception logs `rate_limit_provider_failure` and switches the affected readiness field to `fallback`; every rejection also logs `rate_limited`. Keep the in-memory fallback for local development and temporary binding failures.
 
 ## MCP and deployment
 
@@ -175,12 +175,14 @@ MCP serves `list_scenarios` and `generate_puzzle` at `/mcp`. It requires both `A
 
 ```sh
 npx wrangler secret put API_KEY
+# Optional: replaces API_KEY with a JSON map of client labels to distinct keys.
+npx wrangler secret put MCP_API_KEYS
 npx wrangler secret put MCP_ALLOWED_HOSTNAMES
 npx wrangler secret put REST_ALLOWED_ORIGINS
 npm run deploy
 curl -fsS https://your-worker.workers.dev/healthz
 ```
 
-`MCP_ALLOWED_HOSTNAMES` is a comma-separated hostname allowlist (for example `yokaiba.example.com,yokaiba.workers.dev`), not an origin list. MCP is rate-limited to 30 requests/minute per isolate by default; configure `MCP_RATE_LIMIT` if needed.
+`MCP_ALLOWED_HOSTNAMES` is a comma-separated hostname allowlist (for example `yokaiba.example.com,yokaiba.workers.dev`), not an origin list. Production MCP rate limiting has three layers: `MCP_PREAUTH_RATE_LIMITER` allows 10 requests per 10 seconds per IP before authentication; `MCP_RATE_LIMITER` allows 30 requests per minute for the authenticated API-key fingerprint; and `MCP_GENERATE_RATE_LIMITER` separately allows 10 `generate_puzzle` calls per minute for that fingerprint. The fingerprint is SHA-256, so the API key is never supplied to the provider or logs. If a binding is unavailable, matching local fallbacks are used: `MCP_PREAUTH_RATE_LIMIT` (default 10), `MCP_RATE_LIMIT` (default 30), and `MCP_GENERATE_RATE_LIMIT` (default 10). `API_KEY` remains the simple single-key setup. For genuinely per-customer quotas, instead configure `MCP_API_KEYS` as a Worker secret holding a JSON object of client labels to distinct keys, for example `{"game":"key-1","partner":"key-2"}`; it replaces `API_KEY` when present.
 
 For GitHub deployment automation, configure `CLOUDFLARE_API_TOKEN` and `CLOUDFLARE_ACCOUNT_ID` as repository secrets, plus `CLOUDFLARE_DEPLOYMENT_URL` as a repository variable containing the canonical Worker origin (for example `https://yokaiba.example.workers.dev`). CI injects the package version and immutable Git SHA into the deployed Worker; `/healthz`, `/readyz`, and `/v1/version` expose them for support and cache diagnostics. The deploy workflow verifies health, readiness, version metadata, public puzzle redaction, conditional GET caching, and a deployed OpenAPI contract check after each deployment.

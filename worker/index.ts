@@ -9,10 +9,16 @@ import { json } from "../src/api/json-response.js";
 interface Env {
   /** Matches Budokon's API-key secret name and protects the MCP endpoint. */
   API_KEY?: string;
+  /** Optional JSON object of client IDs to API keys for per-client MCP quotas. */
+  MCP_API_KEYS?: string;
   /** Required comma-separated hostnames, e.g. yokaiba.example.com,yokaiba.workers.dev. */
   MCP_ALLOWED_HOSTNAMES?: string;
   /** Optional requests-per-minute override. Defaults to 30. */
   MCP_RATE_LIMIT?: string;
+  /** Optional unauthenticated MCP requests-per-window override. Defaults to 10. */
+  MCP_PREAUTH_RATE_LIMIT?: string;
+  /** Optional expensive generate_puzzle MCP requests-per-minute override. Defaults to 10. */
+  MCP_GENERATE_RATE_LIMIT?: string;
   /** Comma-separated browser origins permitted to call the public REST API. */
   REST_ALLOWED_ORIGINS?: string;
   /** HMAC secret used to issue and validate browser puzzle tokens. */
@@ -28,6 +34,12 @@ interface Env {
   REST_RATE_LIMITER?: { limit(options: { key: string }): Promise<{ success: boolean }> };
   /** Optional Cloudflare Rate Limiting binding for production-wide answer-verification enforcement. */
   VERIFY_RATE_LIMITER?: { limit(options: { key: string }): Promise<{ success: boolean }> };
+  /** Optional Cloudflare binding that throttles unauthenticated MCP traffic before authentication. */
+  MCP_PREAUTH_RATE_LIMITER?: { limit(options: { key: string }): Promise<{ success: boolean }> };
+  /** Optional Cloudflare binding for authenticated MCP request enforcement. */
+  MCP_RATE_LIMITER?: { limit(options: { key: string }): Promise<{ success: boolean }> };
+  /** Optional Cloudflare binding for the expensive MCP generate_puzzle operation. */
+  MCP_GENERATE_RATE_LIMITER?: { limit(options: { key: string }): Promise<{ success: boolean }> };
   /** Static public assets, including Swagger UI and the canonical OpenAPI document. */
   ASSETS?: { fetch(request: Request): Promise<Response> };
 }
@@ -58,10 +70,50 @@ function constantTimeEqual(expected: string, candidate: string): boolean {
   return difference === 0;
 }
 
+function requestApiKey(request: Request): string | null {
+  return request.headers.get("authorization")?.replace(/^Bearer\s+/i, "") ?? request.headers.get("x-api-key");
+}
+
 function authorized(request: Request, key: string | undefined) {
   if (!key) return false;
-  const candidate = request.headers.get("authorization")?.replace(/^Bearer\s+/i, "") ?? request.headers.get("x-api-key");
+  const candidate = requestApiKey(request);
   return candidate !== null && constantTimeEqual(key, candidate);
+}
+
+function configuredMcpApiKeys(env: Env): string[] | undefined {
+  if (!env.MCP_API_KEYS) return env.API_KEY ? [env.API_KEY] : undefined;
+  try {
+    const parsed = JSON.parse(env.MCP_API_KEYS) as unknown;
+    if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) return undefined;
+    const keys = Object.values(parsed).filter((value): value is string => typeof value === "string" && value.length > 0);
+    return keys.length > 0 ? keys : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+function authenticatedMcpApiKey(request: Request, env: Env): string | undefined {
+  const candidate = requestApiKey(request);
+  const keys = configuredMcpApiKeys(env);
+  if (!candidate || !keys) return undefined;
+  let matchingKey: string | undefined;
+  for (const key of keys) if (constantTimeEqual(key, candidate)) matchingKey ??= key;
+  return matchingKey;
+}
+
+async function apiKeyFingerprint(key: string): Promise<string> {
+  const digest = await crypto.subtle.digest("SHA-256", encoder.encode(key));
+  return Array.from(new Uint8Array(digest), byte => byte.toString(16).padStart(2, "0")).join("");
+}
+
+async function mcpToolName(request: Request): Promise<string | undefined> {
+  if (request.method !== "POST") return undefined;
+  try {
+    const payload = await request.clone().json() as { method?: unknown; params?: { name?: unknown } };
+    return payload.method === "tools/call" && typeof payload.params?.name === "string" ? payload.params.name : undefined;
+  } catch {
+    return undefined;
+  }
 }
 
 export type RateLimitStore = Map<string, { count: number; resetAt: number }>;
@@ -192,13 +244,11 @@ async function providerRateLimitDecision(
   provider: Env["REST_RATE_LIMITER"] | undefined,
   request: Request,
   onProviderFailure: () => void,
+  key = `${request.headers.get("cf-connecting-ip") ?? "anonymous"}:${new URL(request.url).pathname}`,
 ): Promise<RateLimitDecision | undefined> {
   if (provider) {
     try {
-      const url = new URL(request.url);
-      const path = url.pathname;
-      const client = request.headers.get("cf-connecting-ip") ?? "anonymous";
-      return { limited: !(await provider.limit({ key: `${client}:${path}` })).success };
+      return { limited: !(await provider.limit({ key })).success };
     } catch {
       onProviderFailure();
       console.error(JSON.stringify({ event: "rate_limit_provider_failure", path: new URL(request.url).pathname }));
@@ -238,6 +288,9 @@ export function createWorker(options: WorkerOptions = {}) {
   const generatedPuzzleCache = options.generatedPuzzleCache ?? new Map<string, GeneratedPuzzleCacheEntry>();
   let rateLimitProviderFailed = false;
   let verifyRateLimitProviderFailed = false;
+  let mcpPreAuthRateLimitProviderFailed = false;
+  let mcpRateLimitProviderFailed = false;
+  let mcpGenerateRateLimitProviderFailed = false;
   return {
     async fetch(request: Request, env: Env, ctx: ExecutionContext): Promise<Response> {
       const startedAt = Date.now();
@@ -254,6 +307,7 @@ export function createWorker(options: WorkerOptions = {}) {
       const restRequest = path.startsWith("/v1/");
       const responseCorsHeaders = restRequest ? corsHeaders(request.headers.get("origin"), configuredOrigins(env.REST_ALLOWED_ORIGINS)) : undefined;
       let rateLimitDecision: RateLimitDecision | undefined;
+      let rateLimitScope: string | undefined;
       const finish = (response: Response) => {
         response.headers.set("x-request-id", requestId);
         if (restRequest) {
@@ -265,6 +319,7 @@ export function createWorker(options: WorkerOptions = {}) {
           if (rateLimitDecision?.resetAt !== undefined) response.headers.set("ratelimit-reset", String(rateLimitDecision.resetAt));
         }
         if (responseCorsHeaders) for (const [name, value] of Object.entries(responseCorsHeaders)) response.headers.set(name, value);
+        if (response.status === 429) console.log(JSON.stringify({ event: "rate_limited", requestId, path, scope: rateLimitScope ?? "unknown" }));
         console.log(JSON.stringify({ event: "request", requestId, method: request.method, path, status: response.status, durationMs: Date.now() - startedAt }));
         return response;
       };
@@ -275,6 +330,9 @@ export function createWorker(options: WorkerOptions = {}) {
         status: "ready", build,
         rateLimitProvider: env.REST_RATE_LIMITER && !rateLimitProviderFailed ? "configured" : "fallback",
         verifyRateLimitProvider: env.VERIFY_RATE_LIMITER && !verifyRateLimitProviderFailed ? "configured" : "fallback",
+        mcpPreAuthRateLimitProvider: env.MCP_PREAUTH_RATE_LIMITER && !mcpPreAuthRateLimitProviderFailed ? "configured" : "fallback",
+        mcpRateLimitProvider: env.MCP_RATE_LIMITER && !mcpRateLimitProviderFailed ? "configured" : "fallback",
+        mcpGenerateRateLimitProvider: env.MCP_GENERATE_RATE_LIMITER && !mcpGenerateRateLimitProviderFailed ? "configured" : "fallback",
       }));
       if (path === "/docs" || path === "/docs/") return finish(swaggerUiResponse());
       if (path === "/openapi/v1.yaml") return finish(await staticAsset(request, env, "/openapi/v1.yaml", "application/yaml; charset=utf-8"));
@@ -291,6 +349,7 @@ export function createWorker(options: WorkerOptions = {}) {
         () => { rateLimitProviderFailed = true; },
         () => { verifyRateLimitProviderFailed = true; },
       );
+      if (restRequest) rateLimitScope = path === "/v1/puzzles/verify" ? "verify" : "rest";
       if (rateLimitDecision?.limited) {
         return finish(new Response(JSON.stringify({ error: { code: "rate_limited", message: "Too many requests" } }), {
           status: 429,
@@ -315,18 +374,54 @@ export function createWorker(options: WorkerOptions = {}) {
         if (path === "/v1/puzzles/generate") observeDifficultyGeneration(responseForRequest, ctx);
         return finish(await cachePublicGet(responseForRequest, request));
       }
-      if (asRateLimitDecision(rateLimited(request, env.MCP_RATE_LIMIT, "mcp")).limited) {
+      rateLimitScope = "mcp-preauth";
+      rateLimitDecision = await providerRateLimitDecision(
+        env.MCP_PREAUTH_RATE_LIMITER,
+        request,
+        () => { mcpPreAuthRateLimitProviderFailed = true; },
+      ) ?? asRateLimitDecision(rateLimited(request, env.MCP_PREAUTH_RATE_LIMIT ?? env.MCP_RATE_LIMIT ?? "10", "mcp-preauth"));
+      if (rateLimitDecision.limited) {
         return finish(new Response(JSON.stringify({ error: { code: "rate_limited", message: "Too many requests" } }), {
           status: 429,
           headers: { "content-type": "application/json; charset=utf-8", "retry-after": "60" },
         }));
       }
-      if (!env.API_KEY || !env.MCP_ALLOWED_HOSTNAMES) return finish(json({ error: { code: "not_configured", message: "MCP credentials and allowed hosts are required" } }, 503));
-      if (!authorized(request, env.API_KEY)) return finish(json({ error: { code: "unauthorized", message: "A valid API key is required" } }, 401));
+      const authenticatedApiKey = authenticatedMcpApiKey(request, env);
+      if (!configuredMcpApiKeys(env) || !env.MCP_ALLOWED_HOSTNAMES) return finish(json({ error: { code: "not_configured", message: "MCP credentials and allowed hosts are required" } }, 503));
+      if (!authenticatedApiKey) return finish(json({ error: { code: "unauthorized", message: "A valid API key is required" } }, 401));
       const hostnames = env.MCP_ALLOWED_HOSTNAMES.split(",").map(value => value.trim()).filter(Boolean);
       const rejectedHost = hostHeaderValidationResponse(request, hostnames);
       if (rejectedHost) return finish(rejectedHost);
       if (!allowedOrigin(request, hostnames)) return finish(json({ error: { code: "forbidden", message: "Origin is not allowed" } }, 403));
+      const principal = `api-key:${await apiKeyFingerprint(authenticatedApiKey)}`;
+      rateLimitScope = "mcp";
+      rateLimitDecision = await providerRateLimitDecision(
+        env.MCP_RATE_LIMITER,
+        request,
+        () => { mcpRateLimitProviderFailed = true; },
+        `${principal}:mcp`,
+      ) ?? asRateLimitDecision(rateLimited(request, env.MCP_RATE_LIMIT, "mcp"));
+      if (rateLimitDecision.limited) {
+        return finish(new Response(JSON.stringify({ error: { code: "rate_limited", message: "Too many requests" } }), {
+          status: 429,
+          headers: { "content-type": "application/json; charset=utf-8", "retry-after": "60" },
+        }));
+      }
+      if (await mcpToolName(request) === "generate_puzzle") {
+        rateLimitScope = "mcp-generate";
+        rateLimitDecision = await providerRateLimitDecision(
+          env.MCP_GENERATE_RATE_LIMITER,
+          request,
+          () => { mcpGenerateRateLimitProviderFailed = true; },
+          `${principal}:generate_puzzle`,
+        ) ?? asRateLimitDecision(rateLimited(request, env.MCP_GENERATE_RATE_LIMIT ?? "10", "mcp-generate"));
+        if (rateLimitDecision.limited) {
+          return finish(new Response(JSON.stringify({ error: { code: "rate_limited", message: "Too many requests" } }), {
+            status: 429,
+            headers: { "content-type": "application/json; charset=utf-8", "retry-after": "60" },
+          }));
+        }
+      }
       return finish(await mcp.fetch(request));
     },
   } satisfies ExportedHandler<Env>;

@@ -9,10 +9,13 @@ run_worker_first = ["/docs", "/docs/", "/openapi/*"]
 
 # Set these as Worker secrets before deployment:
 #   npx wrangler secret put API_KEY
+#   npx wrangler secret put MCP_API_KEYS # optional JSON map for per-client keys
 #   npx wrangler secret put MCP_ALLOWED_HOSTNAMES
 #   npx wrangler secret put REST_ALLOWED_ORIGINS
 #   npx wrangler secret put PUZZLE_TOKEN_SECRET
 # API_KEY matches the Budokon Worker convention. It is required for /mcp only.
+# MCP_API_KEYS may replace API_KEY with a JSON object mapping client labels to
+# distinct API keys, for example {"game":"...","partner":"..."}.
 # MCP_ALLOWED_HOSTNAMES is a comma-separated hostname allowlist; it is required
 # for the MCP handler's Origin and Host validation.
 # REST_ALLOWED_ORIGINS is a comma-separated list of exact browser origins that
@@ -33,6 +36,33 @@ name = "VERIFY_RATE_LIMITER"
 # This namespace must remain distinct from REST_RATE_LIMITER so verification has
 # its own 10/minute provider-enforced counter.
 namespace_id = "870283"
+
+  [ratelimits.simple]
+  limit = 10
+  period = 60
+
+[[ratelimits]]
+name = "MCP_PREAUTH_RATE_LIMITER"
+# A short per-IP window protects authentication from invalid-key floods.
+namespace_id = "870284"
+
+  [ratelimits.simple]
+  limit = 10
+  period = 10
+
+[[ratelimits]]
+name = "MCP_RATE_LIMITER"
+# This namespace is keyed by a SHA-256 API-key fingerprint, never the secret itself.
+namespace_id = "870285"
+
+  [ratelimits.simple]
+  limit = 30
+  period = 60
+
+[[ratelimits]]
+name = "MCP_GENERATE_RATE_LIMITER"
+# Keep expensive generation separate from lightweight MCP discovery requests.
+namespace_id = "870286"
 
   [ratelimits.simple]
   limit = 10
