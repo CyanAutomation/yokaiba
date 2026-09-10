@@ -10,6 +10,7 @@ import {
   generatePuzzleAtDifficulty,
   DifficultyUnavailableError,
   renderClues,
+  aggregateDifficultyAuditRecords,
   auditDifficultyCorpus,
   isIjfSeniorMensWeightClass,
   MAX_SUPPORTED_ROWS,
@@ -270,17 +271,25 @@ test("the beginner curriculum can generate every calibrated difficulty from one 
 });
 
 test("difficulty corpus audit aggregates human-trace and clue statistics", () => {
-  const report = auditDifficultyCorpus(tournamentOrderTemplate, { seedPrefix: "aggregation-0", sampleSize: 2 });
+  const statistics = aggregateDifficultyAuditRecords([
+    { level: 2, humanTraceComplete: true, clueCount: 5 },
+    { level: 2, humanTraceComplete: false, clueCount: 8 },
+    { level: 12, humanTraceComplete: true, clueCount: 11 },
+  ]);
 
-  assert.deepEqual(report, {
-    templateId: "tournament-order-v1",
-    modelVersion: "yokaiba-difficulty-v4",
-    sampleSize: 2,
-    seedPrefix: "aggregation-0",
-    levelCounts: [0, 1, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0],
-    humanTrace: { complete: 1, incomplete: 1 },
-    clues: { average: 8.5, minimum: 8, maximum: 9 },
+  assert.deepEqual(statistics, {
+    levelCounts: [0, 2, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1],
+    humanTrace: { complete: 2, incomplete: 1 },
+    clues: { average: 8, minimum: 5, maximum: 11 },
   });
+});
+
+test("difficulty corpus audit emits a report for a real template", () => {
+  const report = auditDifficultyCorpus(tournamentOrderTemplate, { seedPrefix: "audit-integration", sampleSize: 1 });
+
+  assert.equal(report.templateId, tournamentOrderTemplate.id);
+  assert.equal(report.sampleSize, 1);
+  assert.equal(report.levelCounts.reduce((total, count) => total + count, 0), 1);
 });
 
 test("expert target generation favors relational deductions over direct facts", () => {
