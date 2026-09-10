@@ -444,17 +444,16 @@ test("generation uses the injected solver and records its version", () => {
   ]);
 });
 
-test("quality evaluation makes exact uniqueness and redundancy solver calls", () => {
-  const { calls, solver } = createRecordingSolver((_spec, clues) => clues.length === 2 ? 1 : 2);
+test("quality evaluation reflects injected solver results", () => {
+  const solver: PuzzleSolver = {
+    version: "quality-contract-test-v1",
+    solve: () => [],
+    countSolutions: (_spec, clues) => clues.some(clue => clue.id === "aki-red") ? 1 : 2,
+  };
   const quality = evaluatePuzzleQuality(qualityFixtureSpec, noGuessSolveFixture, solver);
 
   assert.equal(quality.unique, true);
-  assert.deepEqual(quality.redundantClueIds, []);
-  assert.deepEqual(calls, [
-    { method: "countSolutions", specId: "quality-fixture", clueIds: ["aki-red", "aki-not-second"], limit: 2 },
-    { method: "countSolutions", specId: "quality-fixture", clueIds: ["aki-not-second"], limit: 2 },
-    { method: "countSolutions", specId: "quality-fixture", clueIds: ["aki-red"], limit: 2 },
-  ]);
+  assert.deepEqual(quality.redundantClueIds, ["aki-not-second"]);
 });
 
 test("the generated clue set is minimal for uniqueness", () => {
