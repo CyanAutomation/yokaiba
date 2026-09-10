@@ -122,32 +122,6 @@ const noGuessSolveFixture: Clue[] = [
   { id: "aki-not-second", constraint: { kind: "notMatches", subject: "Aki", category: "placing", value: "2nd" }, text: "Aki did not finish second." },
 ];
 
-type SolverCall = {
-  method: "solve" | "countSolutions";
-  specId: string;
-  clueIds: string[];
-  limit: number | undefined;
-};
-
-function createRecordingSolver(countSolutions: PuzzleSolver["countSolutions"]) {
-  const calls: SolverCall[] = [];
-  const record = (method: SolverCall["method"], specId: string, clues: readonly Clue[], limit: number | undefined) => {
-    calls.push({ method, specId, clueIds: clues.map(clue => clue.id), limit });
-  };
-  const solver: PuzzleSolver = {
-    version: "contract-test-v1",
-    solve: (spec, clues, limit) => {
-      record("solve", spec.id, clues, limit);
-      return [];
-    },
-    countSolutions: (spec, clues, limit) => {
-      record("countSolutions", spec.id, clues, limit);
-      return countSolutions(spec, clues, limit);
-    },
-  };
-  return { calls, solver };
-}
-
 test("Championship Circuit publishes its documented five-row expert board", () => {
   assert.equal(championshipCircuitTemplate.id, "championship-circuit-v2");
   assert.ok(championshipCircuitTemplate.categories.every(category => category.values.length === 5));
@@ -434,14 +408,16 @@ test("solver telemetry reports searched nodes, evaluated constraints, and elapse
 });
 
 test("generation uses the injected solver and records its version", () => {
-  const { calls, solver } = createRecordingSolver(() => 1);
+  const solver: PuzzleSolver = {
+    version: "contract-test-v1",
+    solve: () => [],
+    countSolutions: (_spec, clues) => clues.some(clue => clue.constraint.kind === "distance") ? 1 : 2,
+  };
   const puzzle = generatePuzzle(template, "injected-solver", solver);
 
   assert.equal(puzzle.solverVersion, "contract-test-v1");
-  assert.deepEqual(calls, [
-    { method: "countSolutions", specId: "test-tournament", clueIds: [], limit: 2 },
-    { method: "countSolutions", specId: "test-tournament", clueIds: [], limit: 2 },
-  ]);
+  assert.equal(puzzle.clues.length, 1);
+  assert.equal(puzzle.clues[0]?.constraint.kind, "distance");
 });
 
 test("quality evaluation reflects injected solver results", () => {
