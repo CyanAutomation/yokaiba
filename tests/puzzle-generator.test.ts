@@ -18,6 +18,7 @@ import {
   solve,
   solveWithTelemetry,
   type Clue,
+  type DifficultyAuditRecord,
   type PuzzleSolver,
   type PuzzleTemplate,
 } from "../src/index.js";
@@ -282,6 +283,21 @@ test("difficulty corpus audit aggregates human-trace and clue statistics", () =>
     humanTrace: { complete: 2, incomplete: 1 },
     clues: { average: 8, minimum: 5, maximum: 11 },
   });
+});
+
+test("difficulty corpus audit rejects levels outside the 1–12 scale", () => {
+  const record = (level: number): DifficultyAuditRecord => ({
+    level: level as DifficultyAuditRecord["level"],
+    humanTraceComplete: true,
+    clueCount: 5,
+  });
+
+  for (const level of [0, 13, 1.5, Number.NaN]) {
+    assert.throws(
+      () => aggregateDifficultyAuditRecords([record(level)]),
+      { name: "RangeError", message: `difficulty level must be an integer between 1 and 12, received ${level}` },
+    );
+  }
 });
 
 test("difficulty corpus audit emits a report for a real template", () => {
