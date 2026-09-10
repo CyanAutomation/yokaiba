@@ -10,7 +10,7 @@ export const championshipCircuitTemplate: PuzzleTemplate = {
     { id: "judoka", label: "Judoka", values: ["Aki", "Hana", "Kenji", "Mika", "Sora"] },
     { id: "weight", label: "Weight division", values: IJF_SENIOR_MENS_WEIGHT_CLASSES.slice(0, 5), ordered: true },
     { id: "tatami", label: "Tatami", values: ["Tatami 1", "Tatami 2", "Tatami 3", "Tatami 4", "Tatami 5"], ordered: true },
-    { id: "medal", label: "Medal", values: ["Gold", "Silver", "Bronze", "Finalist", "Quarter-finalist"], ordered: true },
+    { id: "medal", label: "Result", values: ["Gold", "Silver", "Bronze", "Finalist", "Quarter-finalist"], ordered: true },
   ],
   metadata: {
     locales: { default: "en", supported: ["en"] },

@@ -155,6 +155,7 @@ test("Championship Circuit publishes its documented five-row expert board", () =
     championshipCircuitTemplate.categories.filter(category => category.id !== championshipCircuitTemplate.baseCategory).length,
     3,
   );
+  assert.equal(championshipCircuitTemplate.categories.find(category => category.id === "medal")?.label, "Result");
 });
 
 test("templates partition the global 1–12 difficulty scale into course bands", () => {
@@ -206,8 +207,20 @@ test("generated clue prose is natural and avoids implementation phrasing", () =>
 
   assert.ok(puzzle.clues.every(clue => !/associated with|entry associated/i.test(clue.text)));
   assert.ok(puzzle.clues.some(clue => /finished|fought|competed|bout|places?/i.test(clue.text)));
-  assert.ok(puzzle.clues.every(clue => clue.languageVersion === "yokaiba-clue-prose-v3"));
+  assert.ok(puzzle.clues.every(clue => clue.languageVersion === "yokaiba-clue-prose-v4"));
   assert.ok(puzzle.clues.every(clue => typeof clue.phraseVariant === "string"));
+});
+
+test("championship results use natural finish language rather than treating every result as a medal", () => {
+  const clues: Clue[] = [
+    { id: "aki-result", constraint: { kind: "matches", subject: "Aki", category: "medal", value: "Quarter-finalist" }, text: "" },
+    { id: "result-distance", constraint: { kind: "distance", left: { category: "tatami", value: "Tatami 1" }, right: { category: "medal", value: "Quarter-finalist" }, distance: 2 }, text: "" },
+  ];
+
+  const rendered = renderClues(championshipCircuitTemplate, "result-language", clues).map(clue => clue.text);
+
+  assert.ok(rendered.includes("Aki finished as a quarter-finalist."));
+  assert.equal(rendered.some(clue => clue.includes("Quarter-finalist medallist") || clue.includes("earned Quarter-finalist")), false);
 });
 
 test("direct clues keep the competitor as the grammatical subject", () => {
