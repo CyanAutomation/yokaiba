@@ -29,6 +29,9 @@ export function aggregateDifficultyAuditRecords(records: readonly DifficultyAudi
   let minimum = Infinity;
   let maximum = 0;
   for (const record of records) {
+    if (!Number.isInteger(record.level) || record.level < 1 || record.level > 12) {
+      throw new RangeError(`difficulty level must be an integer between 1 and 12, received ${record.level}`);
+    }
     levelCounts[record.level - 1] += 1;
     if (record.humanTraceComplete) complete += 1;
     clueTotal += record.clueCount;
