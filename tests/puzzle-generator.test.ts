@@ -160,17 +160,9 @@ test("generation rejects a non-IJF value in a weight category", () => {
   assert.throws(() => generatePuzzle(invalidTemplate, "invalid-weight"), /valid IJF senior men's weight classes/);
 });
 
-test("Open Division generation is deterministic and unique for a fixed seed", () => {
+test("a seeded Open Division puzzle is reproducible and has exactly one solution", () => {
   const first = generatePuzzle(openDivisionTemplate, "catalogue-seed");
   const second = generatePuzzle(openDivisionTemplate, "catalogue-seed");
-
-  assert.deepEqual(first, second);
-  assert.equal(countSolutions(first.spec, first.clues, 2), 1);
-});
-
-test("a seeded puzzle is reproducible and has exactly one solution", () => {
-  const first = generatePuzzle(template, "golden-seed");
-  const second = generatePuzzle(template, "golden-seed");
 
   assert.deepEqual(first, second);
   assert.equal(countSolutions(first.spec, first.clues, 2), 1);
