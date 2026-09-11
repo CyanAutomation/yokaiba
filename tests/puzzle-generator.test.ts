@@ -269,10 +269,19 @@ test("relational clues name the competitors without mid-sentence capitalization"
     { id: "tatami-distance", constraint: { kind: "distance", left: { category: "tatami", value: "Tatami 4" }, right: { category: "placing", value: "3rd" }, distance: 1 }, text: "" },
   ];
 
-  const rendered = renderClues(tournamentOrderTemplate, "alpha", clues).map(clue => clue.text);
-  assert.ok(rendered.every(clue => !/In the .*?, The competitor/.test(clue)));
-  assert.ok(rendered.includes("In the tournament order, the competitor who finished 2nd came before the competitor who finished 4th."));
-  assert.ok(rendered.some(clue => /one position (away from|separated .* from) the competitor who finished 3rd/i.test(clue)));
+  const coveredVariants = new Set<string>();
+  for (const seed of ["alpha", "beta", "gamma", "delta", "epsilon", "zeta"]) {
+    const rendered = renderClues(tournamentOrderTemplate, seed, clues);
+    const beforeClue = rendered.find(clue => clue.id === "placing-order")!;
+
+    coveredVariants.add(beforeClue.phraseVariant!);
+    assert.match(beforeClue.text, /competitor who finished 2nd.*competitor who finished 4th/i);
+    assert.match(beforeClue.text, /(came before|was earlier than)/i);
+    assert.doesNotMatch(beforeClue.text, /In the .*?, The competitor/);
+    assert.ok(rendered.some(clue => /one position (away from|separated .* from) the competitor who finished 3rd/i.test(clue.text)));
+  }
+
+  assert.deepEqual(coveredVariants, new Set(["before-0", "before-1"]));
 });
 
 test("clue rendering is deterministic and rotates phrase variants within a puzzle", () => {
