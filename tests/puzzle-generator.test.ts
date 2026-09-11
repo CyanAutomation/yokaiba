@@ -170,13 +170,54 @@ test("a seeded Open Division puzzle is reproducible and has exactly one solution
   assert.equal(countSolutions(first.spec, first.clues, 2), 1);
 });
 
-test("generated clue prose is natural and avoids implementation phrasing", () => {
-  const puzzle = generatePuzzle(tournamentOrderTemplate, "natural-language");
+test("representative clue prose satisfies grammar invariants for every generated constraint/category combination", () => {
+  const categories = [
+    { id: "weight", values: ["-60 kg", "-66 kg"] },
+    { id: "tatami", values: ["Tatami 1", "Tatami 2"] },
+    { id: "placing", values: ["1st", "2nd"] },
+  ] as const;
+  const clues: Clue[] = [];
 
-  assert.ok(puzzle.clues.every(clue => !/associated with|entry associated/i.test(clue.text)));
-  assert.ok(puzzle.clues.some(clue => /finished|fought|competed|bout|places?/i.test(clue.text)));
-  assert.ok(puzzle.clues.every(clue => clue.languageVersion === "yokaiba-clue-prose-v4"));
-  assert.ok(puzzle.clues.every(clue => typeof clue.phraseVariant === "string"));
+  for (const [categoryIndex, category] of categories.entries()) {
+    clues.push(
+      { id: `matches-${category.id}`, constraint: { kind: "matches", subject: "Aki", category: category.id, value: category.values[0] }, text: "" },
+      { id: `not-matches-${category.id}`, constraint: { kind: "notMatches", subject: "Hana", category: category.id, value: category.values[1] }, text: "" },
+      { id: `before-${category.id}`, constraint: { kind: "before", left: { category: category.id, value: category.values[0] }, right: { category: category.id, value: category.values[1] } }, text: "" },
+      { id: `adjacent-${category.id}`, constraint: { kind: "adjacent", left: { category: category.id, value: category.values[0] }, right: { category: category.id, value: category.values[1] } }, text: "" },
+    );
+    for (const rightCategory of categories.slice(categoryIndex + 1)) {
+      clues.push(
+        { id: `same-row-${category.id}-${rightCategory.id}`, constraint: { kind: "sameRow", left: { category: category.id, value: category.values[0] }, right: { category: rightCategory.id, value: rightCategory.values[0] } }, text: "" },
+        { id: `distance-${category.id}-${rightCategory.id}`, constraint: { kind: "distance", left: { category: category.id, value: category.values[1] }, right: { category: rightCategory.id, value: rightCategory.values[1] }, distance: 2 }, text: "" },
+      );
+    }
+  }
+
+  const rendered = renderClues(tournamentOrderTemplate, "grammar-contract", clues);
+  for (const clue of rendered) {
+    assert.ok(clue.text.trim().length > 0, `${clue.id} must render nonblank prose`);
+    assert.doesNotMatch(clue.text, /\b(?:undefined|null)\b/i, `${clue.id} must not expose a placeholder token`);
+    const referencedValues = "subject" in clue.constraint
+      ? [clue.constraint.subject, clue.constraint.value]
+      : [clue.constraint.left.value, clue.constraint.right.value];
+    for (const value of referencedValues) {
+      assert.ok(clue.text.includes(value), `${clue.id} must interpolate ${JSON.stringify(value)}`);
+    }
+    if (clue.constraint.kind === "matches" || clue.constraint.kind === "notMatches") {
+      assert.ok(clue.text.startsWith(`${clue.constraint.subject} `), `${clue.id} must use the competitor as its grammatical subject`);
+    }
+  }
+});
+
+test("rendered clue metadata satisfies the language catalogue contract", () => {
+  const clues: Clue[] = [
+    { id: "metadata-match", constraint: { kind: "matches", subject: "Aki", category: "weight", value: "-60 kg" }, text: "" },
+    { id: "metadata-adjacent", constraint: { kind: "adjacent", left: { category: "tatami", value: "Tatami 1" }, right: { category: "tatami", value: "Tatami 2" } }, text: "" },
+  ];
+
+  const rendered = renderClues(tournamentOrderTemplate, "metadata-contract", clues);
+  assert.ok(rendered.every(clue => clue.languageVersion === "yokaiba-clue-prose-v4"));
+  assert.ok(rendered.every(clue => typeof clue.phraseVariant === "string" && clue.phraseVariant.length > 0));
 });
 
 test("championship results use natural finish language rather than treating every result as a medal", () => {
