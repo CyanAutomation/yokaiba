@@ -121,6 +121,10 @@ async function getPuzzle({ templateId, seed, difficultyLevel, etag }) {
 
 Clues retain their semantic constraint while their surface text is rendered from a deterministic English phrase catalogue. `phraseVariant` and `languageVersion` are returned with every clue, so the wording is reproducible and can be audited independently of puzzle logic.
 
+### Clue wording compatibility
+
+Generated clue text must describe the tournament domain rather than the renderer's implementation. The legacy phrases `associated with`, `entry associated`, and `was not the competitor to` are prohibited compatibility regressions: clients and editorial checks may rely on generated clues never containing them. New catalogue variants should preserve that rule while keeping every referenced value visible and using the named competitor as the grammatical subject of direct and negative clues.
+
 ### Difficulty audit and calibration
 
 Run the deterministic corpus audit before a release or after changing templates, clue selection, or scoring:
