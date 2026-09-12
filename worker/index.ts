@@ -1,8 +1,10 @@
 import { createRestRouter } from "../src/api/router.js";
 import { createYokaibaMcpHandler } from "../src/mcp/server.js";
 import { tournamentOrderTemplate } from "../src/templates/tournament-order.js";
+import { tournamentOrderV2Template } from "../src/templates/tournament-order-v2.js";
 import { openDivisionTemplate } from "../src/templates/open-division.js";
 import { championshipCircuitTemplate } from "../src/templates/championship-circuit.js";
+import { championshipBridgeTemplate } from "../src/templates/championship-bridge.js";
 import { hostHeaderValidationResponse } from "@modelcontextprotocol/server";
 import { json } from "../src/api/json-response.js";
 
@@ -30,6 +32,8 @@ interface Env {
   REST_RATE_LIMIT?: string;
   /** Optional best-effort verification attempts per minute; defaults to 10. */
   VERIFY_RATE_LIMIT?: string;
+  /** Optional best-effort puzzle-hint requests per minute; defaults to 10. */
+  HINT_RATE_LIMIT?: string;
   /** Optional Cloudflare Rate Limiting binding for production-wide general REST enforcement. */
   REST_RATE_LIMITER?: { limit(options: { key: string }): Promise<{ success: boolean }> };
   /** Optional Cloudflare Rate Limiting binding for production-wide answer-verification enforcement. */
@@ -44,7 +48,7 @@ interface Env {
   ASSETS?: { fetch(request: Request): Promise<Response> };
 }
 
-const templates = [tournamentOrderTemplate, openDivisionTemplate, championshipCircuitTemplate];
+const templates = [tournamentOrderV2Template, tournamentOrderTemplate, openDivisionTemplate, championshipBridgeTemplate, championshipCircuitTemplate];
 const mcp = createYokaibaMcpHandler(templates);
 
 // JSON response builder provided by src/api/json-response.ts
@@ -264,15 +268,15 @@ async function restRateLimitDecision(
   onRestProviderFailure: () => void,
   onVerifyProviderFailure: () => void,
 ): Promise<RateLimitDecision> {
-  const verification = new URL(request.url).pathname === "/v1/puzzles/verify";
+  const protectedPuzzleOperation = ["/v1/puzzles/verify", "/v1/puzzles/hint"].includes(new URL(request.url).pathname);
   const providerDecision = await providerRateLimitDecision(
-    verification ? env.VERIFY_RATE_LIMITER : env.REST_RATE_LIMITER,
+    protectedPuzzleOperation ? env.VERIFY_RATE_LIMITER : env.REST_RATE_LIMITER,
     request,
-    verification ? onVerifyProviderFailure : onRestProviderFailure,
+    protectedPuzzleOperation ? onVerifyProviderFailure : onRestProviderFailure,
   );
   if (providerDecision) return providerDecision;
   // Retain the local fallback if the relevant provider binding is unavailable.
-  if (verification) return asRateLimitDecision(rateLimited(request, env.VERIFY_RATE_LIMIT ?? "10", "verify"));
+  if (protectedPuzzleOperation) return asRateLimitDecision(rateLimited(request, new URL(request.url).pathname === "/v1/puzzles/hint" ? env.HINT_RATE_LIMIT ?? "10" : env.VERIFY_RATE_LIMIT ?? "10", "protected-puzzle"));
   return asRateLimitDecision(rateLimited(request, env.REST_RATE_LIMIT ?? "60", "rest"));
 }
 
@@ -311,7 +315,7 @@ export function createWorker(options: WorkerOptions = {}) {
       const finish = (response: Response) => {
         response.headers.set("x-request-id", requestId);
         if (restRequest) {
-          const configuredLimit = path === "/v1/puzzles/verify" ? env.VERIFY_RATE_LIMIT ?? "10" : env.REST_RATE_LIMIT ?? "60";
+          const configuredLimit = path === "/v1/puzzles/verify" ? env.VERIFY_RATE_LIMIT ?? "10" : path === "/v1/puzzles/hint" ? env.HINT_RATE_LIMIT ?? "10" : env.REST_RATE_LIMIT ?? "60";
           response.headers.set("ratelimit-limit", configuredLimit);
           response.headers.set("ratelimit-policy", `${configuredLimit};w=60`);
           if (rateLimitDecision?.remaining !== undefined) response.headers.set("ratelimit-remaining", String(rateLimitDecision.remaining));
@@ -349,7 +353,7 @@ export function createWorker(options: WorkerOptions = {}) {
         () => { rateLimitProviderFailed = true; },
         () => { verifyRateLimitProviderFailed = true; },
       );
-      if (restRequest) rateLimitScope = path === "/v1/puzzles/verify" ? "verify" : "rest";
+      if (restRequest) rateLimitScope = path === "/v1/puzzles/verify" || path === "/v1/puzzles/hint" ? "protected-puzzle" : "rest";
       if (rateLimitDecision?.limited) {
         return finish(new Response(JSON.stringify({ error: { code: "rate_limited", message: "Too many requests" } }), {
           status: 429,
