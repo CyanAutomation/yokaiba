@@ -27,6 +27,8 @@ export interface DifficultyCalibration {
   scoreThresholds: number[];
   /** Inclusive global difficulty levels this template is calibrated to produce. */
   levelRange: [DifficultyLevel, DifficultyLevel];
+  /** Targeted generation rejects clue sets that the bounded no-guess model cannot finish. */
+  requiresHumanSolve?: boolean;
   corpus: { sampleSize: number; methodology: string };
 }
 
@@ -91,6 +93,8 @@ export interface GeneratedPuzzle {
   /** Present only when a target difficulty selected a clue-generation strategy. */
   requestedDifficultyLevel?: Difficulty["level"];
   generationStrategy?: number;
+  /** Present when the caller opted into deterministic seed fallback for a target level. */
+  seedFallbackAttempt?: number;
   /** Retained by trusted callers only; REST/MCP generation responses redact this. */
   solution: Solution;
 }

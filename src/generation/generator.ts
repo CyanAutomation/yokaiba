@@ -9,6 +9,7 @@ import { random, shuffled } from "./rng.js";
 export const GENERATOR_VERSION = "yokaiba-generator-v4";
 /** Version of the built-in solver used when callers do not provide one. */
 export const SOLVER_VERSION = exhaustivePuzzleSolver.version;
+const MAX_DIFFICULTY_STRATEGIES = 64;
 
 // RNG and shuffle are provided by ./rng.ts
 
@@ -214,12 +215,45 @@ export function generatePuzzle(template: PuzzleTemplate, seed: string, solver: P
  */
 export function generatePuzzleAtDifficulty(template: PuzzleTemplate, seed: string, difficultyLevel: DifficultyLevel, solver: PuzzleSolver = exhaustivePuzzleSolver): GeneratedPuzzle {
   const observedLevels = new Set<DifficultyLevel>();
-  for (let strategy = 0; strategy < 64; strategy += 1) {
+  const requiresHumanSolve = template.metadata?.difficultyCalibration.requiresHumanSolve === true;
+  for (let strategy = 0; strategy < MAX_DIFFICULTY_STRATEGIES; strategy += 1) {
     const candidate = generatePuzzle(template, seed, solver, { difficultyLevel, strategy });
     observedLevels.add(candidate.difficulty.level);
-    if (candidate.difficulty.level === difficultyLevel) {
+    if (candidate.difficulty.level === difficultyLevel && (!requiresHumanSolve || candidate.difficulty.evidence.humanSolve.solved)) {
       return { ...candidate, requestedDifficultyLevel: difficultyLevel, generationStrategy: strategy };
     }
   }
   throw new DifficultyUnavailableError(template.id, seed, difficultyLevel, [...observedLevels].sort((left, right) => left - right));
+}
+
+/** Generate the normal puzzle unless this versioned template promises no-guess play. */
+export function generateProgressivePuzzle(template: PuzzleTemplate, seed: string, solver: PuzzleSolver = exhaustivePuzzleSolver): GeneratedPuzzle {
+  const puzzle = generatePuzzle(template, seed, solver);
+  if (template.metadata?.difficultyCalibration.requiresHumanSolve !== true || puzzle.difficulty.evidence.humanSolve.solved) return puzzle;
+  return generatePuzzleAtDifficulty(template, seed, puzzle.difficulty.level, solver);
+}
+
+/**
+ * Deterministically try nearby derived seeds when a caller explicitly permits
+ * a target level to use a different puzzle.  The caller's original seed stays
+ * in requestedSeed while seed identifies the replayable selected puzzle.
+ */
+export function generatePuzzleAtDifficultyWithFallback(template: PuzzleTemplate, requestedSeed: string, difficultyLevel: DifficultyLevel, solver: PuzzleSolver = exhaustivePuzzleSolver, maxAttempts = 32): GeneratedPuzzle {
+  try {
+    return generatePuzzleAtDifficulty(template, requestedSeed, difficultyLevel, solver);
+  } catch (error) {
+    if (!(error instanceof DifficultyUnavailableError)) throw error;
+    const requiresHumanSolve = template.metadata?.difficultyCalibration.requiresHumanSolve === true;
+    // A fallback deliberately uses the normal deterministic clue order. It is
+    // far cheaper than repeating a 64-strategy search for every candidate seed,
+    // and the returned seed remains sufficient to replay the selected puzzle.
+    for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
+      const seed = `${requestedSeed}:fallback:${attempt}`;
+      const puzzle = generateProgressivePuzzle(template, seed, solver);
+      if (puzzle.difficulty.level === difficultyLevel && (!requiresHumanSolve || puzzle.difficulty.evidence.humanSolve.solved)) {
+        return { ...puzzle, requestedSeed, seedFallbackAttempt: attempt };
+      }
+    }
+    throw error;
+  }
 }

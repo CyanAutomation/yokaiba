@@ -7,7 +7,9 @@ import {
   exhaustivePuzzleSolver,
   evaluatePuzzleQuality,
   generatePuzzle,
+  generateProgressivePuzzle,
   generatePuzzleAtDifficulty,
+  generatePuzzleAtDifficultyWithFallback,
   DifficultyUnavailableError,
   renderClues,
   aggregateDifficultyAuditRecords,
@@ -23,7 +25,7 @@ import {
   type PuzzleSolver,
   type PuzzleTemplate,
 } from "../src/index.js";
-import { championshipCircuitTemplate, createRestRouter, openDivisionTemplate, tournamentOrderTemplate } from "../src/index.js";
+import { championshipBridgeTemplate, championshipCircuitTemplate, createRestRouter, openDivisionTemplate, tournamentOrderTemplate, tournamentOrderV2Template } from "../src/index.js";
 import { issuePuzzleToken } from "../src/api/puzzle-token.js";
 import worker, { createRateLimiter, createWorker, type GeneratedPuzzleCache } from "../worker/index.js";
 
@@ -135,10 +137,34 @@ test("Championship Circuit publishes its documented five-row expert board", () =
   assert.equal(championshipCircuitTemplate.categories.find(category => category.id === "medal")?.label, "Result");
 });
 
-test("templates partition the global 1–12 difficulty scale into course bands", () => {
-  assert.deepEqual(tournamentOrderTemplate.metadata!.difficultyCalibration.levelRange, [1, 4]);
+test("templates provide a deliberate five-row bridge before the expert course", () => {
+  assert.deepEqual(tournamentOrderV2Template.metadata!.difficultyCalibration.levelRange, [1, 4]);
   assert.deepEqual(openDivisionTemplate.metadata!.difficultyCalibration.levelRange, [5, 8]);
+  assert.deepEqual(championshipBridgeTemplate.metadata!.difficultyCalibration.levelRange, [8, 9]);
+  assert.equal(championshipBridgeTemplate.categories.length, 4);
+  assert.ok(championshipBridgeTemplate.categories.every(category => category.values.length === 5));
   assert.deepEqual(championshipCircuitTemplate.metadata!.difficultyCalibration.levelRange, [9, 12]);
+});
+
+test("targeted beginner puzzles complete under the bounded no-guess deduction model", () => {
+  for (let level = 1; level <= 4; level += 1) {
+    const puzzle = generatePuzzleAtDifficulty(tournamentOrderV2Template, "curriculum-ready", level as 1 | 2 | 3 | 4);
+    assert.equal(puzzle.difficulty.level, level);
+    assert.equal(puzzle.difficulty.evidence.humanSolve.solved, true);
+  }
+});
+
+test("the versioned beginner course also protects untargeted generation from guess-only traces", () => {
+  const puzzle = generateProgressivePuzzle(tournamentOrderV2Template, "curriculum-ready");
+  assert.equal(puzzle.difficulty.evidence.humanSolve.solved, true);
+});
+
+test("adaptive target generation retains the caller seed while selecting a replayable fallback", () => {
+  const puzzle = generatePuzzleAtDifficultyWithFallback(openDivisionTemplate, "course-anchor", 5);
+  assert.equal(puzzle.requestedSeed, "course-anchor");
+  assert.equal(puzzle.difficulty.level, 5);
+  assert.ok(puzzle.seedFallbackAttempt === undefined || puzzle.seedFallbackAttempt > 0);
+  if (puzzle.seedFallbackAttempt) assert.notEqual(puzzle.seed, puzzle.requestedSeed);
 });
 
 test("IJF-template puzzle payloads never use the invalid +81 kg division", () => {
@@ -612,6 +638,8 @@ test("OpenAPI documents every public REST endpoint", async () => {
       post: { statuses: ["200", "400", "404", "422", "429"], schema: "GeneratedPuzzle", requestSchema: "GenerationRequest", headers: ["Access-Control-Allow-Origin", "X-Request-Id"] },
     },
     "/v1/puzzles/verify": { post: { statuses: ["200", "400", "429", "503"], schema: "PuzzleVerificationResult", requestSchema: "PuzzleVerificationRequest", headers: ["Access-Control-Allow-Origin", "X-Request-Id"] } },
+    "/v1/puzzles/hint": { post: { statuses: ["200", "400", "429", "503"], schema: "PuzzleHintResult", requestSchema: "PuzzleHintRequest", headers: ["Access-Control-Allow-Origin", "X-Request-Id"] } },
+    "/v1/events": { post: { statuses: ["202", "400", "429"], schema: "Accepted", requestSchema: "PuzzleOutcomeEvent", headers: ["Access-Control-Allow-Origin", "X-Request-Id"], successStatus: "202" } },
   } as const;
 
   assert.deepEqual(Object.keys(specification.paths), Object.keys(endpoints));
@@ -622,7 +650,7 @@ test("OpenAPI documents every public REST endpoint", async () => {
     for (const [method, expected] of Object.entries(expectedMethods)) {
       const operation = pathItem[method];
       assert.deepEqual(Object.keys(operation.responses), expected.statuses, `${method.toUpperCase()} ${path} response statuses`);
-      const success = operation.responses["200"];
+      const success = operation.responses[expected.successStatus ?? "200"];
       for (const header of expected.headers) {
         const headerDef = success.headers?.[header];
         assert.ok(headerDef, `${method.toUpperCase()} ${path} must document ${header}`);
@@ -654,8 +682,8 @@ test("OpenAPI documents every public REST endpoint", async () => {
   assert.ok(schemas.Clue.properties.phraseVariant);
   assert.deepEqual(schemas.TemplateMetadata.properties.difficultyCalibration.properties.scoreThresholds, {
     type: "array",
-    minItems: 3,
-    maxItems: 3,
+    minItems: 1,
+    maxItems: 11,
     items: { type: "number" },
   });
 });
@@ -768,13 +796,48 @@ test("REST capabilities expose client-safe feature flags and catalogue metadata"
   assert.equal(response.headers.get("cache-control"), "public, max-age=300, s-maxage=300, must-revalidate");
   assert.deepEqual(await response.json(), {
     apiVersion: "v1",
-    features: { answerVerification: false, conditionalGet: true, difficultySelection: true },
+    features: { answerVerification: false, conditionalGet: true, difficultySelection: true, hints: false, outcomeTelemetry: true, seedFallback: true },
     locales: ["en"],
     scenarios: [
       { id: "tournament-order-v1", difficultyLevels: [1, 2, 3, 4] },
       { id: "open-division-v2", difficultyLevels: [5, 6, 7, 8] },
     ],
   });
+});
+
+test("REST can deterministically fall back to a nearby seed for an unavailable selected level", async () => {
+  const route = createRestRouter([openDivisionTemplate]);
+  const response = await route(new Request("https://yokaiba.test/v1/puzzles/generate?templateId=open-division-v2&seed=course-anchor&difficultyLevel=5&allowSeedFallback=true"));
+  assert.equal(response.status, 200);
+  const body = await response.json() as { requestedSeed: string; seed: string; seedFallbackAttempt?: number; difficulty: { level: number } };
+  assert.equal(body.requestedSeed, "course-anchor");
+  assert.equal(body.difficulty.level, 5);
+  assert.ok(body.seedFallbackAttempt === undefined || body.seedFallbackAttempt > 0);
+  if (body.seedFallbackAttempt) assert.notEqual(body.seed, body.requestedSeed);
+});
+
+test("REST provides bounded clue, elimination, and placement hints from a signed puzzle", async () => {
+  const route = createRestRouter([tournamentOrderTemplate], { puzzleTokenSecret: "test-token-secret" });
+  const generated = await route(new Request("https://yokaiba.test/v1/puzzles/generate?templateId=tournament-order-v1&seed=hint-seed"));
+  const { puzzleToken } = await generated.json() as { puzzleToken: string };
+  const clue = await route(new Request("https://yokaiba.test/v1/puzzles/hint", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ puzzleToken, kind: "clue" }) }));
+  assert.equal(clue.status, 200);
+  assert.equal((await clue.json() as { kind: string }).kind, "clue");
+  const placement = await route(new Request("https://yokaiba.test/v1/puzzles/hint", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ puzzleToken, kind: "placement" }) }));
+  assert.equal(placement.status, 200);
+  const placementBody = await placement.json() as { kind: string; placement: { subject: string; category: string; value: string } };
+  assert.equal(placementBody.kind, "placement");
+  assert.equal(placementBody.placement.subject, "Aki");
+  assert.equal(placementBody.placement.category, "weight");
+});
+
+test("REST accepts anonymized puzzle outcomes and rejects unrecognized telemetry", async () => {
+  const route = createRestRouter([tournamentOrderTemplate]);
+  const accepted = await route(new Request("https://yokaiba.test/v1/events", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ event: "puzzle_completed", templateId: "tournament-order-v1", assessedDifficultyLevel: 2, elapsedMs: 120_000, clueCount: 8, hintsUsed: 1 }) }));
+  assert.equal(accepted.status, 202);
+  assert.deepEqual(await accepted.json(), { accepted: true });
+  const rejected = await route(new Request("https://yokaiba.test/v1/events", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ event: "identity_captured", templateId: "tournament-order-v1" }) }));
+  assert.equal(rejected.status, 400);
 });
 
 test("REST verifies a complete submitted answer without exposing the solution", async () => {
