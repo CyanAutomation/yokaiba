@@ -568,6 +568,14 @@ test("quality reports an incomplete human trace when clues cannot finish the puz
 
   assert.equal(quality.humanSolve.solved, false);
   assert.equal(quality.humanSolve.usedGuessing, false);
+  for (const diagnostic of [
+    quality.humanSolve.deductionPasses,
+    quality.humanSolve.totalCost,
+    quality.humanSolve.hardestStep,
+  ]) {
+    assert.ok(Number.isFinite(diagnostic));
+    assert.ok(diagnostic >= 0);
+  }
 });
 
 test("difficulty is reproducible and publishes deterministic human and solver evidence", () => {
