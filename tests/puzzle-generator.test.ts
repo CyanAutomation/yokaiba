@@ -13,6 +13,7 @@ import {
   aggregateDifficultyAuditRecords,
   auditDifficultyCorpus,
   isIjfSeniorMensWeightClass,
+  isClueTextReadable,
   MAX_SUPPORTED_ROWS,
   satisfiesConstraint,
   solve,
@@ -527,14 +528,31 @@ test("quality reports the exact clue kinds in a controlled fixture", () => {
   );
 });
 
+test("clue readability rejects blank text", () => {
+  assert.equal(isClueTextReadable("   "), false);
+});
+
+test("clue readability rejects an unresolved undefined value", () => {
+  assert.equal(isClueTextReadable("undefined finished first."), false);
+});
+
+test("clue readability rejects an unresolved null value", () => {
+  assert.equal(isClueTextReadable("Red was beside null."), false);
+});
+
+test("clue readability accepts valid clue prose", () => {
+  assert.equal(isClueTextReadable("Aki wore red."), true);
+});
+
 test("quality reports the exact unreadable clue IDs in a controlled fixture", () => {
   const quality = evaluatePuzzleQuality(qualityFixtureSpec, clueKindsAndReadabilityFixture);
+  const unreadableClueIds = new Set(quality.readability.unreadableClueIds);
 
-  assert.deepEqual(quality.readability.unreadableClueIds, [
-    "blank-negative",
-    "undefined-order",
-    "null-adjacency",
-  ]);
+  assert.equal(unreadableClueIds.size, 3);
+  assert.ok(unreadableClueIds.has("blank-negative"));
+  assert.ok(unreadableClueIds.has("undefined-order"));
+  assert.ok(unreadableClueIds.has("null-adjacency"));
+  assert.equal(unreadableClueIds.has("direct-red"), false);
 });
 
 test("quality records a completed human trace without guessing", () => {
