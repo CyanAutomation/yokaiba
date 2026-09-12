@@ -2,9 +2,13 @@ import type { Clue, Difficulty, DifficultyCalibration, DifficultyLevel, PuzzleSp
 import type { PuzzleSolver } from "../domain/puzzle-solver.js";
 import { exhaustivePuzzleSolver, solveWithTelemetry } from "../constraints/solver.js";
 
-const COST: Record<Clue["constraint"]["kind"], number> = { matches: 1, notMatches: 1, before: 3, adjacent: 3, sameRow: 3, distance: 4 };
-
 export const DIFFICULTY_MODEL_VERSION = "yokaiba-difficulty-v4";
+/**
+ * Per-clue deduction costs calibrated for {@link DIFFICULTY_MODEL_VERSION}.
+ * These values are part of that model's numeric contract; changing one requires
+ * a new model version and corpus calibration.
+ */
+const COST: Record<Clue["constraint"]["kind"], number> = { matches: 1, notMatches: 1, before: 3, adjacent: 3, sameRow: 3, distance: 4 };
 const defaultCalibration: DifficultyCalibration = {
   modelVersion: DIFFICULTY_MODEL_VERSION,
   scoreThresholds: [68, 73, 79, 88, 98, 108, 118, 128, 138, 148, 158],
@@ -20,7 +24,7 @@ const defaultCalibration: DifficultyCalibration = {
  */
 export function assessPuzzleDifficulty(spec: PuzzleSpec, clues: readonly Clue[]): Difficulty {
   const calibration = spec.metadata?.difficultyCalibration ?? defaultCalibration;
-  const humanSolve = directHumanSolve(spec, clues);
+  const humanSolve = evaluateHumanDeductionTrace(spec, clues);
   const telemetry = solveWithTelemetry(spec, clues, 2).telemetry;
   const directClues = clues.filter(clue => clue.constraint.kind === "matches" || clue.constraint.kind === "notMatches").length;
   const relationalClues = clues.length - directClues;
@@ -70,7 +74,7 @@ export function isClueTextReadable(text: string): boolean {
 }
 
 /** A no-guess human model using direct, all-different, ordering, and adjacency elimination. */
-function directHumanSolve(spec: PuzzleSpec, clues: readonly Clue[]) {
+export function evaluateHumanDeductionTrace(spec: PuzzleSpec, clues: readonly Clue[]): PuzzleQuality["humanSolve"] {
   const base = spec.categories.find(category => category.id === spec.baseCategory)!;
   const possible = new Map<string, Array<Set<string>>>();
   for (const category of spec.categories) if (category.id !== spec.baseCategory) possible.set(category.id, base.values.map(() => new Set(category.values)));
@@ -149,6 +153,6 @@ export function evaluatePuzzleQuality(spec: PuzzleSpec, clues: readonly Clue[], 
     redundantClueIds,
     clueDiversity: { distinctKinds: kinds.length, kinds },
     readability: { unreadableClueIds: clues.filter(clue => !isClueTextReadable(clue.text)).map(clue => clue.id) },
-    humanSolve: directHumanSolve(spec, clues),
+    humanSolve: evaluateHumanDeductionTrace(spec, clues),
   };
 }
