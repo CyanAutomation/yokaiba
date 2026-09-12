@@ -121,6 +121,7 @@ paths:
         - $ref: '#/components/parameters/TemplateId'
         - $ref: '#/components/parameters/Seed'
         - $ref: '#/components/parameters/DifficultyLevel'
+        - $ref: '#/components/parameters/AllowSeedFallback'
         - $ref: '#/components/parameters/IfNoneMatch'
       responses:
         '200':
@@ -193,6 +194,45 @@ paths:
         '400': { $ref: '#/components/responses/BadRequest' }
         '429': { $ref: '#/components/responses/RateLimited' }
         '503': { $ref: '#/components/responses/NotConfigured' }
+  /v1/puzzles/hint:
+    post:
+      summary: Return one bounded, token-authorized puzzle hint
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/PuzzleHintRequest' }
+      responses:
+        '200':
+          description: A single hint, never the complete solution.
+          headers:
+            Access-Control-Allow-Origin: { $ref: '#/components/headers/AccessControlAllowOrigin' }
+            X-Request-Id: { $ref: '#/components/headers/RequestId' }
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/PuzzleHintResult' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '429': { $ref: '#/components/responses/RateLimited' }
+        '503': { $ref: '#/components/responses/NotConfigured' }
+  /v1/events:
+    post:
+      summary: Record an anonymous puzzle outcome for calibration
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/PuzzleOutcomeEvent' }
+      responses:
+        '202':
+          description: The outcome was accepted for logging.
+          headers:
+            Access-Control-Allow-Origin: { $ref: '#/components/headers/AccessControlAllowOrigin' }
+            X-Request-Id: { $ref: '#/components/headers/RequestId' }
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Accepted' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '429': { $ref: '#/components/responses/RateLimited' }
 components:
   parameters:
     TemplateId:
@@ -211,6 +251,12 @@ components:
       required: false
       description: Selects a reproducible puzzle at this assessed difficulty without changing the supplied seed. Returns 422 when none of the deterministic clue strategies for that seed meets the requested level.
       schema: { type: integer, minimum: 1, maximum: 12 }
+    AllowSeedFallback:
+      name: allowSeedFallback
+      in: query
+      required: false
+      description: When true, selects a deterministic derived seed if the supplied seed cannot provide the requested level.
+      schema: { type: boolean, default: false }
     IfNoneMatch:
       name: If-None-Match
       in: header
@@ -310,11 +356,14 @@ components:
         apiVersion: { type: string, const: v1 }
         features:
           type: object
-          required: [answerVerification, conditionalGet, difficultySelection]
+          required: [answerVerification, conditionalGet, difficultySelection, hints, outcomeTelemetry, seedFallback]
           properties:
             answerVerification: { type: boolean }
             conditionalGet: { type: boolean, const: true }
             difficultySelection: { type: boolean, const: true }
+            hints: { type: boolean }
+            outcomeTelemetry: { type: boolean, const: true }
+            seedFallback: { type: boolean, const: true }
         locales: { type: array, items: { type: string }, uniqueItems: true }
         scenarios:
           type: array
@@ -336,10 +385,12 @@ components:
             supported: { type: array, items: { type: string } }
         difficultyCalibration:
           type: object
-          required: [modelVersion, scoreThresholds, corpus]
+          required: [modelVersion, scoreThresholds, levelRange, corpus]
           properties:
             modelVersion: { type: string }
-            scoreThresholds: { type: array, minItems: 3, maxItems: 3, items: { type: number } }
+            scoreThresholds: { type: array, minItems: 1, maxItems: 11, items: { type: number } }
+            levelRange: { type: array, minItems: 2, maxItems: 2, items: { type: integer, minimum: 1, maximum: 12 } }
+            requiresHumanSolve: { type: boolean }
             corpus: { type: object, additionalProperties: true }
     Scenario:
       type: object
@@ -365,6 +416,7 @@ components:
         templateId: { type: string, minLength: 1, maxLength: 128 }
         seed: { type: string, minLength: 1, maxLength: 128 }
         difficultyLevel: { type: integer, minimum: 1, maximum: 12 }
+        allowSeedFallback: { type: boolean, default: false }
     Constraint:
       type: object
       required: [kind]
@@ -404,6 +456,7 @@ components:
         requestedSeed: { type: string, description: The seed provided by the caller. }
         seed: { type: string }
         requestedDifficultyLevel: { type: integer, minimum: 1, maximum: 12 }
+        seedFallbackAttempt: { type: integer, minimum: 1 }
         templateId: { type: string }
         generatorVersion: { type: string }
         solverVersion: { type: string }
@@ -452,6 +505,37 @@ components:
       required: [correct]
       properties:
         correct: { type: boolean }
+    PuzzleHintRequest:
+      type: object
+      required: [puzzleToken]
+      additionalProperties: false
+      properties:
+        puzzleToken: { type: string, minLength: 1 }
+        kind: { type: string, enum: [clue, elimination, placement], default: clue }
+    PuzzleHintResult:
+      type: object
+      required: [kind]
+      properties:
+        kind: { type: string, enum: [clue, elimination, placement] }
+        clue: { type: object, properties: { id: { type: string }, text: { type: string } } }
+        placement: { type: object, properties: { subject: { type: string }, category: { type: string }, value: { type: string } } }
+    PuzzleOutcomeEvent:
+      type: object
+      required: [event, templateId]
+      additionalProperties: false
+      properties:
+        event: { type: string, enum: [puzzle_started, puzzle_completed, hint_used, mistake, puzzle_abandoned] }
+        templateId: { type: string }
+        requestedDifficultyLevel: { type: integer, minimum: 1, maximum: 12 }
+        assessedDifficultyLevel: { type: integer, minimum: 1, maximum: 12 }
+        clueCount: { type: integer, minimum: 0, maximum: 100 }
+        elapsedMs: { type: integer, minimum: 0, maximum: 86400000 }
+        hintsUsed: { type: integer, minimum: 0, maximum: 100 }
+        mistakes: { type: integer, minimum: 0, maximum: 100 }
+    Accepted:
+      type: object
+      required: [accepted]
+      properties: { accepted: { type: boolean, const: true } }
     Error:
       type: object
       required: [error]
