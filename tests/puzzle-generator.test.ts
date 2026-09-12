@@ -520,10 +520,11 @@ test("the generated clue set is minimal for uniqueness", () => {
 test("quality reports the exact clue kinds in a controlled fixture", () => {
   const quality = evaluatePuzzleQuality(qualityFixtureSpec, clueKindsAndReadabilityFixture);
 
-  assert.deepEqual(quality.clueDiversity, {
-    distinctKinds: 4,
-    kinds: ["adjacent", "before", "matches", "notMatches"],
-  });
+  assert.equal(quality.clueDiversity.distinctKinds, 4);
+  assert.deepEqual(
+    new Set(quality.clueDiversity.kinds),
+    new Set(["adjacent", "before", "matches", "notMatches"]),
+  );
 });
 
 test("quality reports the exact unreadable clue IDs in a controlled fixture", () => {
