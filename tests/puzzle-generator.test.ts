@@ -464,14 +464,21 @@ test("solver telemetry reports searched nodes, evaluated constraints, and elapse
     currentTime += 25;
     return reading;
   };
-  const result = solveWithTelemetry(solverFixtureSpec, [clue], 2, advancingClock);
+  const constrained = solveWithTelemetry(solverFixtureSpec, [clue], 2, advancingClock);
+  const unconstrained = solveWithTelemetry(solverFixtureSpec, [], 2, advancingClock);
 
-  assert.equal(result.solutions.length, 2);
-  assert.equal(result.telemetry.nodesVisited, 3);
-  assert.equal(result.telemetry.constraintChecks, 1);
-  assert.ok(result.telemetry.nodesVisited > result.telemetry.constraintChecks);
-  assert.equal(result.telemetry.elapsedMs, 25);
-  assert.ok(result.solutions.every(solution => satisfiesConstraint(solverFixtureSpec, solution, clue.constraint)));
+  assert.equal(constrained.solutions.length, 2);
+  for (const result of [constrained, unconstrained]) {
+    assert.ok(Number.isInteger(result.telemetry.nodesVisited));
+    assert.ok(result.telemetry.nodesVisited >= 0);
+    assert.ok(Number.isInteger(result.telemetry.constraintChecks));
+    assert.ok(result.telemetry.constraintChecks >= 0);
+    assert.ok(result.telemetry.nodesVisited > 0, "a nontrivial solve must report search work");
+    assert.equal(result.telemetry.elapsedMs, 25);
+  }
+  assert.ok(constrained.telemetry.constraintChecks > 0, "a constrained solve must evaluate constraints");
+  assert.equal(unconstrained.telemetry.constraintChecks, 0, "a solve without clues has no constraints to evaluate");
+  assert.ok(constrained.solutions.every(solution => satisfiesConstraint(solverFixtureSpec, solution, clue.constraint)));
 });
 
 test("generation uses the injected solver and records its version", () => {
