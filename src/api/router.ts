@@ -1,4 +1,4 @@
-import { DifficultyUnavailableError, GENERATOR_VERSION, generatePuzzle, generatePuzzleAtDifficulty, SOLVER_VERSION } from "../generation/generator.js";
+import { DifficultyUnavailableError, GENERATOR_VERSION, generateProgressivePuzzle, generatePuzzleAtDifficulty, generatePuzzleAtDifficultyWithFallback, SOLVER_VERSION } from "../generation/generator.js";
 import { issuePuzzleToken, verifyPuzzleToken } from "./puzzle-token.js";
 import { json } from "./json-response.js";
 import type { Difficulty, GeneratedPuzzle, PuzzleSpec, PuzzleTemplate, Solution } from "../domain/types.js";
@@ -32,7 +32,7 @@ function publicCapabilities(templates: readonly PuzzleTemplate[], puzzleTokenSec
   });
   return {
     apiVersion: "v1",
-    features: { answerVerification: Boolean(puzzleTokenSecret), conditionalGet: true, difficultySelection: true },
+    features: { answerVerification: Boolean(puzzleTokenSecret), conditionalGet: true, difficultySelection: true, hints: Boolean(puzzleTokenSecret), outcomeTelemetry: true, seedFallback: true },
     locales: [...locales].sort(),
     scenarios,
   };
@@ -80,7 +80,8 @@ function generationParameters(value: Record<string, unknown>) {
   if (value.seed.length > MAX_GENERATION_FIELD_LENGTH) throw new TypeError(`seed must be at most ${MAX_GENERATION_FIELD_LENGTH} characters`);
   const difficultyLevel = value.difficultyLevel;
   if (difficultyLevel !== undefined && (typeof difficultyLevel !== "number" || !Number.isInteger(difficultyLevel) || difficultyLevel < 1 || difficultyLevel > 12)) throw new TypeError("difficultyLevel must be an integer from 1 to 12");
-  return { templateId: value.templateId, seed: value.seed, ...(difficultyLevel === undefined ? {} : { difficultyLevel: difficultyLevel as Difficulty["level"] }) };
+  if (value.allowSeedFallback !== undefined && typeof value.allowSeedFallback !== "boolean") throw new TypeError("allowSeedFallback must be a boolean");
+  return { templateId: value.templateId, seed: value.seed, ...(difficultyLevel === undefined ? {} : { difficultyLevel: difficultyLevel as Difficulty["level"] }), ...(value.allowSeedFallback ? { allowSeedFallback: true } : {}) };
 }
 
 async function generationRequest(request: Request) {
@@ -91,12 +92,13 @@ async function generationRequest(request: Request) {
 
 function generationQuery(url: URL) {
   const rawDifficulty = url.searchParams.get("difficultyLevel");
-  return generationParameters({ templateId: url.searchParams.get("templateId"), seed: url.searchParams.get("seed"), ...(rawDifficulty === null ? {} : { difficultyLevel: Number(rawDifficulty) }) });
+  const rawFallback = url.searchParams.get("allowSeedFallback");
+  return generationParameters({ templateId: url.searchParams.get("templateId"), seed: url.searchParams.get("seed"), ...(rawDifficulty === null ? {} : { difficultyLevel: Number(rawDifficulty) }), ...(rawFallback === null ? {} : { allowSeedFallback: rawFallback === "true" ? true : rawFallback === "false" ? false : rawFallback }) });
 }
 
-function generateAtDifficulty(template: PuzzleTemplate, seed: string, difficultyLevel: Difficulty["level"] | undefined): GeneratedPuzzle {
-  if (!difficultyLevel) return generatePuzzle(template, seed);
-  return generatePuzzleAtDifficulty(template, seed, difficultyLevel);
+function generateAtDifficulty(template: PuzzleTemplate, seed: string, difficultyLevel: Difficulty["level"] | undefined, allowSeedFallback = false): GeneratedPuzzle {
+  if (!difficultyLevel) return generateProgressivePuzzle(template, seed);
+  return allowSeedFallback ? generatePuzzleAtDifficultyWithFallback(template, seed, difficultyLevel) : generatePuzzleAtDifficulty(template, seed, difficultyLevel);
 }
 
 function validateAnswer(spec: PuzzleSpec, value: unknown): Solution {
@@ -136,6 +138,38 @@ async function verificationRequest(request: Request) {
   return { puzzleToken: value.puzzleToken, answer: value.answer };
 }
 
+type HintKind = "clue" | "elimination" | "placement";
+
+async function protectedPuzzle(request: Request, templates: Map<string, PuzzleTemplate>, secret: string) {
+  const body = await readJsonBody(request);
+  if (!body || typeof body !== "object" || Array.isArray(body)) throw new TypeError("request body must be an object");
+  const value = body as Record<string, unknown>;
+  if (typeof value.puzzleToken !== "string" || !value.puzzleToken) throw new TypeError("puzzleToken must be a non-empty string");
+  const token = await verifyPuzzleToken(value.puzzleToken, secret);
+  if (!token) throw new TypeError("puzzleToken is invalid");
+  const template = templates.get(token.templateId);
+  if (!template) throw new TypeError("puzzleToken references an unknown template");
+  const puzzle = token.requestedDifficultyLevel === undefined ? generateProgressivePuzzle(template, token.seed) : generatePuzzleAtDifficulty(template, token.seed, token.requestedDifficultyLevel);
+  if (!supportsTokenGeneratorVersion(token.generatorVersion, puzzle.generatorVersion) || puzzle.solverVersion !== token.solverVersion) throw new TypeError("puzzleToken references an unsupported puzzle version");
+  return { value, puzzle };
+}
+
+function telemetryRequest(value: unknown, templates: Map<string, PuzzleTemplate>) {
+  if (!value || typeof value !== "object" || Array.isArray(value)) throw new TypeError("request body must be an object");
+  const event = value as Record<string, unknown>;
+  const allowed = new Set(["puzzle_started", "puzzle_completed", "hint_used", "mistake", "puzzle_abandoned"]);
+  if (typeof event.event !== "string" || !allowed.has(event.event)) throw new TypeError("event must be a supported puzzle outcome");
+  if (typeof event.templateId !== "string" || !templates.has(event.templateId)) throw new TypeError("templateId must reference a known template");
+  for (const name of ["requestedDifficultyLevel", "assessedDifficultyLevel", "clueCount", "elapsedMs", "hintsUsed", "mistakes"]) {
+    const candidate = event[name];
+    const isDifficulty = name === "requestedDifficultyLevel" || name === "assessedDifficultyLevel";
+    const minimum = isDifficulty ? 1 : 0;
+    const maximum = isDifficulty ? 12 : name === "elapsedMs" ? 86_400_000 : 100;
+    if (candidate !== undefined && (typeof candidate !== "number" || !Number.isSafeInteger(candidate) || candidate < minimum || candidate > maximum)) throw new TypeError(`${name} is outside its supported range`);
+  }
+  return { event: event.event, templateId: event.templateId, ...(typeof event.requestedDifficultyLevel === "number" ? { requestedDifficultyLevel: event.requestedDifficultyLevel } : {}), ...(typeof event.assessedDifficultyLevel === "number" ? { assessedDifficultyLevel: event.assessedDifficultyLevel } : {}), ...(typeof event.clueCount === "number" ? { clueCount: event.clueCount } : {}), ...(typeof event.elapsedMs === "number" ? { elapsedMs: event.elapsedMs } : {}), ...(typeof event.hintsUsed === "number" ? { hintsUsed: event.hintsUsed } : {}), ...(typeof event.mistakes === "number" ? { mistakes: event.mistakes } : {}) };
+}
+
 /** Runtime-neutral Fetch router; Worker and Node adapters can share it unchanged. */
 export function createRestRouter(templates: readonly PuzzleTemplate[], options: RestRouterOptions = {}) {
   const byId = new Map(templates.map(template => [template.id, template]));
@@ -150,6 +184,30 @@ export function createRestRouter(templates: readonly PuzzleTemplate[], options: 
     if (request.method === "GET" && path === "/v1/scenarios") return json({ scenarios: templates.map(scenarioSummary) }, 200, { "cache-control": SCENARIOS_CACHE_CONTROL });
     if (request.method === "GET" && path === "/v1/capabilities") return json(publicCapabilities(templates, options.puzzleTokenSecret), 200, { "cache-control": SCENARIOS_CACHE_CONTROL });
     if (request.method === "GET" && path === "/v1/version") return json({ serviceVersion: options.serviceVersion ?? "0.1.0", buildSha: options.buildSha ?? "local", generatorVersion: GENERATOR_VERSION, solverVersion: SOLVER_VERSION }, 200, { "cache-control": VERSION_CACHE_CONTROL });
+    if (request.method === "POST" && path === "/v1/events") {
+      try {
+        console.log(JSON.stringify({ ...telemetryRequest(await readJsonBody(request), byId), logEvent: "puzzle_outcome" }));
+        return json({ accepted: true }, 202);
+      } catch (error) {
+        return json({ error: { code: "bad_request", message: error instanceof Error ? error.message : "invalid request" } }, 400);
+      }
+    }
+    if (request.method === "POST" && path === "/v1/puzzles/hint") {
+      if (!options.puzzleTokenSecret) return json({ error: { code: "not_configured", message: "puzzle hints are not configured" } }, 503);
+      try {
+        const { value, puzzle } = await protectedPuzzle(request, byId, options.puzzleTokenSecret);
+        const kind = value.kind === undefined ? "clue" : value.kind;
+        if (kind !== "clue" && kind !== "elimination" && kind !== "placement") throw new TypeError("kind must be clue, elimination, or placement");
+        if (kind === "placement") {
+          const category = puzzle.spec.categories.find(candidate => candidate.id !== puzzle.spec.baseCategory)!;
+          return json({ kind, placement: { subject: puzzle.spec.categories.find(candidate => candidate.id === puzzle.spec.baseCategory)!.values[0], category: category.id, value: puzzle.solution.assignments[category.id][0] } });
+        }
+        const clue = (kind === "elimination" ? puzzle.clues.find(candidate => candidate.constraint.kind === "notMatches") : undefined) ?? puzzle.clues[0]!;
+        return json({ kind: clue.constraint.kind === "notMatches" && kind === "elimination" ? kind : "clue", clue: { id: clue.id, text: clue.text } });
+      } catch (error) {
+        return json({ error: { code: "bad_request", message: error instanceof Error ? error.message : "invalid request" } }, 400);
+      }
+    }
     if (request.method === "POST" && path === "/v1/puzzles/verify") {
       if (!options.puzzleTokenSecret) return json({ error: { code: "not_configured", message: "puzzle verification is not configured" } }, 503);
       try {
@@ -158,9 +216,7 @@ export function createRestRouter(templates: readonly PuzzleTemplate[], options: 
         if (!token) throw new TypeError("puzzleToken is invalid");
         const template = byId.get(token.templateId);
         if (!template) throw new TypeError("puzzleToken references an unknown template");
-        const puzzle = token.requestedDifficultyLevel === undefined
-          ? generatePuzzle(template, token.seed)
-          : generatePuzzleAtDifficulty(template, token.seed, token.requestedDifficultyLevel);
+        const puzzle = token.requestedDifficultyLevel === undefined ? generateProgressivePuzzle(template, token.seed) : generatePuzzleAtDifficulty(template, token.seed, token.requestedDifficultyLevel);
         if (!supportsTokenGeneratorVersion(token.generatorVersion, puzzle.generatorVersion) || puzzle.solverVersion !== token.solverVersion) throw new TypeError("puzzleToken references an unsupported puzzle version");
         return json({ correct: sameSolution(puzzle.solution, validateAnswer(puzzle.spec, answer)) });
       } catch (error) {
@@ -169,10 +225,10 @@ export function createRestRouter(templates: readonly PuzzleTemplate[], options: 
     }
     if ((request.method === "POST" || request.method === "GET") && path === "/v1/puzzles/generate") {
       try {
-        const { templateId, seed, difficultyLevel } = request.method === "POST" ? await generationRequest(request) : generationQuery(url);
+        const { templateId, seed, difficultyLevel, allowSeedFallback } = request.method === "POST" ? await generationRequest(request) : generationQuery(url);
         const template = byId.get(templateId);
         if (!template) return json({ error: { code: "not_found", message: "unknown templateId" } }, 404);
-        return json(await publicPuzzle(generateAtDifficulty(template, seed, difficultyLevel), options.puzzleTokenSecret), 200,
+        return json(await publicPuzzle(generateAtDifficulty(template, seed, difficultyLevel, allowSeedFallback), options.puzzleTokenSecret), 200,
           request.method === "GET" ? { "cache-control": GENERATED_PUZZLE_CACHE_CONTROL } : undefined);
       } catch (error) {
         if (error instanceof DifficultyUnavailableError) return json({

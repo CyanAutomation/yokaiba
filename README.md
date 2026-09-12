@@ -49,6 +49,8 @@ The API root redirects to the interactive [Swagger UI](https://yokaiba.scheimann
 - `GET /v1/version`
 - `GET` or `POST /v1/puzzles/generate`
 - `POST /v1/puzzles/verify`
+- `POST /v1/puzzles/hint`
+- `POST /v1/events`
 
 ### 60-second browser quick start
 
@@ -77,15 +79,15 @@ generating a puzzle.
 Template IDs are versioned public contracts. A correction that changes a
 template's values or generated output receives a new template ID; clients must
 store the template ID, seed, generator version, and solver version together for
-replay. The currently supported five-row templates are `open-division-v2` and
-`championship-circuit-v2`; both use the IJF sequence `-60 kg`, `-66 kg`,
-`-73 kg`, `-81 kg`, `-90 kg`.
+replay. The currently supported five-row templates are `open-division-v2`,
+`championship-bridge-v1`, and `championship-circuit-v2`; all use the IJF sequence `-60 kg`, `-66 kg`,
+`-73 kg`, `-81 kg`, `-90 kg`. `championship-bridge-v1` overlaps levels 8–9 with a five-row, three-category board so players can practise the Championship Circuit's board shape before entering its expert range.
 
 For browser games, use the cacheable GET form. Deterministic puzzle and scenario catalogue GET endpoints return public `Cache-Control` headers with a 300-second max-age and `must-revalidate`. Browsers and edge caches may serve a fresh stored response for up to 300 seconds; once it is stale, they must revalidate before reuse. `/v1/version` uses `Cache-Control: no-cache`, allowing clients to retain its ETag while always revalidating deployment metadata.
 
 ```js
 const baseUrl = "https://yokaiba.scheimann.workers.dev";
-const params = new URLSearchParams({ templateId: "tournament-order-v1", seed: "round-42" });
+const params = new URLSearchParams({ templateId: "tournament-order-v2", seed: "round-42" });
 const response = await fetch(`${baseUrl}/v1/puzzles/generate?${params}`);
 if (!response.ok) throw new Error(`Puzzle request failed: ${response.status}`);
 const puzzle = await response.json();
@@ -96,14 +98,14 @@ POST remains available for clients that cannot use query parameters:
 ```sh
 curl -X POST http://localhost:8787/v1/puzzles/generate \
   -H 'content-type: application/json' \
-  -d '{"templateId":"tournament-order-v1","seed":"round-42"}'
+  -d '{"templateId":"tournament-order-v2","seed":"round-42"}'
 ```
 
 `templateId` and `seed` must be non-empty strings of at most 128 characters. Every response includes `X-Request-Id`, which is also included in Worker logs.
 
 Generated puzzles include `difficulty` (`level` 1–12, label, model identifier, and deterministic evidence). Tournament Order is calibrated to levels 1–4, Open Division to 5–8, and Championship Circuit to 9–12. Each template publishes its locale metadata and its own 1,000-seed calibration strategy. Difficulty combines the deduction trace, relational/cross-category clue structure, and deterministic solver telemetry; retain `modelVersion` and `evidence` when recording scores. The no-guess trace is an engineering diagnostic, not a substitute for player research.
 
-When `difficultyLevel` is supplied, generation searches deterministic clue-order strategies for that exact seed. It never substitutes another seed: if no strategy reaches the requested band, the API returns `422` with `difficulty_unavailable` and `availableDifficultyLevels`. Those alternatives are levels observed while trying every strategy for the requested band, rather than a costly exhaustive seed-wide search. Clients can suggest one of them or generate a fresh seed. Deterministic `422` GET responses use the same public `Cache-Control` headers with `must-revalidate` as successful generation, preventing repeated expensive misses.
+When `difficultyLevel` is supplied, generation searches deterministic clue-order strategies for that exact seed. It never substitutes another seed by default: if no strategy reaches the requested band, the API returns `422` with `difficulty_unavailable` and `availableDifficultyLevels`. Set `allowSeedFallback=true` to opt into a bounded deterministic search of derived seeds; the response retains `requestedSeed`, returns the replayable selected `seed`, and includes `seedFallbackAttempt`. Beginner targeted levels also reject clue sets that the bounded no-guess model cannot complete.
 
 For a production browser client, handle validation, unavailable-difficulty, rate-limit, and conditional-cache responses explicitly:
 
@@ -133,7 +135,7 @@ Run the deterministic corpus audit before a release or after changing templates,
 npm run audit:difficulty -- 1000
 ```
 
-The report includes per-level counts, clue-count range, and completion of the bounded no-guess trace for every template. Treat it as a regression gate, not evidence of player difficulty. For player validation, record anonymized `puzzle_started`, `puzzle_completed`, `hint_used`, `mistake`, and `puzzle_abandoned` events with `templateId`, `seed`, requested/assessed difficulty, generator version, solver version, difficulty model version, elapsed time, and clue count. Recalibrate template-specific thresholds on a held-out player sample, version the model, and retain historic metadata with every outcome.
+The report includes per-level counts, clue-count range, and completion of the bounded no-guess trace for every template. Treat it as a regression gate, not evidence of player difficulty. For player validation, send anonymized `puzzle_started`, `puzzle_completed`, `hint_used`, `mistake`, and `puzzle_abandoned` outcomes to `POST /v1/events` with template, difficulty, clue-count, hint/mistake totals, and elapsed time. Never send a seed, player identifier, or answer cells. Recalibrate template-specific thresholds on a held-out player sample, version the model, and retain historic metadata with every outcome.
 
 They also include a **signed** `puzzleToken` when `PUZZLE_TOKEN_SECRET` is configured. The token payload is base64url-encoded, readable reproducibility metadata (including the seed), followed by an HMAC signature. It protects against tampering; it does not encrypt the seed, hide the puzzle solution from a determined caller, or make public deterministic puzzles cheat-proof. Keep it with the puzzle in the browser and submit only the player’s completed non-base category assignments:
 
@@ -155,7 +157,7 @@ const check = await fetch(`${baseUrl}/v1/puzzles/verify`, {
 const { correct } = await check.json();
 ```
 
-The answer must contain each non-base category exactly once, with every category value exactly once, in base-row order. Verification returns only `{ correct: boolean }`; it never reveals correct cells or the solution. It prevents a browser from declaring itself complete without the server, but it does not make a public deterministic puzzle cheat-proof. Leaderboards need user identity and server-side game/session persistence.
+The answer must contain each non-base category exactly once, with every category value exactly once, in base-row order. Verification returns only `{ correct: boolean }`; it never reveals correct cells or the solution. For progressive assistance, `POST /v1/puzzles/hint` accepts the puzzle token and `kind` of `clue`, `elimination`, or `placement`; a placement hint reveals one cell, while the other kinds repeat bounded clue information. It prevents a browser from declaring itself complete without the server, but it does not make a public deterministic puzzle cheat-proof.
 
 ## Browser CORS and abuse controls
 
