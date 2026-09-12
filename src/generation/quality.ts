@@ -64,6 +64,11 @@ export interface PuzzleQuality {
   humanSolve: { solved: boolean; usedGuessing: false; totalCost: number; hardestStep: number; deductionPasses: number };
 }
 
+/** Whether rendered clue prose is present and contains no unresolved placeholders. */
+export function isClueTextReadable(text: string): boolean {
+  return Boolean(text.trim()) && !/\b(undefined|null)\b/i.test(text);
+}
+
 /** A no-guess human model using direct, all-different, ordering, and adjacency elimination. */
 function directHumanSolve(spec: PuzzleSpec, clues: readonly Clue[]) {
   const base = spec.categories.find(category => category.id === spec.baseCategory)!;
@@ -143,7 +148,7 @@ export function evaluatePuzzleQuality(spec: PuzzleSpec, clues: readonly Clue[], 
     unique,
     redundantClueIds,
     clueDiversity: { distinctKinds: kinds.length, kinds },
-    readability: { unreadableClueIds: clues.filter(clue => !clue.text.trim() || /\b(undefined|null)\b/i.test(clue.text)).map(clue => clue.id) },
+    readability: { unreadableClueIds: clues.filter(clue => !isClueTextReadable(clue.text)).map(clue => clue.id) },
     humanSolve: directHumanSolve(spec, clues),
   };
 }
