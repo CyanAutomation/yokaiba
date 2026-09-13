@@ -4,7 +4,7 @@ Yokaiba creates deterministic, uniquely solvable judo logic-grid puzzles for gam
 
 ## What it provides
 
-- A 4×4 tournament-order scenario, a 5×5 open-division scenario, a denser 5×5 Championship Circuit scenario, and a portable TypeScript constraint solver.
+- A 4×4 tournament-order scenario, a 5×3 open-division scenario, a denser 5×4 Championship Circuit scenario, and a portable TypeScript constraint solver.
 - Deterministic generation: the same template ID, seed, generator version, and solver version reproduce the same puzzle.
 - Minimal clue sets with direct, negative, ordering, adjacency, same-row, and exact-distance clues. The hidden solution is never returned over REST or MCP.
 - Server-side browser-answer verification using signed puzzle tokens, plus a deterministic 1–12 difficulty assessment with published human-trace and solver-search evidence.
