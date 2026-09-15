@@ -23,7 +23,12 @@ export async function waitForExpectedDeployment({
   while (true) {
     const url = new URL("/healthz", origin);
     url.searchParams.set("deployment-probe", `${now()}-${attempt++}`);
-    const response = await fetchImpl(url, { headers: { "cache-control": "no-cache" } });
+    let response;
+    try {
+      response = await fetchImpl(url, { headers: { "cache-control": "no-cache" } });
+    } catch (error) {
+      throw new Error(`/healthz fetch failed (origin: ${origin}; attempt: ${attempt})`, { cause: error });
+    }
     last = {
       serviceVersion: undefined,
       buildSha: undefined,
