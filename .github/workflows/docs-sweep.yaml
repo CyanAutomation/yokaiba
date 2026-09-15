@@ -270,7 +270,7 @@ jobs:
   monitor:
     name: Monitor Kaseki documentation sweep
     needs: dispatch
-    environment: kaseki
+    environment: kaseki-docs
     runs-on: ubuntu-latest
     # Kaseki receives a 3-hour run budget. Allow a small amount of polling
     # overhead, then make a delayed or stuck run visible as a failed workflow.
