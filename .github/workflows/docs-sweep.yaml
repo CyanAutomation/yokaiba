@@ -296,7 +296,7 @@ jobs:
           : "${KASEKI_API_TOKEN:?KASEKI_API_TOKEN is not configured}"
           : "${KASEKI_RUN_ID:?Kaseki submission did not return a run ID}"
 
-          for _ in $(seq 1 360); do
+          for _ in $(seq 1 180); do
             response_file="$(mktemp)"
             trap 'rm -f "$response_file"' EXIT
             curl --fail-with-body --silent --show-error --retry 3 --retry-all-errors \
@@ -313,7 +313,7 @@ jobs:
             case "$status" in
               completed) exit 0 ;;
               failed) echo "Kaseki run $KASEKI_RUN_ID failed." >&2; exit 1 ;;
-              queued|running) sleep 30 ;;
+              queued|running) sleep 60 ;;
               *) echo "Kaseki returned an unknown run status: $status" >&2; exit 1 ;;
             esac
           done
