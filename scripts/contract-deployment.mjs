@@ -1,5 +1,9 @@
 const rawBaseUrl = process.env.DEPLOYMENT_URL;
 if (!rawBaseUrl) throw new Error("DEPLOYMENT_URL must contain the canonical deployed Worker origin");
+const expectedBuildSha = process.env.EXPECTED_BUILD_SHA;
+if (!expectedBuildSha) throw new Error("EXPECTED_BUILD_SHA must contain the Git SHA being deployed");
+const expectedBuildVersion = process.env.EXPECTED_BUILD_VERSION;
+if (!expectedBuildVersion) throw new Error("EXPECTED_BUILD_VERSION must contain the package version being deployed");
 const baseUrl = new URL(rawBaseUrl);
 if (baseUrl.pathname !== "/" || baseUrl.search || baseUrl.hash) throw new Error("DEPLOYMENT_URL must be an origin without a path, query, or fragment");
 
@@ -15,11 +19,16 @@ for (const path of ["/healthz", "/readyz", "/v1/scenarios", "/v1/version", "/v1/
 }
 
 const health = await (await request("/healthz")).json();
-if (health.status !== "ok" || !health.build?.buildSha) throw new Error("health does not satisfy the deployed contract");
+if (health.status !== "ok" || health.build?.serviceVersion !== expectedBuildVersion || health.build?.buildSha !== expectedBuildSha) {
+  throw new Error("health does not identify the deployment that this workflow released");
+}
 const ready = await (await request("/readyz")).json();
 if (ready.status !== "ready" || !["configured", "fallback"].includes(ready.rateLimitProvider)) throw new Error("readiness does not satisfy the deployed contract");
 const version = await (await request("/v1/version")).json();
-if (!version.serviceVersion || !version.buildSha || !version.generatorVersion || !version.solverVersion) throw new Error("version does not satisfy the deployed contract");
+if (version.serviceVersion !== expectedBuildVersion || version.buildSha !== expectedBuildSha) {
+  throw new Error("version does not identify the deployment that this workflow released");
+}
+if (!version.generatorVersion || !version.solverVersion) throw new Error("version does not satisfy the deployed contract");
 const scenarios = await (await request("/v1/scenarios")).json();
 if (!Array.isArray(scenarios.scenarios) || scenarios.scenarios.length < 2 || !scenarios.scenarios.every(scenario => scenario.metadata?.locales?.default)) throw new Error("scenario catalogue does not satisfy the deployed contract");
 

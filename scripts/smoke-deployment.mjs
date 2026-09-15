@@ -1,5 +1,9 @@
 const rawBaseUrl = process.env.DEPLOYMENT_URL;
 if (!rawBaseUrl) throw new Error("DEPLOYMENT_URL must contain the canonical deployed Worker origin");
+const expectedBuildSha = process.env.EXPECTED_BUILD_SHA;
+if (!expectedBuildSha) throw new Error("EXPECTED_BUILD_SHA must contain the Git SHA being deployed");
+const expectedBuildVersion = process.env.EXPECTED_BUILD_VERSION;
+if (!expectedBuildVersion) throw new Error("EXPECTED_BUILD_VERSION must contain the package version being deployed");
 
 const baseUrl = new URL(rawBaseUrl);
 if (baseUrl.pathname !== "/" || baseUrl.search || baseUrl.hash) throw new Error("DEPLOYMENT_URL must be an origin without a path, query, or fragment");
@@ -12,7 +16,10 @@ async function get(path, options) {
 
 const health = await get("/healthz");
 const healthBody = await health.json();
-if (healthBody.status !== "ok" || !healthBody.build?.serviceVersion || !healthBody.build?.buildSha) throw new Error("health response is incomplete");
+if (healthBody.status !== "ok") throw new Error("health response is not ok");
+if (healthBody.build?.serviceVersion !== expectedBuildVersion || healthBody.build?.buildSha !== expectedBuildSha) {
+  throw new Error("health response does not identify the deployment that this workflow released");
+}
 
 const ready = await get("/readyz");
 const readyBody = await ready.json();
@@ -20,7 +27,10 @@ if (readyBody.status !== "ready" || readyBody.rateLimitProvider !== "configured"
 
 const version = await get("/v1/version");
 const versionBody = await version.json();
-if (!versionBody.serviceVersion || !versionBody.buildSha || !versionBody.generatorVersion || !versionBody.solverVersion) throw new Error("version response is incomplete");
+if (versionBody.serviceVersion !== expectedBuildVersion || versionBody.buildSha !== expectedBuildSha) {
+  throw new Error("version response does not identify the deployment that this workflow released");
+}
+if (!versionBody.generatorVersion || !versionBody.solverVersion) throw new Error("version response is incomplete");
 
 const puzzlePath = "/v1/puzzles/generate?templateId=tournament-order-v1&seed=deployment-smoke";
 const puzzle = await get(puzzlePath);

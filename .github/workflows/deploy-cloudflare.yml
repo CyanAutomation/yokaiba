@@ -14,13 +14,17 @@ concurrency:
 
 jobs:
   deploy:
+    # A manually dispatched workflow may be started from any ref in the UI.
+    # Production releases must always use the protected default branch.
+    if: github.ref == 'refs/heads/main'
+    environment: production
     runs-on: ubuntu-latest
     timeout-minutes: 15
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
 
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@1e60f620b9541d8bcd3c84b123bf50962bb33ba3 # v4.0.4
         with:
           node-version: 22
           cache: npm
@@ -54,8 +58,12 @@ jobs:
         run: node scripts/smoke-deployment.mjs
         env:
           DEPLOYMENT_URL: ${{ vars.CLOUDFLARE_DEPLOYMENT_URL }}
+          EXPECTED_BUILD_SHA: ${{ github.sha }}
+          EXPECTED_BUILD_VERSION: ${{ steps.build.outputs.version }}
 
       - name: Contract-test deployed public API
         run: node scripts/contract-deployment.mjs
         env:
           DEPLOYMENT_URL: ${{ vars.CLOUDFLARE_DEPLOYMENT_URL }}
+          EXPECTED_BUILD_SHA: ${{ github.sha }}
+          EXPECTED_BUILD_VERSION: ${{ steps.build.outputs.version }}
