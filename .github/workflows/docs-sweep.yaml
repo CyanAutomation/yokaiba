@@ -95,7 +95,7 @@ jobs:
   api_connection:
     name: Kaseki API Status
     needs: readiness
-    environment: kaseki
+    environment: kaseki-docs
     runs-on: ubuntu-latest
     timeout-minutes: 2
     env:
@@ -122,7 +122,7 @@ jobs:
   dispatch:
     name: Submit Kaseki documentation sweep
     needs: api_connection
-    environment: kaseki
+    environment: kaseki-docs
     runs-on: ubuntu-latest
     timeout-minutes: 10
     outputs:
