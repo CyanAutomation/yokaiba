@@ -40,6 +40,7 @@ jobs:
   system_status:
     name: Kaseki System Status
     runs-on: ubuntu-latest
+    environment: kaseki-docs
     timeout-minutes: 2
     env:
       # Set this repository or organization variable to the stable HTTPS Kaseki
@@ -73,6 +74,7 @@ jobs:
   readiness:
     name: Kaseki System Readiness
     needs: system_status
+    environment: kaseki-docs
     runs-on: ubuntu-latest
     timeout-minutes: 2
     env:
