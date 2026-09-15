@@ -58,6 +58,7 @@ test("deployment probe reports sanitized context for network failures", async ()
       now: () => 123,
     }),
     error => {
+      assert.ok(error instanceof Error);
       assert.equal(error.message, "/healthz fetch failed (origin: https://deployment.example; attempt: 1)");
       assert.equal(error.cause, networkError);
       assert.doesNotMatch(error.message, /user|password|secret|sensitive-path/);
@@ -82,6 +83,7 @@ test("deployment probe timeout reports expected and last received metadata", asy
       },
     }),
     error => {
+      assert.ok(error instanceof Error);
       assert.match(error.message, /origin: https:\/\/deployment\.example/);
       assert.match(error.message, /expected: \{"serviceVersion":"1\.2\.3","buildSha":"abc123"\}/);
       assert.match(error.message, /last received: \{"serviceVersion":"0\.9\.0","buildSha":"stalesha"\}/);
