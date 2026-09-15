@@ -47,6 +47,25 @@ test("deployment probe retries stale metadata until the current build arrives", 
   assert.equal(elapsed, 3_000);
 });
 
+test("deployment probe reports sanitized context for network failures", async () => {
+  const networkError = new TypeError("fetch failed");
+
+  await assert.rejects(
+    waitForExpectedDeployment({
+      baseUrl: "https://user:password@deployment.example/sensitive-path?token=secret",
+      ...expected,
+      fetchImpl: () => Promise.reject(networkError),
+      now: () => 123,
+    }),
+    error => {
+      assert.equal(error.message, "/healthz fetch failed (origin: https://deployment.example; attempt: 1)");
+      assert.equal(error.cause, networkError);
+      assert.doesNotMatch(error.message, /user|password|secret|sensitive-path/);
+      return true;
+    },
+  );
+});
+
 test("deployment probe timeout reports expected and last received metadata", async () => {
   let elapsed = 0;
   await assert.rejects(
