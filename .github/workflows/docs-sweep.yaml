@@ -140,7 +140,7 @@ jobs:
       TASK_DESCRIPTION: ${{ inputs.task_description || 'Keep README.md and docs/ accurate against the current implementation.' }}
       ALLOWLIST: ${{ inputs.allowlist || 'README.md,docs/**/*.md' }}
       VALIDATION_COMMAND: ${{ inputs.validation_command || 'npm run typecheck && npm test' }}
-      IDEMPOTENCY_KEY: kaseki-docs-sweep-${{ github.run_id }}
+      IDEMPOTENCY_SEED: kaseki-docs-sweep-${{ github.repository }}-${{ github.run_id }}
 
     steps:
       - name: Check Kaseki availability
@@ -156,6 +156,15 @@ jobs:
           set -euo pipefail
           : "${KASEKI_API_TOKEN:?KASEKI_API_TOKEN is not configured}"
 
+          idempotency_key="$(
+            python3 -c 'import sys, uuid; print(uuid.uuid5(uuid.NAMESPACE_URL, sys.argv[1]))' \
+              "$IDEMPOTENCY_SEED"
+          )"
+          python3 -c 'import sys, uuid; uuid.UUID(sys.argv[1])' "$idempotency_key" || {
+            echo "::error title=Invalid idempotency key::Derived idempotency key is not a valid UUID" >&2
+            exit 1
+          }
+
           payload="$(
             jq -n \
               --arg repoUrl "$REPO_URL" \
@@ -163,7 +172,7 @@ jobs:
               --arg taskDescription "$TASK_DESCRIPTION" \
               --arg validationCommand "$VALIDATION_COMMAND" \
               --arg allowlist "$ALLOWLIST" \
-              --arg idempotencyKey "$IDEMPOTENCY_KEY" \
+              --arg idempotencyKey "$idempotency_key" \
               '{
                 repoUrl: $repoUrl,
                 ref: $ref,
