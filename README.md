@@ -1,3 +1,5 @@
+[![Deploy Cloudflare Worker](https://github.com/CyanAutomation/yokaiba/actions/workflows/deploy-cloudflare.yml/badge.svg?branch=main)](https://github.com/CyanAutomation/yokaiba/actions/workflows/deploy-cloudflare.yml)
+
 # Yokaiba
 
 Yokaiba creates deterministic, uniquely solvable judo logic-grid puzzles for games, REST clients, and MCP clients.
