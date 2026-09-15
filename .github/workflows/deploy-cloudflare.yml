@@ -49,13 +49,47 @@ jobs:
           fi
 
       - name: Deploy Worker
-        run: npx wrangler deploy --var BUILD_VERSION:${{ steps.build.outputs.version }} --var BUILD_SHA:${{ github.sha }}
+        id: deploy
+        run: |
+          npx wrangler deploy --var BUILD_VERSION:${{ steps.build.outputs.version }} --var BUILD_SHA:${{ github.sha }}
+          node <<'EOF'
+          const fs = require("node:fs");
+          const records = fs.readFileSync(process.env.WRANGLER_OUTPUT_FILE_PATH, "utf8").trim().split("\n").map(JSON.parse);
+          const deployment = records.findLast(record => record.type === "deploy");
+          if (!deployment) throw new Error("Wrangler did not write machine-readable deployment information");
+          if (deployment.worker_name !== "yokaiba") throw new Error(`Wrangler deployed unexpected Worker ${JSON.stringify(deployment.worker_name)}`);
+
+          const directUrls = deployment.targets.filter(target => {
+            try {
+              const url = new URL(target);
+              return url.protocol === "https:" && url.hostname.endsWith(".workers.dev");
+            } catch {
+              return false;
+            }
+          });
+          if (directUrls.length !== 1) {
+            throw new Error(`Expected exactly one direct workers.dev deployment target, received ${JSON.stringify(directUrls)}`);
+          }
+          fs.appendFileSync(process.env.GITHUB_OUTPUT, `deployment_url=${directUrls[0]}\n`);
+          EOF
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          WRANGLER_OUTPUT_FILE_PATH: ${{ runner.temp }}/wrangler-deploy-output.json
+
+      - name: Probe direct Worker deployment
+        run: node scripts/health-deployment.mjs
+        env:
+          DEPLOYMENT_URL: ${{ steps.deploy.outputs.deployment_url }}
+          EXPECTED_BUILD_SHA: ${{ github.sha }}
+          EXPECTED_BUILD_VERSION: ${{ steps.build.outputs.version }}
 
       - name: Smoke-test deployed public API
-        run: node scripts/smoke-deployment.mjs
+        run: |
+          if ! node scripts/smoke-deployment.mjs; then
+            echo "::error::The freshly deployed Worker endpoint exposes the expected build, but the canonical endpoint does not. Check that CLOUDFLARE_DEPLOYMENT_URL and its route resolve to the yokaiba Worker in CLOUDFLARE_ACCOUNT_ID."
+            exit 1
+          fi
         env:
           DEPLOYMENT_URL: ${{ vars.CLOUDFLARE_DEPLOYMENT_URL }}
           EXPECTED_BUILD_SHA: ${{ github.sha }}
