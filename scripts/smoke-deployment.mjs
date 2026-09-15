@@ -1,3 +1,5 @@
+import { waitForExpectedDeployment } from "./deployment-probe.mjs";
+
 const rawBaseUrl = process.env.DEPLOYMENT_URL;
 if (!rawBaseUrl) throw new Error("DEPLOYMENT_URL must contain the canonical deployed Worker origin");
 const expectedBuildSha = process.env.EXPECTED_BUILD_SHA;
@@ -14,12 +16,7 @@ async function get(path, options) {
   return response;
 }
 
-const health = await get("/healthz");
-const healthBody = await health.json();
-if (healthBody.status !== "ok") throw new Error("health response is not ok");
-if (healthBody.build?.serviceVersion !== expectedBuildVersion || healthBody.build?.buildSha !== expectedBuildSha) {
-  throw new Error("health response does not identify the deployment that this workflow released");
-}
+await waitForExpectedDeployment({ baseUrl, expectedBuildVersion, expectedBuildSha });
 
 const ready = await get("/readyz");
 const readyBody = await ready.json();

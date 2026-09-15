@@ -1,3 +1,5 @@
+import { waitForExpectedDeployment } from "./deployment-probe.mjs";
+
 const rawBaseUrl = process.env.DEPLOYMENT_URL;
 if (!rawBaseUrl) throw new Error("DEPLOYMENT_URL must contain the canonical deployed Worker origin");
 const expectedBuildSha = process.env.EXPECTED_BUILD_SHA;
@@ -13,15 +15,13 @@ async function request(path) {
   return response;
 }
 
+await waitForExpectedDeployment({ baseUrl, expectedBuildVersion, expectedBuildSha });
+
 const specification = await (await request("/openapi/v1.yaml")).text();
 for (const path of ["/healthz", "/readyz", "/v1/scenarios", "/v1/version", "/v1/puzzles/generate", "/v1/puzzles/verify"]) {
   if (!specification.includes(`  ${path}:`)) throw new Error(`deployed OpenAPI document does not define ${path}`);
 }
 
-const health = await (await request("/healthz")).json();
-if (health.status !== "ok" || health.build?.serviceVersion !== expectedBuildVersion || health.build?.buildSha !== expectedBuildSha) {
-  throw new Error("health does not identify the deployment that this workflow released");
-}
 const ready = await (await request("/readyz")).json();
 if (ready.status !== "ready" || !["configured", "fallback"].includes(ready.rateLimitProvider)) throw new Error("readiness does not satisfy the deployed contract");
 const version = await (await request("/v1/version")).json();
