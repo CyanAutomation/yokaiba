@@ -285,7 +285,7 @@ jobs:
           : "${KASEKI_API_TOKEN:?KASEKI_API_TOKEN is not configured}"
           : "${KASEKI_RUN_ID:?Kaseki submission did not return a run ID}"
 
-          for attempt in $(seq 1 360); do
+          for _ in $(seq 1 360); do
             response_file="$(mktemp)"
             trap 'rm -f "$response_file"' EXIT
             curl --fail-with-body --silent --show-error --retry 3 --retry-all-errors \
