@@ -1,4 +1,4 @@
-[![Deploy Cloudflare Worker](https://github.com/CyanAutomation/yokaiba/actions/workflows/deploy-cloudflare.yml/badge.svg?branch=main)](https://github.com/CyanAutomation/yokaiba/actions/workflows/deploy-cloudflare.yml)
+[![Validate](https://github.com/CyanAutomation/yokaiba/actions/workflows/validate.yml/badge.svg?branch=main)](https://github.com/CyanAutomation/yokaiba/actions/workflows/validate.yml) [![Deploy Cloudflare Worker](https://github.com/CyanAutomation/yokaiba/actions/workflows/deploy-cloudflare.yml/badge.svg?branch=main)](https://github.com/CyanAutomation/yokaiba/actions/workflows/deploy-cloudflare.yml)
 
 # Yokaiba
 
