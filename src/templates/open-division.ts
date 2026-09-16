@@ -17,6 +17,7 @@ export const openDivisionTemplate: PuzzleTemplate = {
       modelVersion: "yokaiba-difficulty-v4",
       scoreThresholds: [100, 111, 122],
       levelRange: [5, 8],
+      requiresHumanSolve: true,
       corpus: { sampleSize: 1_000, methodology: "Seeded corpus scored with the no-guess trace and deterministic solver telemetry." },
     },
   },

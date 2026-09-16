@@ -10,6 +10,7 @@ export const GENERATOR_VERSION = "yokaiba-generator-v4";
 /** Version of the built-in solver used when callers do not provide one. */
 export const SOLVER_VERSION = exhaustivePuzzleSolver.version;
 const MAX_DIFFICULTY_STRATEGIES = 64;
+const DENSE_FALLBACK_STRATEGY_LIMIT = 8;
 
 // RNG and shuffle are provided by ./rng.ts
 
@@ -213,10 +214,10 @@ export function generatePuzzle(template: PuzzleTemplate, seed: string, solver: P
  * Construct from one stable solution seed and explore deterministic clue-order
  * strategies. A target is unavailable rather than silently changing the seed.
  */
-export function generatePuzzleAtDifficulty(template: PuzzleTemplate, seed: string, difficultyLevel: DifficultyLevel, solver: PuzzleSolver = exhaustivePuzzleSolver): GeneratedPuzzle {
+export function generatePuzzleAtDifficulty(template: PuzzleTemplate, seed: string, difficultyLevel: DifficultyLevel, solver: PuzzleSolver = exhaustivePuzzleSolver, strategyLimit = MAX_DIFFICULTY_STRATEGIES): GeneratedPuzzle {
   const observedLevels = new Set<DifficultyLevel>();
   const requiresHumanSolve = template.metadata?.difficultyCalibration.requiresHumanSolve === true;
-  for (let strategy = 0; strategy < MAX_DIFFICULTY_STRATEGIES; strategy += 1) {
+  for (let strategy = 0; strategy < strategyLimit; strategy += 1) {
     const candidate = generatePuzzle(template, seed, solver, { difficultyLevel, strategy });
     observedLevels.add(candidate.difficulty.level);
     if (candidate.difficulty.level === difficultyLevel && (!requiresHumanSolve || candidate.difficulty.evidence.humanSolve.solved)) {
@@ -224,6 +225,13 @@ export function generatePuzzleAtDifficulty(template: PuzzleTemplate, seed: strin
     }
   }
   throw new DifficultyUnavailableError(template.id, seed, difficultyLevel, [...observedLevels].sort((left, right) => left - right));
+}
+
+/** Dense five-row multi-grid boards can exceed Worker CPU limits if fallback first tries every clue ordering. */
+export function difficultyStrategyLimitForFallback(template: PuzzleTemplate): number {
+  const base = template.categories.find(category => category.id === template.baseCategory)!;
+  const grids = template.categories.length - 1;
+  return base.values.length >= 5 && grids >= 3 ? DENSE_FALLBACK_STRATEGY_LIMIT : MAX_DIFFICULTY_STRATEGIES;
 }
 
 /** Generate the normal puzzle unless this versioned template promises no-guess play. */
@@ -240,7 +248,7 @@ export function generateProgressivePuzzle(template: PuzzleTemplate, seed: string
  */
 export function generatePuzzleAtDifficultyWithFallback(template: PuzzleTemplate, requestedSeed: string, difficultyLevel: DifficultyLevel, solver: PuzzleSolver = exhaustivePuzzleSolver, maxAttempts = 32): GeneratedPuzzle {
   try {
-    return generatePuzzleAtDifficulty(template, requestedSeed, difficultyLevel, solver);
+    return generatePuzzleAtDifficulty(template, requestedSeed, difficultyLevel, solver, difficultyStrategyLimitForFallback(template));
   } catch (error) {
     if (!(error instanceof DifficultyUnavailableError)) throw error;
     const requiresHumanSolve = template.metadata?.difficultyCalibration.requiresHumanSolve === true;
@@ -249,7 +257,15 @@ export function generatePuzzleAtDifficultyWithFallback(template: PuzzleTemplate,
     // and the returned seed remains sufficient to replay the selected puzzle.
     for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
       const seed = `${requestedSeed}:fallback:${attempt}`;
-      const puzzle = generateProgressivePuzzle(template, seed, solver);
+      let puzzle: GeneratedPuzzle;
+      try {
+        puzzle = generateProgressivePuzzle(template, seed, solver);
+      } catch (candidateError) {
+        // A candidate may have the requested score but no no-guess strategy.
+        // It is not a service failure; continue the bounded deterministic scan.
+        if (candidateError instanceof DifficultyUnavailableError) continue;
+        throw candidateError;
+      }
       if (puzzle.difficulty.level === difficultyLevel && (!requiresHumanSolve || puzzle.difficulty.evidence.humanSolve.solved)) {
         return { ...puzzle, requestedSeed, seedFallbackAttempt: attempt };
       }

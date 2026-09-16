@@ -14,6 +14,8 @@ import {
   renderClues,
   aggregateDifficultyAuditRecords,
   auditDifficultyCorpus,
+  auditTargetedDifficultyCorpus,
+  difficultyStrategyLimitForFallback,
   isIjfSeniorMensWeightClass,
   isClueTextReadable,
   MAX_SUPPORTED_ROWS,
@@ -144,6 +146,9 @@ test("templates provide a deliberate five-row bridge before the expert course", 
   assert.equal(championshipBridgeTemplate.categories.length, 4);
   assert.ok(championshipBridgeTemplate.categories.every(category => category.values.length === 5));
   assert.deepEqual(championshipCircuitTemplate.metadata!.difficultyCalibration.levelRange, [9, 12]);
+  for (const template of [tournamentOrderV2Template, openDivisionTemplate, championshipBridgeTemplate, championshipCircuitTemplate]) {
+    assert.equal(template.metadata!.difficultyCalibration.requiresHumanSolve, true);
+  }
 });
 
 test("targeted beginner puzzles complete under the bounded no-guess deduction model", () => {
@@ -383,6 +388,19 @@ test("difficulty corpus audit emits a report for a real template", () => {
   assert.equal(report.templateId, tournamentOrderTemplate.id);
   assert.equal(report.sampleSize, 1);
   assert.equal(report.levelCounts.reduce((total, count) => total + count, 0), 1);
+});
+
+test("targeted corpus audits prove every requested course level rather than sampling untargeted puzzles", () => {
+  const report = auditTargetedDifficultyCorpus(tournamentOrderV2Template, { seedPrefix: "targeted-audit", sampleSize: 1 });
+
+  assert.deepEqual(report.levels.map(level => level.requestedDifficultyLevel), [1, 2, 3, 4]);
+  assert.ok(report.levels.every(level => level.generated === 1 && level.humanTrace.incomplete === 0));
+  assert.ok(report.levels.every(level => level.assessedLevelCounts[level.requestedDifficultyLevel - 1] === 1));
+});
+
+test("fallback bounds dense strategy search to protect production CPU while compact boards retain full search", () => {
+  assert.equal(difficultyStrategyLimitForFallback(tournamentOrderV2Template), 64);
+  assert.equal(difficultyStrategyLimitForFallback(championshipCircuitTemplate), 8);
 });
 
 test("expert target generation favors relational deductions over direct facts", () => {
