@@ -18,6 +18,7 @@ export const championshipCircuitTemplate: PuzzleTemplate = {
       modelVersion: "yokaiba-difficulty-v4",
       scoreThresholds: [145, 157, 168],
       levelRange: [9, 12],
+      requiresHumanSolve: true,
       corpus: { sampleSize: 1_000, methodology: "Seeded corpus scored with a deterministic deduction trace and solver telemetry." },
     },
   },
