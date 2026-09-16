@@ -107,7 +107,7 @@ curl -X POST http://localhost:8787/v1/puzzles/generate \
 
 Generated puzzles include `difficulty` (`level` 1–12, label, model identifier, and deterministic evidence). Tournament Order is calibrated to levels 1–4, Open Division to 5–8, and Championship Circuit to 9–12. Each template publishes its locale metadata and its own 1,000-seed calibration strategy. Difficulty combines the deduction trace, relational/cross-category clue structure, and deterministic solver telemetry; retain `modelVersion` and `evidence` when recording scores. The no-guess trace is an engineering diagnostic, not a substitute for player research.
 
-When `difficultyLevel` is supplied, generation searches deterministic clue-order strategies for that exact seed. It never substitutes another seed by default: if no strategy reaches the requested band, the API returns `422` with `difficulty_unavailable` and `availableDifficultyLevels`. Set `allowSeedFallback=true` to opt into a bounded deterministic search of derived seeds; the response retains `requestedSeed`, returns the replayable selected `seed`, and includes `seedFallbackAttempt`. Beginner targeted levels also reject clue sets that the bounded no-guess model cannot complete.
+When `difficultyLevel` is supplied, generation searches deterministic clue-order strategies for that exact seed. It never substitutes another seed by default: if no strategy reaches the requested band, the API returns `422` with `difficulty_unavailable` and `availableDifficultyLevels`. Set `allowSeedFallback=true` to opt into a bounded deterministic search of derived seeds; the response retains `requestedSeed`, returns the replayable selected `seed`, and includes `seedFallbackAttempt`. All targeted curriculum levels reject clue sets that the bounded no-guess model cannot complete.
 
 For a production browser client, handle validation, unavailable-difficulty, rate-limit, and conditional-cache responses explicitly:
 
@@ -135,9 +135,10 @@ Run the deterministic corpus audit before a release or after changing templates,
 
 ```sh
 npm run audit:difficulty -- 1000
+npm run audit:difficulty:targeted -- 1000
 ```
 
-The report includes per-level counts, clue-count range, and completion of the bounded no-guess trace for every template. Treat it as a regression gate, not evidence of player difficulty. For player validation, send anonymized `puzzle_started`, `puzzle_completed`, `hint_used`, `mistake`, and `puzzle_abandoned` outcomes to `POST /v1/events` with template, difficulty, clue-count, hint/mistake totals, and elapsed time. Never send a seed, player identifier, or answer cells. Recalibrate template-specific thresholds on a held-out player sample, version the model, and retain historic metadata with every outcome.
+The distribution report includes per-level counts, clue-count range, and completion of the bounded no-guess trace for every template. The targeted report exercises every advertised level through the same deterministic fallback path used by the course, reporting fallback use and no-guess completion per level. Treat both as regression gates, not evidence of player difficulty. For player validation, send anonymized `puzzle_started`, `puzzle_completed`, `hint_used`, `mistake`, and `puzzle_abandoned` outcomes to `POST /v1/events` with template, difficulty, clue-count, hint/mistake totals, and elapsed time. Never send a seed, player identifier, or answer cells. Recalibrate template-specific thresholds on a held-out player sample, version the model, and retain historic metadata with every outcome.
 
 They also include a **signed** `puzzleToken` when `PUZZLE_TOKEN_SECRET` is configured. The token payload is base64url-encoded, readable reproducibility metadata (including the seed), followed by an HMAC signature. It protects against tampering; it does not encrypt the seed, hide the puzzle solution from a determined caller, or make public deterministic puzzles cheat-proof. Keep it with the puzzle in the browser and submit only the player’s completed non-base category assignments:
 
