@@ -9,6 +9,7 @@
     "test": "node --import tsx --test tests/*.test.ts",
     "dev": "wrangler dev",
     "audit:difficulty": "tsx scripts/audit-difficulty.mts",
+    "audit:difficulty:targeted": "tsx scripts/audit-targeted-difficulty.mts",
     "vendor:swagger-ui": "node scripts/vendor-swagger-ui.mjs",
     "deploy": "wrangler deploy"
   },
