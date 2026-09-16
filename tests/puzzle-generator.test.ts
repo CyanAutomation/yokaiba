@@ -849,13 +849,15 @@ test("REST provides bounded clue, elimination, and placement hints from a signed
   assert.equal(placementBody.placement.category, "weight");
 });
 
-test("REST accepts anonymized puzzle outcomes and rejects unrecognized telemetry", async () => {
+test("REST accepts anonymized puzzle outcomes with their smart-marking cohort and rejects malformed telemetry", async () => {
   const route = createRestRouter([tournamentOrderTemplate]);
-  const accepted = await route(new Request("https://yokaiba.test/v1/events", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ event: "puzzle_completed", templateId: "tournament-order-v1", assessedDifficultyLevel: 2, elapsedMs: 120_000, clueCount: 8, hintsUsed: 1 }) }));
+  const accepted = await route(new Request("https://yokaiba.test/v1/events", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ event: "puzzle_completed", templateId: "tournament-order-v1", assessedDifficultyLevel: 2, elapsedMs: 120_000, clueCount: 8, hintsUsed: 1, smartMarkingEnabled: true }) }));
   assert.equal(accepted.status, 202);
   assert.deepEqual(await accepted.json(), { accepted: true });
   const rejected = await route(new Request("https://yokaiba.test/v1/events", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ event: "identity_captured", templateId: "tournament-order-v1" }) }));
   assert.equal(rejected.status, 400);
+  const malformed = await route(new Request("https://yokaiba.test/v1/events", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ event: "puzzle_completed", templateId: "tournament-order-v1", smartMarkingEnabled: "true" }) }));
+  assert.equal(malformed.status, 400);
 });
 
 test("REST verifies a complete submitted answer without exposing the solution", async () => {

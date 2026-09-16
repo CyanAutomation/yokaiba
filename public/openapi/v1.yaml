@@ -532,6 +532,7 @@ components:
         elapsedMs: { type: integer, minimum: 0, maximum: 86400000 }
         hintsUsed: { type: integer, minimum: 0, maximum: 100 }
         mistakes: { type: integer, minimum: 0, maximum: 100 }
+        smartMarkingEnabled: { type: boolean, description: "Whether the player enabled the optional advanced efficiency feature; not a hint or assist." }
     Accepted:
       type: object
       required: [accepted]
