@@ -248,7 +248,7 @@ test("rendered clue metadata satisfies the language catalogue contract", () => {
   ];
 
   const rendered = renderClues(tournamentOrderTemplate, "metadata-contract", clues);
-  assert.ok(rendered.every(clue => clue.languageVersion === "yokaiba-clue-prose-v5"));
+  assert.ok(rendered.every(clue => clue.languageVersion === "yokaiba-clue-prose-v6"));
   assert.ok(rendered.every(clue => typeof clue.phraseVariant === "string" && clue.phraseVariant.length > 0));
 });
 

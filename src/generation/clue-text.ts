@@ -1,7 +1,7 @@
 import type { Clue, ClueConstraint, PuzzleTemplate } from "../domain/types.js";
 import { hash } from "../domain/hash.js";
 
-export const CLUE_LANGUAGE_VERSION = "yokaiba-clue-prose-v5";
+export const CLUE_LANGUAGE_VERSION = "yokaiba-clue-prose-v6";
 
 function capitalise(value: string) {
   return `${value[0]!.toUpperCase()}${value.slice(1)}`;
@@ -96,7 +96,7 @@ function renderConstraint(template: PuzzleTemplate, constraint: ClueConstraint, 
   const distance = positionWords[constraint.distance] ?? String(constraint.distance);
   const positions = `${distance} position${constraint.distance === 1 ? "" : "s"}`;
   return index === 0
-    ? `In the ${template.title.toLowerCase()} order, ${left} and ${right} were exactly ${positions} apart.`
+    ? `In the ${template.title.toLowerCase()} order, ${left} was exactly ${positions} from ${right}.`
     : `In the ${template.title.toLowerCase()} order, ${left} was exactly ${positions} away from ${right}.`;
 }
 
