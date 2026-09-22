@@ -1,7 +1,7 @@
 import type { Clue, ClueConstraint, PuzzleTemplate } from "../domain/types.js";
 import { hash } from "../domain/hash.js";
 
-export const CLUE_LANGUAGE_VERSION = "yokaiba-clue-prose-v4";
+export const CLUE_LANGUAGE_VERSION = "yokaiba-clue-prose-v6";
 
 function capitalise(value: string) {
   return `${value[0]!.toUpperCase()}${value.slice(1)}`;
@@ -27,6 +27,7 @@ function termSubject(categoryId: string, value: string) {
   if (categoryId === "weight") return `the ${value} competitor`;
   if (categoryId === "tatami") return `the competitor on ${value}`;
   if (categoryId === "placing") return `the competitor who finished ${value}`;
+  if (categoryId === "result") return `the competitor who finished ${value}`;
   if (categoryId === "medal") return resultSubject(value);
   return `the competitor with ${value}`;
 }
@@ -35,6 +36,7 @@ function subjectAction(categoryId: string, value: string) {
   if (categoryId === "weight") return `fought in the ${value} division`;
   if (categoryId === "tatami") return `competed on ${value}`;
   if (categoryId === "placing") return `finished in ${value} place`;
+  if (categoryId === "result") return `finished in ${value} place`;
   if (categoryId === "medal") return resultAction(value);
   return `had ${value}`;
 }
@@ -43,6 +45,7 @@ function negativeAction(categoryId: string, value: string) {
   if (categoryId === "weight") return `fight in the ${value} division`;
   if (categoryId === "tatami") return `compete on ${value}`;
   if (categoryId === "placing") return `finish ${value}`;
+  if (categoryId === "result") return `finish in ${value} place`;
   if (categoryId === "medal") return negativeResultAction(value);
   return `have ${value}`;
 }
@@ -77,15 +80,15 @@ function renderConstraint(template: PuzzleTemplate, constraint: ClueConstraint, 
     const left = termSubject(constraint.left.category, constraint.left.value);
     const right = termSubject(constraint.right.category, constraint.right.value);
     return index === 0
-      ? `In the ${template.title.toLowerCase()}, ${left} came before ${right}.`
-      : `${capitalise(left)} was earlier than ${right} in the ${template.title.toLowerCase()}.`;
+      ? `In the ${template.title.toLowerCase()} order, ${left} came before ${right}.`
+      : `In the ${template.title.toLowerCase()} order, ${left} was earlier than ${right}.`;
   }
   if (constraint.kind === "adjacent") {
     const left = termSubject(constraint.left.category, constraint.left.value);
     const right = termSubject(constraint.right.category, constraint.right.value);
     return index === 0
-      ? `${capitalise(left)} and ${right} were consecutive in the ${template.title.toLowerCase()}.`
-      : `In the ${template.title.toLowerCase()}, ${left} was next to ${right}.`;
+      ? `In the ${template.title.toLowerCase()} order, ${left} and ${right} occupied consecutive positions.`
+      : `In the ${template.title.toLowerCase()} order, ${left} was immediately next to ${right}.`;
   }
   const left = termSubject(constraint.left.category, constraint.left.value);
   const right = termSubject(constraint.right.category, constraint.right.value);
@@ -93,8 +96,8 @@ function renderConstraint(template: PuzzleTemplate, constraint: ClueConstraint, 
   const distance = positionWords[constraint.distance] ?? String(constraint.distance);
   const positions = `${distance} position${constraint.distance === 1 ? "" : "s"}`;
   return index === 0
-    ? `${capitalise(left)} was ${positions} away from ${right}.`
-    : `Exactly ${positions} separated ${left} from ${right}.`;
+    ? `In the ${template.title.toLowerCase()} order, ${left} was exactly ${positions} from ${right}.`
+    : `In the ${template.title.toLowerCase()} order, ${left} was exactly ${positions} away from ${right}.`;
 }
 
 /** Render semantic constraints through a deterministic, bounded phrase catalogue. */
