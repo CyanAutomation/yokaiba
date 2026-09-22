@@ -124,9 +124,12 @@ function sameSolution(left: Solution, right: Solution): boolean {
   return categories.length === Object.keys(right.assignments).length && categories.every(category => left.assignments[category].length === right.assignments[category]?.length && left.assignments[category].every((value, index) => value === right.assignments[category][index]));
 }
 
-/** v3/v4 preserve puzzle-solution semantics for a v2 token. */
+/** v3-v5 preserve puzzle-solution semantics for older signed tokens. */
 function supportsTokenGeneratorVersion(tokenVersion: string, generatedVersion: string) {
-  return tokenVersion === generatedVersion || (tokenVersion === "yokaiba-generator-v2" && (generatedVersion === "yokaiba-generator-v3" || generatedVersion === "yokaiba-generator-v4"));
+  return tokenVersion === generatedVersion || (
+    ["yokaiba-generator-v2", "yokaiba-generator-v3", "yokaiba-generator-v4"].includes(tokenVersion)
+    && ["yokaiba-generator-v3", "yokaiba-generator-v4", "yokaiba-generator-v5"].includes(generatedVersion)
+  );
 }
 
 async function verificationRequest(request: Request) {

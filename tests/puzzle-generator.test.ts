@@ -248,7 +248,7 @@ test("rendered clue metadata satisfies the language catalogue contract", () => {
   ];
 
   const rendered = renderClues(tournamentOrderTemplate, "metadata-contract", clues);
-  assert.ok(rendered.every(clue => clue.languageVersion === "yokaiba-clue-prose-v4"));
+  assert.ok(rendered.every(clue => clue.languageVersion === "yokaiba-clue-prose-v5"));
   assert.ok(rendered.every(clue => typeof clue.phraseVariant === "string" && clue.phraseVariant.length > 0));
 });
 
@@ -310,7 +310,7 @@ test("relational clues name the competitors without mid-sentence capitalization"
     assert.match(beforeClue.text, /competitor who finished 2nd.*competitor who finished 4th/i);
     assert.match(beforeClue.text, /(came before|was earlier than)/i);
     assert.doesNotMatch(beforeClue.text, /In the .*?, The competitor/);
-    assert.ok(rendered.some(clue => /one position (away from|separated .* from) the competitor who finished 3rd/i.test(clue.text)));
+    assert.ok(rendered.some(clue => /Tatami 4.*one position.*competitor who finished 3rd/i.test(clue.text)));
   }
 
   assert.deepEqual(coveredVariants, new Set(["before-0", "before-1"]));
@@ -991,7 +991,7 @@ test("version and readiness expose deployed build and rate-limit configuration",
   };
   const version = await isolatedWorker.fetch(new Request("https://yokaiba.test/v1/version"), env, {} as ExecutionContext);
   assert.deepEqual(await version.json(), {
-    serviceVersion: "0.1.0-test", buildSha: "deadbeef", generatorVersion: "yokaiba-generator-v4", solverVersion: "yokaiba-exhaustive-v1",
+    serviceVersion: "0.1.0-test", buildSha: "deadbeef", generatorVersion: "yokaiba-generator-v5", solverVersion: "yokaiba-exhaustive-v1",
   });
   const ready = await isolatedWorker.fetch(new Request("https://yokaiba.test/readyz"), env, {} as ExecutionContext);
   assert.deepEqual(await ready.json(), {
