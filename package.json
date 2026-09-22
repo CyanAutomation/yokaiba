@@ -10,6 +10,7 @@
     "dev": "wrangler dev",
     "audit:difficulty": "tsx scripts/audit-difficulty.mts",
     "audit:difficulty:targeted": "tsx scripts/audit-targeted-difficulty.mts",
+    "audit:jev": "tsx scripts/audit-jev.mts",
     "vendor:swagger-ui": "node scripts/vendor-swagger-ui.mjs",
     "deploy": "wrangler deploy"
   },

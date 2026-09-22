@@ -6,7 +6,7 @@ import { isIjfSeniorMensWeightClass } from "../domain/ijf-weight-classes.js";
 import { renderClues } from "./clue-text.js";
 import { random, shuffled } from "./rng.js";
 
-export const GENERATOR_VERSION = "yokaiba-generator-v4";
+export const GENERATOR_VERSION = "yokaiba-generator-v5";
 /** Version of the built-in solver used when callers do not provide one. */
 export const SOLVER_VERSION = exhaustivePuzzleSolver.version;
 const MAX_DIFFICULTY_STRATEGIES = 64;
