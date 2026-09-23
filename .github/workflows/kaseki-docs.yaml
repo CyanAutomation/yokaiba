@@ -6,7 +6,7 @@ on:
   workflow_dispatch:
 
 run-name: >-
-  Docs sweep · ${{ github.repository }}@${{ github.event.repository.default_branch }}
+  Docs sweep · ${{ github.repository }}@${{ github.ref_name }}
 
 permissions:
   contents: read
@@ -17,15 +17,15 @@ concurrency:
 
 env:
   REPO_URL: ${{ github.server_url }}/${{ github.repository }}
-  REF: ${{ github.event.repository.default_branch }}
+  REF: ${{ github.ref_name }}
   TASK_DESCRIPTION: Keep README.md and docs/ accurate against the current implementation.
   ALLOWLIST: README.md,docs/**/*.md
-  VALIDATION_COMMAND: npm run lint && npm test && npm run build
+  VALIDATION_COMMAND: npm run typecheck && npm test && npm run build
 
 jobs:
   system_status:
     name: Kaseki System Status
-    if: github.ref == format('refs/heads/{0}', github.event.repository.default_branch)
+    if: github.event_name == 'schedule' || github.ref == format('refs/heads/{0}', github.event.repository.default_branch)
     runs-on: ubuntu-latest
     timeout-minutes: 2
     environment: kaseki-agent
@@ -64,7 +64,7 @@ jobs:
   readiness:
     name: Kaseki System Readiness
     needs: system_status
-    if: github.ref == format('refs/heads/{0}', github.event.repository.default_branch)
+    if: github.event_name == 'schedule' || github.ref == format('refs/heads/{0}', github.event.repository.default_branch)
     runs-on: ubuntu-latest
     timeout-minutes: 2
     environment: kaseki-agent
@@ -102,18 +102,19 @@ jobs:
   api_connection:
     name: Kaseki API Status
     needs: readiness
-    if: github.ref == format('refs/heads/{0}', github.event.repository.default_branch)
+    if: github.event_name == 'schedule' || github.ref == format('refs/heads/{0}', github.event.repository.default_branch)
     runs-on: ubuntu-latest
     timeout-minutes: 2
     environment: kaseki-agent
     env:
       KASEKI_BASE_URL: ${{ vars.KASEKI_BASE_URL }}
-      # Store this as an environment secret, rather than a repository secret.
-      KASEKI_API_TOKEN: ${{ secrets.KASEKI_API_TOKEN }}
 
     steps:
       - name: Verify gateway connectivity and authentication
         shell: bash
+        env:
+          # Store this as an environment secret, rather than a repository secret.
+          KASEKI_API_TOKEN: ${{ secrets.KASEKI_API_TOKEN }}
         run: |
           set -euo pipefail
 
@@ -144,7 +145,7 @@ jobs:
   dispatch:
     name: Submit Kaseki documentation sweep
     needs: api_connection
-    if: github.ref == format('refs/heads/{0}', github.event.repository.default_branch)
+    if: github.event_name == 'schedule' || github.ref == format('refs/heads/{0}', github.event.repository.default_branch)
     runs-on: ubuntu-latest
     timeout-minutes: 10
     environment: kaseki-agent
