@@ -290,6 +290,7 @@ export function createWorker(options: WorkerOptions = {}) {
   const clock = options.clock ?? Date.now;
   const rateLimited = options.rateLimiter ?? createRateLimiter(options.localRateLimitStore, clock);
   const generatedPuzzleCache = options.generatedPuzzleCache ?? new Map<string, GeneratedPuzzleCacheEntry>();
+  const generatedPuzzleRequests = new Map<string, Promise<Response>>();
   let rateLimitProviderFailed = false;
   let verifyRateLimitProviderFailed = false;
   let mcpPreAuthRateLimitProviderFailed = false;
@@ -370,8 +371,25 @@ export function createWorker(options: WorkerOptions = {}) {
         let responseForRequest: Response;
         if (cacheKey) {
           const cachedResponse = cachedGeneratedPuzzle(generatedPuzzleCache, cacheKey, clock());
-          responseForRequest = cachedResponse
-            ?? await cacheGeneratedPuzzle(generatedPuzzleCache, cacheKey, await routeRequest(), clock());
+          if (cachedResponse) {
+            responseForRequest = cachedResponse;
+          } else {
+            let generation = generatedPuzzleRequests.get(cacheKey);
+            if (!generation) {
+              generation = (async () => cacheGeneratedPuzzle(
+                generatedPuzzleCache,
+                cacheKey,
+                await routeRequest(),
+                clock(),
+              ))();
+              generatedPuzzleRequests.set(cacheKey, generation);
+            }
+            try {
+              responseForRequest = (await generation).clone();
+            } finally {
+              if (generatedPuzzleRequests.get(cacheKey) === generation) generatedPuzzleRequests.delete(cacheKey);
+            }
+          }
         } else {
           responseForRequest = await routeRequest();
         }

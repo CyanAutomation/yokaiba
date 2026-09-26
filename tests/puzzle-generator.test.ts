@@ -1332,6 +1332,65 @@ test("worker memoizes deterministic GET generation within the local cache TTL", 
   assert.equal(generationCalls, 2);
 });
 
+test("worker coalesces concurrent deterministic GET generation for the same cache key", async () => {
+  let generationCalls = 0;
+  let releaseGeneration!: (response: Response) => void;
+  const generationResponse = new Promise<Response>(resolve => { releaseGeneration = resolve; });
+  const isolatedWorker = createWorker({
+    rateLimiter: () => false,
+    generatePuzzleResponse: () => {
+      generationCalls += 1;
+      return generationResponse;
+    },
+  });
+  const request = () => new Request("https://yokaiba.test/v1/puzzles/generate?templateId=tournament-order-v1&seed=concurrent");
+
+  const first = isolatedWorker.fetch(request(), {}, {} as ExecutionContext);
+  const second = isolatedWorker.fetch(request(), {}, {} as ExecutionContext);
+  await new Promise<void>(resolve => setImmediate(resolve));
+  assert.equal(generationCalls, 1);
+
+  releaseGeneration(new Response(JSON.stringify({ generated: true }), {
+    headers: { "content-type": "application/json" },
+  }));
+  const responses = await Promise.all([first, second]);
+  assert.deepEqual(await Promise.all(responses.map(response => response.json())), [
+    { generated: true },
+    { generated: true },
+  ]);
+  assert.equal(generationCalls, 1);
+});
+
+test("worker clears rejected in-flight generation so the cache key can be retried", async () => {
+  let generationCalls = 0;
+  let rejectGeneration!: (reason: Error) => void;
+  const failedGeneration = new Promise<Response>((_resolve, reject) => { rejectGeneration = reject; });
+  const isolatedWorker = createWorker({
+    rateLimiter: () => false,
+    generatePuzzleResponse: () => {
+      generationCalls += 1;
+      if (generationCalls === 1) return failedGeneration;
+      return new Response(JSON.stringify({ generationCalls }), {
+        headers: { "content-type": "application/json" },
+      });
+    },
+  });
+  const request = () => new Request("https://yokaiba.test/v1/puzzles/generate?templateId=tournament-order-v1&seed=retry");
+
+  const first = isolatedWorker.fetch(request(), {}, {} as ExecutionContext);
+  const second = isolatedWorker.fetch(request(), {}, {} as ExecutionContext);
+  const failures = Promise.allSettled([first, second]);
+  await new Promise<void>(resolve => setImmediate(resolve));
+  assert.equal(generationCalls, 1);
+  rejectGeneration(new Error("generation failed"));
+  assert.deepEqual((await failures).map(result => result.status), ["rejected", "rejected"]);
+
+  const retried = await isolatedWorker.fetch(request(), {}, {} as ExecutionContext);
+  assert.equal(retried.status, 200);
+  assert.deepEqual(await retried.json(), { generationCalls: 2 });
+  assert.equal(generationCalls, 2);
+});
+
 test("worker bounds the documented local generation cache capacity", async () => {
   let generationCalls = 0;
   const generatedPuzzleCache: GeneratedPuzzleCache = new Map();
