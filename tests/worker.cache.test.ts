@@ -91,3 +91,20 @@ test("generated puzzle cache stores an immutable response snapshot through its T
   assert.equal(cachedGeneratedPuzzle(cache, key, storedAt + 300_000), undefined);
   assert.equal(cache.has(key), false);
 });
+
+test("generated puzzle cache keys canonicalize routing inputs", () => {
+  const key = (url: string) => generatedPuzzleCacheKey(new Request(url), "secret");
+  const canonical = key("https://first.example/v1/puzzles/generate?templateId=template&seed=seed&difficultyLevel=4&allowSeedFallback=true");
+
+  assert.equal(key("http://second.example/v1/puzzles/generate?ignored=value&allowSeedFallback=true&seed=seed&difficultyLevel=4&templateId=template#fragment"), canonical);
+  assert.equal(key("https://first.example/v1/puzzles/generate?seed=seed&templateId=template&allowSeedFallback=false"), key("https://first.example/v1/puzzles/generate?templateId=template&seed=seed"));
+
+  for (const changed of [
+    "https://first.example/v1/puzzles/generate?templateId=other&seed=seed&difficultyLevel=4&allowSeedFallback=true",
+    "https://first.example/v1/puzzles/generate?templateId=template&seed=other&difficultyLevel=4&allowSeedFallback=true",
+    "https://first.example/v1/puzzles/generate?templateId=template&seed=seed&difficultyLevel=5&allowSeedFallback=true",
+    "https://first.example/v1/puzzles/generate?templateId=template&seed=seed&difficultyLevel=4&allowSeedFallback=false",
+  ]) assert.notEqual(key(changed), canonical);
+
+  assert.equal(key("https://first.example/v1/puzzles/generate?templateId=template&seed=seed&difficultyLevel=invalid"), undefined);
+});

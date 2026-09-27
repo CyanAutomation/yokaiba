@@ -3,8 +3,8 @@ import { issuePuzzleToken, verifyPuzzleToken } from "./puzzle-token.js";
 import { json } from "./json-response.js";
 import type { Difficulty, GeneratedPuzzle, PuzzleSpec, PuzzleTemplate, Solution } from "../domain/types.js";
 import { scenarioSummary } from "../catalogue.js";
+import { normalizeGenerationParameters, parseGenerationQuery } from "./generation-query.js";
 
-const MAX_GENERATION_FIELD_LENGTH = 128;
 const MAX_GENERATION_BODY_BYTES = 16 * 1024;
 const INVALID_JSON_BODY_MESSAGE = "request body must be valid JSON";
 const MAX_DIFFICULTY_SEARCH_ATTEMPTS = 128;
@@ -73,27 +73,10 @@ async function publicPuzzle(puzzle: GeneratedPuzzle, puzzleTokenSecret?: string)
   return { ...rest, spec, ...(puzzleTokenSecret ? { puzzleToken: await issuePuzzleToken(puzzle, puzzleTokenSecret) } : {}) };
 }
 
-function generationParameters(value: Record<string, unknown>) {
-  if (typeof value.templateId !== "string" || !value.templateId.trim()) throw new TypeError("templateId must be a non-empty string");
-  if (typeof value.seed !== "string" || !value.seed.trim()) throw new TypeError("seed must be a non-empty string");
-  if (value.templateId.length > MAX_GENERATION_FIELD_LENGTH) throw new TypeError(`templateId must be at most ${MAX_GENERATION_FIELD_LENGTH} characters`);
-  if (value.seed.length > MAX_GENERATION_FIELD_LENGTH) throw new TypeError(`seed must be at most ${MAX_GENERATION_FIELD_LENGTH} characters`);
-  const difficultyLevel = value.difficultyLevel;
-  if (difficultyLevel !== undefined && (typeof difficultyLevel !== "number" || !Number.isInteger(difficultyLevel) || difficultyLevel < 1 || difficultyLevel > 12)) throw new TypeError("difficultyLevel must be an integer from 1 to 12");
-  if (value.allowSeedFallback !== undefined && typeof value.allowSeedFallback !== "boolean") throw new TypeError("allowSeedFallback must be a boolean");
-  return { templateId: value.templateId, seed: value.seed, ...(difficultyLevel === undefined ? {} : { difficultyLevel: difficultyLevel as Difficulty["level"] }), ...(value.allowSeedFallback ? { allowSeedFallback: true } : {}) };
-}
-
 async function generationRequest(request: Request) {
   const body = await readJsonBody(request);
   if (!body || typeof body !== "object" || Array.isArray(body)) throw new TypeError("request body must be an object");
-  return generationParameters(body as Record<string, unknown>);
-}
-
-function generationQuery(url: URL) {
-  const rawDifficulty = url.searchParams.get("difficultyLevel");
-  const rawFallback = url.searchParams.get("allowSeedFallback");
-  return generationParameters({ templateId: url.searchParams.get("templateId"), seed: url.searchParams.get("seed"), ...(rawDifficulty === null ? {} : { difficultyLevel: Number(rawDifficulty) }), ...(rawFallback === null ? {} : { allowSeedFallback: rawFallback === "true" ? true : rawFallback === "false" ? false : rawFallback }) });
+  return normalizeGenerationParameters(body as Record<string, unknown>);
 }
 
 function generateAtDifficulty(template: PuzzleTemplate, seed: string, difficultyLevel: Difficulty["level"] | undefined, allowSeedFallback = false): GeneratedPuzzle {
@@ -229,7 +212,7 @@ export function createRestRouter(templates: readonly PuzzleTemplate[], options: 
     }
     if ((request.method === "POST" || request.method === "GET") && path === "/v1/puzzles/generate") {
       try {
-        const { templateId, seed, difficultyLevel, allowSeedFallback } = request.method === "POST" ? await generationRequest(request) : generationQuery(url);
+        const { templateId, seed, difficultyLevel, allowSeedFallback } = request.method === "POST" ? await generationRequest(request) : parseGenerationQuery(url);
         const template = byId.get(templateId);
         if (!template) return json({ error: { code: "not_found", message: "unknown templateId" } }, 404);
         return json(await publicPuzzle(generateAtDifficulty(template, seed, difficultyLevel, allowSeedFallback), options.puzzleTokenSecret), 200,
