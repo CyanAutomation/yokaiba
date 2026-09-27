@@ -37,6 +37,7 @@ test("generated puzzle cache stores an immutable response snapshot through its T
   const cache = new Map();
   const req = new Request("https://example.com/v1/puzzles/generate");
   const key = generatedPuzzleCacheKey(req, undefined);
+  assert.ok(key);
   const storedAt = 1_700_000_000_000;
   const bodyBytes = new TextEncoder().encode('{"puzzle":"representative"}');
   const response = new Response(bodyBytes, {
