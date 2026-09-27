@@ -14,8 +14,17 @@ export function responseFromGeneratedPuzzleSnapshot(entry: GeneratedPuzzleCacheE
   });
 }
 
-export function generatedPuzzleCacheKey(request: Request, puzzleTokenSecret: string | undefined): string {
-  return `${request.url}\u0000${puzzleTokenSecret ?? ""}`;
+export function generatedPuzzleCacheKey(request: Request, puzzleTokenSecret: string | undefined): string | undefined {
+  try {
+    const { templateId, seed, difficultyLevel, allowSeedFallback } = parseGenerationQuery(new URL(request.url));
+    // A positional tuple gives the identity a fixed ordering and makes explicit
+    // that an absent fallback has the same semantics as `false`.
+    return JSON.stringify([templateId, seed, difficultyLevel ?? null, allowSeedFallback ?? false, puzzleTokenSecret ?? ""]);
+  } catch {
+    // Invalid generation requests are routed normally so the router can return
+    // its canonical 400 response; they are not eligible for memoization.
+    return undefined;
+  }
 }
 
 export function cachedGeneratedPuzzle(cache: Map<string, GeneratedPuzzleCacheEntry>, key: string, now: number): Response | undefined {
@@ -65,3 +74,4 @@ export async function cachePublicGet(response: Response, request: Request): Prom
   }
   return new Response(response.body, { status: response.status, statusText: response.statusText, headers });
 }
+import { parseGenerationQuery } from "../src/api/generation-query.js";

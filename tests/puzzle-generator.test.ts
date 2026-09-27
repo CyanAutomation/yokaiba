@@ -1332,6 +1332,34 @@ test("worker memoizes deterministic GET generation within the local cache TTL", 
   assert.equal(generationCalls, 2);
 });
 
+test("worker memoizes canonical generation queries and separates every generation input", async () => {
+  let generationCalls = 0;
+  const isolatedWorker = createWorker({
+    rateLimiter: () => false,
+    generatePuzzleResponse: () => new Response(JSON.stringify({ generationCalls: ++generationCalls }), {
+      headers: { "content-type": "application/json" },
+    }),
+  });
+  const fetchGeneration = (query: string, origin = "https://yokaiba.test") => isolatedWorker.fetch(
+    new Request(`${origin}/v1/puzzles/generate?${query}`), {}, {} as ExecutionContext,
+  );
+
+  const canonical = "templateId=tournament-order-v1&seed=canonical&difficultyLevel=4&allowSeedFallback=true";
+  assert.deepEqual(await (await fetchGeneration(canonical)).json(), { generationCalls: 1 });
+  assert.deepEqual(await (await fetchGeneration("tracking=ignored&allowSeedFallback=true&difficultyLevel=4&seed=canonical&templateId=tournament-order-v1", "http://other.test")).json(), { generationCalls: 1 });
+
+  const variants = [
+    "templateId=open-division-v2&seed=canonical&difficultyLevel=4&allowSeedFallback=true",
+    "templateId=tournament-order-v1&seed=other&difficultyLevel=4&allowSeedFallback=true",
+    "templateId=tournament-order-v1&seed=canonical&difficultyLevel=5&allowSeedFallback=true",
+    "templateId=tournament-order-v1&seed=canonical&difficultyLevel=4&allowSeedFallback=false",
+  ];
+  for (const [index, variant] of variants.entries()) {
+    assert.deepEqual(await (await fetchGeneration(variant)).json(), { generationCalls: index + 2 });
+  }
+  assert.equal(generationCalls, 5);
+});
+
 test("worker coalesces concurrent deterministic GET generation for the same cache key", async () => {
   let generationCalls = 0;
   let releaseGeneration!: (response: Response) => void;
