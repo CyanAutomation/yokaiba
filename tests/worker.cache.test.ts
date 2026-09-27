@@ -35,7 +35,7 @@ test("createRateLimiter enforces small limits and reports remaining/reset", () =
 
 test("generated puzzle cache stores an immutable response snapshot through its TTL", async () => {
   const cache = new Map();
-  const req = new Request("https://example.com/v1/puzzles/generate");
+  const req = new Request("https://example.com/v1/puzzles/generate?templateId=open-division-v2&seed=test-seed");
   const key = generatedPuzzleCacheKey(req, undefined);
   assert.ok(key);
   const storedAt = 1_700_000_000_000;
