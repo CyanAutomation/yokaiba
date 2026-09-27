@@ -17,18 +17,38 @@ export function responseFromGeneratedPuzzleSnapshot(entry: GeneratedPuzzleCacheE
   });
 }
 
+const MAX_PUZZLE_TOKEN_NAMESPACE_DIGESTS = 10;
 const puzzleTokenNamespaceDigests = new Map<string | undefined, Promise<string>>();
 
 function puzzleTokenNamespace(puzzleTokenSecret: string | undefined): Promise<string> {
   let digest = puzzleTokenNamespaceDigests.get(puzzleTokenSecret);
-  if (!digest) {
+  if (digest) {
+    // Refresh insertion order so secrets that are still active remain cached.
+    puzzleTokenNamespaceDigests.delete(puzzleTokenSecret);
+    puzzleTokenNamespaceDigests.set(puzzleTokenSecret, digest);
+  } else {
     // Include the signing mode in the digest input so an explicitly configured
     // empty secret cannot share cache entries with unsigned puzzles.
     const namespaceInput = puzzleTokenSecret === undefined
       ? "unsigned"
       : `signed\0${puzzleTokenSecret}`;
     digest = crypto.subtle.digest("SHA-256", new TextEncoder().encode(namespaceInput))
-      .then(value => [...new Uint8Array(value)].map(byte => byte.toString(16).padStart(2, "0")).join(""));
+      .then(value => [...new Uint8Array(value)].map(byte => byte.toString(16).padStart(2, "0")).join(""))
+      .catch(error => {
+        // Do not retain rejected promises: a transient Web Crypto failure should
+        // not permanently disable caching for this signing configuration.
+        if (puzzleTokenNamespaceDigests.get(puzzleTokenSecret) === digest) {
+          puzzleTokenNamespaceDigests.delete(puzzleTokenSecret);
+        }
+        console.error(JSON.stringify({
+          event: "puzzle_token_namespace_digest_failure",
+          error: error instanceof Error ? error.message : String(error),
+        }));
+        throw error;
+      });
+    while (puzzleTokenNamespaceDigests.size >= MAX_PUZZLE_TOKEN_NAMESPACE_DIGESTS) {
+      puzzleTokenNamespaceDigests.delete(puzzleTokenNamespaceDigests.keys().next().value as string | undefined);
+    }
     puzzleTokenNamespaceDigests.set(puzzleTokenSecret, digest);
   }
   return digest;
