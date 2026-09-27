@@ -1,7 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { createRateLimiter, type RateLimitDecision } from "../worker/index.js";
-import { generatedPuzzleCacheKey, cachedGeneratedPuzzle, cacheGeneratedPuzzle } from "../worker/cache.js";
+import { generatedPuzzleCacheKey, cachedGeneratedPuzzle, cacheGeneratedPuzzle, cachePublicGet } from "../worker/cache.js";
 
 test("createRateLimiter enforces small limits and reports remaining/reset", () => {
   let now = 1_000_000;
@@ -61,6 +61,9 @@ test("generated puzzle cache stores an immutable response snapshot through its T
   assert.ok(entry.body instanceof ArrayBuffer);
   assert.ok(Array.isArray(entry.headers));
   assert.notStrictEqual(entry, response);
+  assert.match(entry.etag, /^"yokaiba-v1-[a-f0-9]{64}"$/);
+  assert.equal(returned.headers.get("etag"), entry.etag);
+  assert.equal(cached.headers.get("etag"), entry.etag);
 
   // Mutating the inputs and the first materialized response cannot alter the
   // byte/header snapshot used to materialize later cache hits.
@@ -78,11 +81,13 @@ test("generated puzzle cache stores an immutable response snapshot through its T
   assert.equal(returned.headers.get("x-generation-seed"), expectedHeaders["x-generation-seed"]);
 
   returned.headers.set("x-generation-seed", "changed-returned");
+  returned.headers.set("etag", '"changed-returned"');
 
   assert.equal(cached.status, 422);
   assert.equal(cached.statusText, "Unprocessable Content");
   assert.equal(cached.headers.get("content-type"), expectedHeaders["content-type"]);
   assert.equal(cached.headers.get("x-generation-seed"), expectedHeaders["x-generation-seed"]);
+  assert.equal(cached.headers.get("etag"), entry.etag);
   assert.equal(await cached.text(), '{"puzzle":"representative"}');
 
   const immediatelyBeforeExpiry = cachedGeneratedPuzzle(cache, key, storedAt + 300_000 - 1);
@@ -91,6 +96,18 @@ test("generated puzzle cache stores an immutable response snapshot through its T
 
   assert.equal(cachedGeneratedPuzzle(cache, key, storedAt + 300_000), undefined);
   assert.equal(cache.has(key), false);
+});
+
+test("public GET caching preserves an existing valid ETag", async () => {
+  const etag = 'W/"precomputed-validator"';
+  const fresh = await cachePublicGet(new Response("content", { headers: { etag } }), new Request("https://example.com/v1/scenarios"));
+  assert.equal(fresh.headers.get("etag"), etag);
+
+  const revalidated = await cachePublicGet(new Response("content", { headers: { etag } }), new Request("https://example.com/v1/scenarios", {
+    headers: { "if-none-match": '"precomputed-validator"' },
+  }));
+  assert.equal(revalidated.status, 304);
+  assert.equal(revalidated.headers.get("etag"), etag);
 });
 
 test("generated puzzle cache keys canonicalize routing inputs", async () => {
