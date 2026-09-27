@@ -36,7 +36,7 @@ test("createRateLimiter enforces small limits and reports remaining/reset", () =
 test("generated puzzle cache stores an immutable response snapshot through its TTL", async () => {
   const cache = new Map();
   const req = new Request("https://example.com/v1/puzzles/generate?templateId=open-division-v2&seed=test-seed");
-  const key = generatedPuzzleCacheKey(req, undefined);
+  const key = await generatedPuzzleCacheKey(req, undefined);
   assert.ok(key);
   const storedAt = 1_700_000_000_000;
   const bodyBytes = new TextEncoder().encode('{"puzzle":"representative"}');
@@ -93,19 +93,36 @@ test("generated puzzle cache stores an immutable response snapshot through its T
   assert.equal(cache.has(key), false);
 });
 
-test("generated puzzle cache keys canonicalize routing inputs", () => {
+test("generated puzzle cache keys canonicalize routing inputs", async () => {
   const key = (url: string) => generatedPuzzleCacheKey(new Request(url), "secret");
-  const canonical = key("https://first.example/v1/puzzles/generate?templateId=template&seed=seed&difficultyLevel=4&allowSeedFallback=true");
+  const canonical = await key("https://first.example/v1/puzzles/generate?templateId=template&seed=seed&difficultyLevel=4&allowSeedFallback=true");
 
-  assert.equal(key("http://second.example/v1/puzzles/generate?ignored=value&allowSeedFallback=true&seed=seed&difficultyLevel=4&templateId=template#fragment"), canonical);
-  assert.equal(key("https://first.example/v1/puzzles/generate?seed=seed&templateId=template&allowSeedFallback=false"), key("https://first.example/v1/puzzles/generate?templateId=template&seed=seed"));
+  assert.equal(await key("http://second.example/v1/puzzles/generate?ignored=value&allowSeedFallback=true&seed=seed&difficultyLevel=4&templateId=template#fragment"), canonical);
+  assert.equal(await key("https://first.example/v1/puzzles/generate?seed=seed&templateId=template&allowSeedFallback=false"), await key("https://first.example/v1/puzzles/generate?templateId=template&seed=seed"));
 
   for (const changed of [
     "https://first.example/v1/puzzles/generate?templateId=other&seed=seed&difficultyLevel=4&allowSeedFallback=true",
     "https://first.example/v1/puzzles/generate?templateId=template&seed=other&difficultyLevel=4&allowSeedFallback=true",
     "https://first.example/v1/puzzles/generate?templateId=template&seed=seed&difficultyLevel=5&allowSeedFallback=true",
     "https://first.example/v1/puzzles/generate?templateId=template&seed=seed&difficultyLevel=4&allowSeedFallback=false",
-  ]) assert.notEqual(key(changed), canonical);
+  ]) assert.notEqual(await key(changed), canonical);
 
-  assert.equal(key("https://first.example/v1/puzzles/generate?templateId=template&seed=seed&difficultyLevel=invalid"), undefined);
+  assert.equal(await key("https://first.example/v1/puzzles/generate?templateId=template&seed=seed&difficultyLevel=invalid"), undefined);
+});
+
+test("generated puzzle cache keys namespace secrets without exposing them", async () => {
+  const request = new Request("https://example.com/v1/puzzles/generate?templateId=template&seed=seed");
+  const firstSecret = "first-private-signing-secret";
+  const secondSecret = "second-private-signing-secret";
+
+  const firstKey = await generatedPuzzleCacheKey(request, firstSecret);
+  const secondKey = await generatedPuzzleCacheKey(request, secondSecret);
+
+  assert.ok(firstKey);
+  assert.ok(secondKey);
+  assert.notEqual(firstKey, secondKey);
+  for (const key of [firstKey, secondKey]) {
+    assert.equal(key.includes(firstSecret), false);
+    assert.equal(key.includes(secondSecret), false);
+  }
 });
