@@ -43,10 +43,10 @@ function puzzleTokenNamespace(puzzleTokenSecret: string | undefined): Promise<st
         }));
         throw error;
       });
-    puzzleTokenNamespaceDigests.set(puzzleTokenSecret, digest);
-    while (puzzleTokenNamespaceDigests.size > MAX_PUZZLE_TOKEN_NAMESPACE_DIGESTS) {
+    while (puzzleTokenNamespaceDigests.size >= MAX_PUZZLE_TOKEN_NAMESPACE_DIGESTS) {
       puzzleTokenNamespaceDigests.delete(puzzleTokenNamespaceDigests.keys().next().value as string | undefined);
     }
+    puzzleTokenNamespaceDigests.set(puzzleTokenSecret, digest);
   }
   return digest;
 }
