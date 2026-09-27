@@ -65,7 +65,7 @@ export class GeneratedPuzzleCache {
 
     this.#entries.set(key, entry);
     this.#bodyBytes += entryBodyBytes;
-    while (this.#entries.size > this.maxEntries || this.#bodyBytes >= this.maxBodyBytes) {
+    while (this.#entries.size > this.maxEntries || this.#bodyBytes > this.maxBodyBytes) {
       const oldestKey = this.#entries.keys().next().value as string;
       this.#delete(oldestKey, this.#entries.get(oldestKey)!);
     }
