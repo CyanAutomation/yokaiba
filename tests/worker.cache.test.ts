@@ -159,9 +159,22 @@ test("generated puzzle cache key digest memoization evicts least-recently-used s
 
   try {
     const secrets = Array.from({ length: 11 }, (_, index) => `lru-test-secret-${index}`);
+
+    // Fill the cache, then refresh the oldest secret before adding one more.
+    // The refreshed entry must survive while the now-oldest secret is evicted.
+    for (const secret of secrets.slice(0, 10)) await generatedPuzzleCacheKey(request, secret);
+    assert.equal(digestCalls, 10);
+
     await generatedPuzzleCacheKey(request, secrets[0]);
-    for (const secret of secrets.slice(1)) await generatedPuzzleCacheKey(request, secret);
+    assert.equal(digestCalls, 10);
+
+    await generatedPuzzleCacheKey(request, secrets[10]);
+    assert.equal(digestCalls, 11);
+
     await generatedPuzzleCacheKey(request, secrets[0]);
+    assert.equal(digestCalls, 11);
+
+    await generatedPuzzleCacheKey(request, secrets[1]);
     assert.equal(digestCalls, 12);
   } finally {
     Reflect.deleteProperty(subtle, "digest");
