@@ -1,7 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { createRateLimiter, type RateLimitDecision } from "../worker/index.js";
-import { generatedPuzzleCacheKey, cachedGeneratedPuzzle, cacheGeneratedPuzzle, cachePublicGet } from "../worker/cache.js";
+import { GeneratedPuzzleCache, generatedPuzzleCacheKey, cachedGeneratedPuzzle, cacheGeneratedPuzzle, cachePublicGet } from "../worker/cache.js";
 
 test("createRateLimiter enforces small limits and reports remaining/reset", () => {
   let now = 1_000_000;
@@ -34,7 +34,7 @@ test("createRateLimiter enforces small limits and reports remaining/reset", () =
 });
 
 test("generated puzzle cache stores an immutable response snapshot through its TTL", async () => {
-  const cache = new Map();
+  const cache = new GeneratedPuzzleCache();
   const req = new Request("https://example.com/v1/puzzles/generate?templateId=open-division-v2&seed=test-seed");
   const key = await generatedPuzzleCacheKey(req, undefined);
   assert.ok(key);
@@ -56,7 +56,7 @@ test("generated puzzle cache stores an immutable response snapshot through its T
   assert.notStrictEqual(cached, response);
   assert.notStrictEqual(cached, returned);
 
-  const entry = cache.get(key);
+  const entry = cache.peek(key);
   assert.ok(entry);
   assert.ok(entry.body instanceof ArrayBuffer);
   assert.ok(Array.isArray(entry.headers));
@@ -96,6 +96,57 @@ test("generated puzzle cache stores an immutable response snapshot through its T
 
   assert.equal(cachedGeneratedPuzzle(cache, key, storedAt + 300_000), undefined);
   assert.equal(cache.has(key), false);
+});
+
+test("generated puzzle cache evicts least-recently-used bodies to meet its byte budget", async () => {
+  const cache = new GeneratedPuzzleCache(10, 10);
+  await cacheGeneratedPuzzle(cache, "oldest", new Response("1234"), 0);
+  await cacheGeneratedPuzzle(cache, "recent", new Response("5678"), 0);
+
+  // A hit makes the first insertion more recent than the second one.
+  assert.ok(cachedGeneratedPuzzle(cache, "oldest", 1));
+  await cacheGeneratedPuzzle(cache, "new", new Response("abcde"), 1);
+
+  assert.equal(cache.has("oldest"), true);
+  assert.equal(cache.has("recent"), false);
+  assert.equal(cache.has("new"), true);
+  assert.equal(cache.bodyBytes, 9);
+});
+
+test("generated puzzle cache adjusts its byte accounting when replacing a key", async () => {
+  const cache = new GeneratedPuzzleCache(10, 7);
+  await cacheGeneratedPuzzle(cache, "same", new Response("12345"), 0);
+  await cacheGeneratedPuzzle(cache, "same", new Response("12"), 1);
+  await cacheGeneratedPuzzle(cache, "other", new Response("abcde"), 1);
+
+  assert.equal(cache.size, 2);
+  assert.equal(cache.bodyBytes, 7);
+  assert.equal(await cachedGeneratedPuzzle(cache, "same", 2)?.text(), "12");
+});
+
+test("generated puzzle cache removes expired entries from its byte accounting", async () => {
+  const cache = new GeneratedPuzzleCache(10, 5);
+  await cacheGeneratedPuzzle(cache, "expired", new Response("12345"), 0);
+
+  assert.equal(cachedGeneratedPuzzle(cache, "expired", 300_000), undefined);
+  assert.equal(cache.bodyBytes, 0);
+
+  await cacheGeneratedPuzzle(cache, "replacement", new Response("abcde"), 300_000);
+  assert.equal(cache.has("replacement"), true);
+  assert.equal(cache.bodyBytes, 5);
+});
+
+test("generated puzzle cache returns but does not retain an individually oversized response", async () => {
+  const cache = new GeneratedPuzzleCache(10, 4);
+  await cacheGeneratedPuzzle(cache, "retained", new Response("1234"), 0);
+
+  const returned = await cacheGeneratedPuzzle(cache, "oversized", new Response("12345"), 1);
+
+  assert.equal(await returned.text(), "12345");
+  assert.match(returned.headers.get("etag") ?? "", /^"yokaiba-v1-[a-f0-9]{64}"$/);
+  assert.equal(cache.has("oversized"), false);
+  assert.equal(cache.has("retained"), true);
+  assert.equal(cache.bodyBytes, 4);
 });
 
 test("public GET caching preserves an existing valid ETag", async () => {

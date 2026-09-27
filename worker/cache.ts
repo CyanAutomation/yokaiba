@@ -7,6 +7,77 @@ export interface GeneratedPuzzleCacheEntry {
   readonly etag: string;
 }
 
+const GENERATED_PUZZLE_CACHE_TTL_MS = 300_000;
+export const MAX_GENERATED_PUZZLE_CACHE_ENTRIES = 128;
+export const MAX_GENERATED_PUZZLE_CACHE_BODY_BYTES = 16 * 1024 * 1024;
+
+/** An LRU cache that owns both entry-count and cached-body byte accounting. */
+export class GeneratedPuzzleCache {
+  readonly #entries = new Map<string, GeneratedPuzzleCacheEntry>();
+  #bodyBytes = 0;
+
+  constructor(
+    readonly maxEntries = MAX_GENERATED_PUZZLE_CACHE_ENTRIES,
+    readonly maxBodyBytes = MAX_GENERATED_PUZZLE_CACHE_BODY_BYTES,
+  ) {}
+
+  get size(): number {
+    return this.#entries.size;
+  }
+
+  get bodyBytes(): number {
+    return this.#bodyBytes;
+  }
+
+  has(key: string): boolean {
+    return this.#entries.has(key);
+  }
+
+  values(): MapIterator<GeneratedPuzzleCacheEntry> {
+    return this.#entries.values();
+  }
+
+  peek(key: string): GeneratedPuzzleCacheEntry | undefined {
+    return this.#entries.get(key);
+  }
+
+  get(key: string, now: number): GeneratedPuzzleCacheEntry | undefined {
+    const entry = this.#entries.get(key);
+    if (!entry) return undefined;
+    if (entry.expiresAt <= now) {
+      this.#delete(key, entry);
+      return undefined;
+    }
+    // Refresh insertion order so the oldest entry is evicted first.
+    this.#entries.delete(key);
+    this.#entries.set(key, entry);
+    return entry;
+  }
+
+  set(key: string, entry: GeneratedPuzzleCacheEntry): boolean {
+    const replaced = this.#entries.get(key);
+    if (replaced) this.#delete(key, replaced);
+
+    const entryBodyBytes = entry.body.byteLength;
+    // A response larger than the entire budget can be served, but retaining it
+    // would necessarily evict every useful cache entry.
+    if (entryBodyBytes > this.maxBodyBytes) return false;
+
+    this.#entries.set(key, entry);
+    this.#bodyBytes += entryBodyBytes;
+    while (this.#entries.size > this.maxEntries || this.#bodyBytes > this.maxBodyBytes) {
+      const oldestKey = this.#entries.keys().next().value as string | undefined;
+      if (oldestKey === undefined) break;
+      this.#delete(oldestKey, this.#entries.get(oldestKey)!);
+    }
+    return true;
+  }
+
+  #delete(key: string, entry: GeneratedPuzzleCacheEntry): void {
+    if (this.#entries.delete(key)) this.#bodyBytes -= entry.body.byteLength;
+  }
+}
+
 export function responseFromGeneratedPuzzleSnapshot(entry: GeneratedPuzzleCacheEntry): Response {
   const headers = new Headers(entry.headers.map(([name, value]) => [name, value]));
   headers.set("etag", entry.etag);
@@ -67,23 +138,13 @@ export async function generatedPuzzleCacheKey(request: Request, puzzleTokenSecre
   }
 }
 
-export function cachedGeneratedPuzzle(cache: Map<string, GeneratedPuzzleCacheEntry>, key: string, now: number): Response | undefined {
-  const entry = cache.get(key);
+export function cachedGeneratedPuzzle(cache: GeneratedPuzzleCache, key: string, now: number): Response | undefined {
+  const entry = cache.get(key, now);
   if (!entry) return undefined;
-  if (entry.expiresAt <= now) {
-    cache.delete(key);
-    return undefined;
-  }
-  // Refresh insertion order so the oldest entry is evicted first.
-  cache.delete(key);
-  cache.set(key, entry);
   return responseFromGeneratedPuzzleSnapshot(entry);
 }
 
-const GENERATED_PUZZLE_CACHE_TTL_MS = 300_000;
-const MAX_GENERATED_PUZZLE_CACHE_ENTRIES = 128;
-
-export async function cacheGeneratedPuzzle(cache: Map<string, GeneratedPuzzleCacheEntry>, key: string, response: Response, now: number): Promise<Response> {
+export async function cacheGeneratedPuzzle(cache: GeneratedPuzzleCache, key: string, response: Response, now: number): Promise<Response> {
   if (response.status !== 200 && response.status !== 422) return response;
   const body = await response.arrayBuffer();
   const entry: GeneratedPuzzleCacheEntry = {
@@ -95,7 +156,6 @@ export async function cacheGeneratedPuzzle(cache: Map<string, GeneratedPuzzleCac
     etag: await contentEtagFromBytes(body),
   };
   cache.set(key, entry);
-  while (cache.size > MAX_GENERATED_PUZZLE_CACHE_ENTRIES) cache.delete(cache.keys().next().value as string);
   return responseFromGeneratedPuzzleSnapshot(entry);
 }
 

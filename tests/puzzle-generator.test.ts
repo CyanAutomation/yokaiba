@@ -29,7 +29,7 @@ import {
 } from "../src/index.js";
 import { championshipBridgeTemplate, championshipCircuitTemplate, createRestRouter, openDivisionTemplate, tournamentOrderTemplate, tournamentOrderV2Template } from "../src/index.js";
 import { issuePuzzleToken } from "../src/api/puzzle-token.js";
-import worker, { createRateLimiter, createWorker, type GeneratedPuzzleCache } from "../worker/index.js";
+import worker, { createRateLimiter, createWorker, GeneratedPuzzleCache } from "../worker/index.js";
 
 type OpenApiObject = Record<string, any>;
 
@@ -1294,7 +1294,7 @@ test("worker returns an ETag and honors conditional public GETs", async () => {
 test("worker memoizes deterministic GET generation within the local cache TTL", async () => {
   let now = 1_000;
   let generationCalls = 0;
-  const generatedPuzzleCache: GeneratedPuzzleCache = new Map();
+  const generatedPuzzleCache = new GeneratedPuzzleCache();
   const isolatedWorker = createWorker({
     clock: () => now,
     generatedPuzzleCache,
@@ -1426,7 +1426,7 @@ test("worker clears rejected in-flight generation so the cache key can be retrie
 
 test("worker bounds the documented local generation cache capacity", async () => {
   let generationCalls = 0;
-  const generatedPuzzleCache: GeneratedPuzzleCache = new Map();
+  const generatedPuzzleCache = new GeneratedPuzzleCache();
   const isolatedWorker = createWorker({
     rateLimiter: () => false,
     generatedPuzzleCache,
@@ -1453,7 +1453,7 @@ test("worker bounds the documented local generation cache capacity", async () =>
 });
 
 test("worker caches and conditionally revalidates deterministic unavailable-difficulty responses", async () => {
-  const generatedPuzzleCache: GeneratedPuzzleCache = new Map();
+  const generatedPuzzleCache = new GeneratedPuzzleCache();
   const isolatedWorker = createWorker({ generatedPuzzleCache });
   const url = "https://yokaiba.test/v1/puzzles/generate?templateId=open-division-v2&seed=review-20260904&difficultyLevel=7";
   const first = await isolatedWorker.fetch(new Request(url, { headers: { "cf-connecting-ip": "192.0.2.92" } }), {}, {} as ExecutionContext);
