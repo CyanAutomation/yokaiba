@@ -143,3 +143,60 @@ test("generated puzzle cache keys namespace secrets without exposing them", asyn
     assert.equal(key.includes(secondSecret), false);
   }
 });
+
+test("generated puzzle cache key digest memoization evicts least-recently-used secrets", async () => {
+  const request = new Request("https://example.com/v1/puzzles/generate?templateId=template&seed=seed");
+  const subtle = crypto.subtle;
+  const originalDigest = subtle.digest.bind(subtle);
+  let digestCalls = 0;
+  Object.defineProperty(subtle, "digest", {
+    configurable: true,
+    value: (...args: Parameters<SubtleCrypto["digest"]>) => {
+      digestCalls += 1;
+      return originalDigest(...args);
+    },
+  });
+
+  try {
+    const secrets = Array.from({ length: 11 }, (_, index) => `lru-test-secret-${index}`);
+    await generatedPuzzleCacheKey(request, secrets[0]);
+    for (const secret of secrets.slice(1)) await generatedPuzzleCacheKey(request, secret);
+    await generatedPuzzleCacheKey(request, secrets[0]);
+    assert.equal(digestCalls, 12);
+  } finally {
+    Reflect.deleteProperty(subtle, "digest");
+  }
+});
+
+test("generated puzzle cache key logs crypto failures and retries them", async () => {
+  const request = new Request("https://example.com/v1/puzzles/generate?templateId=template&seed=seed");
+  const subtle = crypto.subtle;
+  const failure = new Error("test digest failure");
+  let digestCalls = 0;
+  const errors: string[] = [];
+  const originalConsoleError = console.error;
+  Object.defineProperty(subtle, "digest", {
+    configurable: true,
+    value: async () => {
+      digestCalls += 1;
+      throw failure;
+    },
+  });
+  console.error = (message?: unknown) => errors.push(String(message));
+
+  try {
+    assert.equal(await generatedPuzzleCacheKey(request, "failing-crypto-test-secret"), undefined);
+    assert.equal(await generatedPuzzleCacheKey(request, "failing-crypto-test-secret"), undefined);
+    assert.equal(digestCalls, 2);
+    assert.equal(errors.length, 2);
+    for (const message of errors) {
+      assert.deepEqual(JSON.parse(message), {
+        event: "puzzle_token_namespace_digest_failure",
+        error: failure.message,
+      });
+    }
+  } finally {
+    console.error = originalConsoleError;
+    Reflect.deleteProperty(subtle, "digest");
+  }
+});
