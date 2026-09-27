@@ -1311,14 +1311,18 @@ test("worker memoizes deterministic GET generation within the local cache TTL", 
 
   const first = await isolatedWorker.fetch(request(), {}, {} as ExecutionContext);
   assert.equal(first.status, 200);
+  const freshEtag = first.headers.get("etag");
+  assert.match(freshEtag ?? "", /^"yokaiba-v1-[a-f0-9]{64}"$/);
   assert.deepEqual(await first.json(), { generationCalls: 1 });
   const snapshot = [...generatedPuzzleCache.values()][0]!;
   assert.equal("response" in snapshot, false);
   assert.equal(snapshot.status, 200);
+  assert.equal(snapshot.etag, freshEtag);
   assert.equal(new TextDecoder().decode(snapshot.body), JSON.stringify({ generationCalls: 1 }));
 
   const cached = await isolatedWorker.fetch(request(), {}, {} as ExecutionContext);
   const etag = cached.headers.get("etag");
+  assert.equal(etag, freshEtag);
   assert.deepEqual(await cached.json(), { generationCalls: 1 });
   assert.equal(generationCalls, 1);
   const revalidated = await isolatedWorker.fetch(new Request(request(), { headers: {
@@ -1326,6 +1330,7 @@ test("worker memoizes deterministic GET generation within the local cache TTL", 
     "if-none-match": etag!,
   } }), {}, {} as ExecutionContext);
   assert.equal(revalidated.status, 304);
+  assert.equal(revalidated.headers.get("etag"), freshEtag);
   assert.equal(generationCalls, 1);
   now += 300_000;
   assert.deepEqual(await (await isolatedWorker.fetch(request(), {}, {} as ExecutionContext)).json(), { generationCalls: 2 });
@@ -1461,8 +1466,10 @@ test("worker caches and conditionally revalidates deterministic unavailable-diff
   assert.equal(snapshot.status, 422);
   assert.equal("response" in snapshot, false);
   assert.ok(snapshot.body.byteLength > 0);
+  assert.equal(snapshot.etag, etag);
   const revalidated = await isolatedWorker.fetch(new Request(url, { headers: { "cf-connecting-ip": "192.0.2.92", "if-none-match": etag! } }), {}, {} as ExecutionContext);
   assert.equal(revalidated.status, 304);
+  assert.equal(revalidated.headers.get("etag"), etag);
 });
 
 test("worker gives scenario discovery and version metadata explicit cache policies", async () => {
