@@ -138,13 +138,8 @@ export interface WorkerOptions {
 }
 const RATE_WINDOW_MS = 60_000;
 const MAX_RATE_LIMIT_KEYS = 10_000;
-const GENERATED_PUZZLE_CACHE_TTL_MS = 300_000;
-const MAX_GENERATED_PUZZLE_CACHE_ENTRIES = 128;
-
-import type { GeneratedPuzzleCacheEntry } from "./cache.js";
-import { generatedPuzzleCacheKey, cachedGeneratedPuzzle, cacheGeneratedPuzzle, cachePublicGet } from "./cache.js";
-
-export type GeneratedPuzzleCache = Map<string, GeneratedPuzzleCacheEntry>;
+import { GeneratedPuzzleCache, generatedPuzzleCacheKey, cachedGeneratedPuzzle, cacheGeneratedPuzzle, cachePublicGet } from "./cache.js";
+export { GeneratedPuzzleCache } from "./cache.js";
 
 export function createRateLimiter(rateLimits: RateLimitStore = new Map(), clock: () => number = Date.now): RateLimiter {
   return (request, rawLimit, scope) => {
@@ -289,7 +284,7 @@ function allowedOrigin(request: Request, hostnames: string[]) {
 export function createWorker(options: WorkerOptions = {}) {
   const clock = options.clock ?? Date.now;
   const rateLimited = options.rateLimiter ?? createRateLimiter(options.localRateLimitStore, clock);
-  const generatedPuzzleCache = options.generatedPuzzleCache ?? new Map<string, GeneratedPuzzleCacheEntry>();
+  const generatedPuzzleCache = options.generatedPuzzleCache ?? new GeneratedPuzzleCache();
   const generatedPuzzleRequests = new Map<string, Promise<Response>>();
   let rateLimitProviderFailed = false;
   let verifyRateLimitProviderFailed = false;
