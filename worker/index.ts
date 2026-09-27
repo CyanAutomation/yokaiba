@@ -366,7 +366,7 @@ export function createWorker(options: WorkerOptions = {}) {
           ? options.generatePuzzleResponse(request)
           : createRestRouter(templates, { puzzleTokenSecret: env.PUZZLE_TOKEN_SECRET, ...build })(request);
         const cacheKey = request.method === "GET" && path === "/v1/puzzles/generate"
-          ? generatedPuzzleCacheKey(request, env.PUZZLE_TOKEN_SECRET)
+          ? await generatedPuzzleCacheKey(request, env.PUZZLE_TOKEN_SECRET)
           : undefined;
         let responseForRequest: Response;
         if (cacheKey) {

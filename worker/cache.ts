@@ -14,12 +14,29 @@ export function responseFromGeneratedPuzzleSnapshot(entry: GeneratedPuzzleCacheE
   });
 }
 
-export function generatedPuzzleCacheKey(request: Request, puzzleTokenSecret: string | undefined): string | undefined {
+const puzzleTokenNamespaceDigests = new Map<string | undefined, Promise<string>>();
+
+function puzzleTokenNamespace(puzzleTokenSecret: string | undefined): Promise<string> {
+  let digest = puzzleTokenNamespaceDigests.get(puzzleTokenSecret);
+  if (!digest) {
+    // Include the signing mode in the digest input so an explicitly configured
+    // empty secret cannot share cache entries with unsigned puzzles.
+    const namespaceInput = puzzleTokenSecret === undefined
+      ? "unsigned"
+      : `signed\0${puzzleTokenSecret}`;
+    digest = crypto.subtle.digest("SHA-256", new TextEncoder().encode(namespaceInput))
+      .then(value => [...new Uint8Array(value)].map(byte => byte.toString(16).padStart(2, "0")).join(""));
+    puzzleTokenNamespaceDigests.set(puzzleTokenSecret, digest);
+  }
+  return digest;
+}
+
+export async function generatedPuzzleCacheKey(request: Request, puzzleTokenSecret: string | undefined): Promise<string | undefined> {
   try {
     const { templateId, seed, difficultyLevel, allowSeedFallback } = parseGenerationQuery(new URL(request.url));
     // A positional tuple gives the identity a fixed ordering and makes explicit
     // that an absent fallback has the same semantics as `false`.
-    return JSON.stringify([templateId, seed, difficultyLevel ?? null, allowSeedFallback ?? false, puzzleTokenSecret ?? ""]);
+    return JSON.stringify([templateId, seed, difficultyLevel ?? null, allowSeedFallback ?? false, await puzzleTokenNamespace(puzzleTokenSecret)]);
   } catch {
     // Invalid generation requests are routed normally so the router can return
     // its canonical 400 response; they are not eligible for memoization.
