@@ -109,6 +109,18 @@ curl -X POST http://localhost:8787/v1/puzzles/generate \
 
 Generated puzzles include `difficulty` (`level` 1–12, label, model identifier, and deterministic evidence). Tournament Order is calibrated to levels 1–4, Open Division to 5–8, and Championship Circuit to 9–12. Each template publishes its locale metadata and its own 1,000-seed calibration strategy. Difficulty combines the deduction trace, relational/cross-category clue structure, and deterministic solver telemetry; retain `modelVersion` and `evidence` when recording scores. The no-guess trace is an engineering diagnostic, not a substitute for player research.
 
+### Logical, semantic, and observed difficulty
+
+Yokaiba keeps three calibration signals separate:
+
+- **Logical difficulty** is deterministic and authoritative for the existing 1–12 level contract. The solver owns solvability, uniqueness, correctness, hints, redundancy, deduction traces, and solver telemetry.
+- **Semantic difficulty** is optional, probabilistic JEV review of human-facing clue language. The offline `npm run audit:jev` report records readability, ambiguity, linguistic complexity, relationship explicitness, the structured constraint, rendered wording, language/template metadata, seed, logical level/model version, requested/resolved JEV model, schema version, confidence, and usage where returned. JEV findings are review leads; they never change puzzle validity or generation.
+- **Observed player difficulty** comes from real outcomes such as completion time, hints, mistakes, and abandonment. `POST /v1/events` currently validates and logs anonymous events; it does not persist aggregates or accept a puzzle seed/key that joins an outcome to an offline semantic sample. Future correlation will need a privacy-conscious puzzle/version key and cohort aggregation. No production thresholds are automatically recalibrated.
+
+Clue-level semantic review batches its typed questions together and sends rendered text with the corresponding structured constraint, without puzzle solutions. Add `--puzzle-review` to `npm run audit:jev` for bounded clue-set questions about wording repetition, terminology consistency, phrasing variety, and language burden compared with deterministic logical difficulty. The report keeps these profiles paired by template and seed; it does not collapse them into one score. For example, a high language-burden response alongside logical level 3 is calibration evidence, not a new difficulty level. JEV is never called by puzzle generation, solving, hinting, or answer verification. Provider failures are reported as unavailable semantic results and leave a resumable checkpoint.
+
+The audit review thresholds are centralized provisional leads, not validated cutoffs or CI gates. Evaluate them against labelled examples before relying on them for release decisions. Use `OPENROUTER_API_KEY` only in the invoking environment; it is not read from project files or written into reports.
+
 When `difficultyLevel` is supplied, generation searches deterministic clue-order strategies for that exact seed. It never substitutes another seed by default: if no strategy reaches the requested band, the API returns `422` with `difficulty_unavailable` and `availableDifficultyLevels`. Set `allowSeedFallback=true` to opt into a bounded deterministic search of derived seeds; the response retains `requestedSeed`, returns the replayable selected `seed`, and includes `seedFallbackAttempt`. All targeted curriculum levels reject clue sets that the bounded no-guess model cannot complete.
 
 For a production browser client, handle validation, unavailable-difficulty, rate-limit, and conditional-cache responses explicitly:
