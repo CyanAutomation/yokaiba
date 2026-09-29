@@ -1,7 +1,7 @@
 import type { Clue, ClueConstraint, PuzzleTemplate } from "../domain/types.js";
 import { hash } from "../domain/hash.js";
 
-export const CLUE_LANGUAGE_VERSION = "yokaiba-clue-prose-v6";
+export const CLUE_LANGUAGE_VERSION = "yokaiba-clue-prose-v7";
 
 function capitalise(value: string) {
   return `${value[0]!.toUpperCase()}${value.slice(1)}`;
@@ -50,6 +50,11 @@ function negativeAction(categoryId: string, value: string) {
   return `have ${value}`;
 }
 
+function orderedContext(template: PuzzleTemplate) {
+  const title = template.title.trim().replace(/\s+/g, " ");
+  return /\border$/i.test(title) ? title : `${title} order`;
+}
+
 function chooseVariant(seed: string, clue: Clue, count: number, previousFamily?: string) {
   let index = hash(`${seed}:${clue.id}:${CLUE_LANGUAGE_VERSION}`) % count;
   const family = `${clue.constraint.kind}-${index}`;
@@ -80,24 +85,23 @@ function renderConstraint(template: PuzzleTemplate, constraint: ClueConstraint, 
     const left = termSubject(constraint.left.category, constraint.left.value);
     const right = termSubject(constraint.right.category, constraint.right.value);
     return index === 0
-      ? `In the ${template.title.toLowerCase()} order, ${left} came before ${right}.`
-      : `In the ${template.title.toLowerCase()} order, ${left} was earlier than ${right}.`;
+      ? `In the ${orderedContext(template).toLowerCase()}, ${left} came before ${right}.`
+      : `In the ${orderedContext(template).toLowerCase()}, ${left} was earlier than ${right}.`;
   }
   if (constraint.kind === "adjacent") {
     const left = termSubject(constraint.left.category, constraint.left.value);
     const right = termSubject(constraint.right.category, constraint.right.value);
     return index === 0
-      ? `In the ${template.title.toLowerCase()} order, ${left} and ${right} occupied consecutive positions.`
-      : `In the ${template.title.toLowerCase()} order, ${left} was immediately next to ${right}.`;
+      ? `In the ${orderedContext(template).toLowerCase()}, ${left} and ${right} occupied consecutive positions.`
+      : `In the ${orderedContext(template).toLowerCase()}, ${left} was immediately next to ${right}.`;
   }
   const left = termSubject(constraint.left.category, constraint.left.value);
   const right = termSubject(constraint.right.category, constraint.right.value);
   const positionWords = ["zero", "one", "two", "three", "four"];
   const distance = positionWords[constraint.distance] ?? String(constraint.distance);
-  const positions = `${distance} position${constraint.distance === 1 ? "" : "s"}`;
   return index === 0
-    ? `In the ${template.title.toLowerCase()} order, ${left} was exactly ${positions} from ${right}.`
-    : `In the ${template.title.toLowerCase()} order, ${left} was exactly ${positions} away from ${right}.`;
+    ? `In the ${orderedContext(template).toLowerCase()}, the positions of ${left} and ${right} differed by exactly ${distance}.`
+    : `The positions of ${left} and ${right} in the ${orderedContext(template).toLowerCase()} differed by exactly ${distance}.`;
 }
 
 /** Render semantic constraints through a deterministic, bounded phrase catalogue. */
