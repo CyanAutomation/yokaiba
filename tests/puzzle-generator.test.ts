@@ -248,7 +248,7 @@ test("rendered clue metadata satisfies the language catalogue contract", () => {
   ];
 
   const rendered = renderClues(tournamentOrderTemplate, "metadata-contract", clues);
-  assert.ok(rendered.every(clue => clue.languageVersion === "yokaiba-clue-prose-v6"));
+  assert.ok(rendered.every(clue => clue.languageVersion === "yokaiba-clue-prose-v7"));
   assert.ok(rendered.every(clue => typeof clue.phraseVariant === "string" && clue.phraseVariant.length > 0));
 });
 
@@ -310,10 +310,25 @@ test("relational clues name the competitors without mid-sentence capitalization"
     assert.match(beforeClue.text, /competitor who finished 2nd.*competitor who finished 4th/i);
     assert.match(beforeClue.text, /(came before|was earlier than)/i);
     assert.doesNotMatch(beforeClue.text, /In the .*?, The competitor/);
-    assert.ok(rendered.some(clue => /Tatami 4.*one position.*competitor who finished 3rd/i.test(clue.text)));
+    assert.ok(rendered.some(clue => /positions of .*Tatami 4.*competitor who finished 3rd.*differed by exactly one/i.test(clue.text)));
   }
 
   assert.deepEqual(coveredVariants, new Set(["before-0", "before-1"]));
+});
+
+test("ordered clue prose avoids a duplicated order word and states position differences explicitly", () => {
+  const clues: Clue[] = [
+    { id: "tatami-before", constraint: { kind: "before", left: { category: "tatami", value: "Tatami 2" }, right: { category: "tatami", value: "Tatami 1" } }, text: "" },
+    { id: "weight-distance", constraint: { kind: "distance", left: { category: "weight", value: "-73 kg" }, right: { category: "tatami", value: "Tatami 1" }, distance: 3 }, text: "" },
+  ];
+
+  for (const seed of ["alpha", "beta", "gamma", "delta"]) {
+    const rendered = renderClues(tournamentOrderTemplate, seed, clues);
+    assert.ok(rendered.every(clue => !/order order/i.test(clue.text)));
+    const distance = rendered.find(clue => clue.id === "weight-distance")!;
+    assert.match(distance.text, /positions of .* -73 kg competitor.*competitor on Tatami 1.*differed by exactly three/i);
+    assert.doesNotMatch(distance.text, /positions? (?:away|from)|positions? separated/i);
+  }
 });
 
 test("clue rendering is deterministic and rotates phrase variants within a puzzle", () => {
@@ -365,6 +380,27 @@ test("difficulty corpus audit aggregates human-trace and clue statistics", () =>
     humanTrace: { complete: 2, incomplete: 1 },
     clues: { average: 8, minimum: 5, maximum: 11 },
   });
+});
+
+test("difficulty audit reports sample progress through a callback", () => {
+  const progress: Array<{ phase: string; completed: number; total: number }> = [];
+  auditDifficultyCorpus(tournamentOrderV2Template, {
+    sampleSize: 2,
+    onProgress: event => progress.push({ phase: event.phase, completed: event.completed, total: event.total }),
+  });
+  assert.deepEqual(progress, [
+    { phase: "difficulty", completed: 1, total: 2 },
+    { phase: "difficulty", completed: 2, total: 2 },
+  ]);
+
+  const targetedProgress: Array<{ phase: string; level?: number; completed: number; total: number }> = [];
+  auditTargetedDifficultyCorpus(tournamentOrderV2Template, {
+    sampleSize: 1,
+    onProgress: event => targetedProgress.push({ phase: event.phase, level: event.requestedDifficultyLevel, completed: event.completed, total: event.total }),
+  });
+  assert.equal(targetedProgress.length, 4);
+  assert.ok(targetedProgress.every(event => event.phase === "targeted" && event.completed === 1 && event.total === 1));
+  assert.deepEqual(targetedProgress.map(event => event.level), [1, 2, 3, 4]);
 });
 
 test("difficulty corpus audit rejects levels outside the 1–12 scale", () => {

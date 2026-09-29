@@ -35,6 +35,16 @@ export interface DifficultyAuditRecord {
 
 export type DifficultyCorpusStatistics = Pick<DifficultyCorpusAudit, "levelCounts" | "humanTrace" | "clues">;
 
+export interface DifficultyAuditProgress {
+  phase: "difficulty" | "targeted";
+  templateId: string;
+  requestedDifficultyLevel?: Difficulty["level"];
+  completed: number;
+  total: number;
+}
+
+export type DifficultyAuditProgressCallback = (progress: DifficultyAuditProgress) => void;
+
 /** Aggregate already-generated audit observations without invoking the generator. */
 export function aggregateDifficultyAuditRecords(records: readonly DifficultyAuditRecord[]): DifficultyCorpusStatistics {
   if (records.length === 0) throw new RangeError("at least one audit record is required");
@@ -67,7 +77,7 @@ export function aggregateDifficultyAuditRecords(records: readonly DifficultyAudi
  * checks. It deliberately reports the bounded no-guess trace separately from
  * player outcomes: this is an engineering diagnostic, not human validation.
  */
-export function auditDifficultyCorpus(template: PuzzleTemplate, options: { sampleSize?: number; seedPrefix?: string } = {}): DifficultyCorpusAudit {
+export function auditDifficultyCorpus(template: PuzzleTemplate, options: { sampleSize?: number; seedPrefix?: string; onProgress?: DifficultyAuditProgressCallback } = {}): DifficultyCorpusAudit {
   const sampleSize = options.sampleSize ?? template.metadata?.difficultyCalibration.corpus.sampleSize ?? 1_000;
   const seedPrefix = options.seedPrefix ?? "difficulty-audit";
   if (!Number.isInteger(sampleSize) || sampleSize < 1) throw new RangeError("sampleSize must be a positive integer");
@@ -82,6 +92,7 @@ export function auditDifficultyCorpus(template: PuzzleTemplate, options: { sampl
       humanTraceComplete: puzzle.difficulty.evidence.humanSolve.solved,
       clueCount: puzzle.clues.length,
     });
+    options.onProgress?.({ phase: "difficulty", templateId: template.id, completed: index + 1, total: sampleSize });
   }
   return {
     templateId: template.id,
@@ -97,7 +108,7 @@ export function auditDifficultyCorpus(template: PuzzleTemplate, options: { sampl
  * browser course. This is deliberately separate from the distribution audit:
  * a normal generator sample cannot prove that a requested level is deliverable.
  */
-export function auditTargetedDifficultyCorpus(template: PuzzleTemplate, options: { sampleSize?: number; seedPrefix?: string } = {}): TargetedDifficultyCorpusAudit {
+export function auditTargetedDifficultyCorpus(template: PuzzleTemplate, options: { sampleSize?: number; seedPrefix?: string; onProgress?: DifficultyAuditProgressCallback } = {}): TargetedDifficultyCorpusAudit {
   const sampleSize = options.sampleSize ?? template.metadata?.difficultyCalibration.corpus.sampleSize ?? 1_000;
   const seedPrefix = options.seedPrefix ?? "targeted-difficulty-audit";
   if (!Number.isInteger(sampleSize) || sampleSize < 1) throw new RangeError("sampleSize must be a positive integer");
@@ -112,6 +123,7 @@ export function auditTargetedDifficultyCorpus(template: PuzzleTemplate, options:
       const puzzle = generatePuzzleAtDifficultyWithFallback(template, `${seedPrefix}-${requestedDifficultyLevel}-${index}`, requestedDifficultyLevel);
       modelVersion ??= puzzle.difficulty.modelVersion;
       records.push({ level: puzzle.difficulty.level, humanTraceComplete: puzzle.difficulty.evidence.humanSolve.solved, clueCount: puzzle.clues.length });
+      options.onProgress?.({ phase: "targeted", templateId: template.id, requestedDifficultyLevel, completed: index + 1, total: sampleSize });
       if (puzzle.seedFallbackAttempt !== undefined) {
         fallbackUsed += 1;
         maximumAttempt = Math.max(maximumAttempt, puzzle.seedFallbackAttempt);
