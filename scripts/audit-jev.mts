@@ -13,14 +13,24 @@ import { tournamentOrderTemplate } from "../src/templates/tournament-order.js";
 import { tournamentOrderV2Template } from "../src/templates/tournament-order-v2.js";
 import {
   applyJevAnswers,
+  applyJevPuzzleAnswers,
+  aggregateSemanticCalibrationEvidence,
   assertCheckpointConfiguration,
+  buildClueDecisionPayload,
   buildAuditMarkdown,
+  buildPuzzleDecisionPayload,
+  markClueUnavailable,
+  markPuzzleUnavailable,
   parseAuditArguments,
-  readJevAnswerMap,
+  puzzleReviewFlagReasons,
   readAuditCheckpoint,
+  requestJevDecisionBatch,
   writeAuditCheckpoint,
+  SEMANTIC_ASSESSMENT_SCHEMA_VERSION,
+  JEV_REVIEW_THRESHOLDS,
   type AuditCheckpoint,
   type AuditedClue,
+  type AuditedPuzzle,
   type JevAuditReport,
   type JevRunConfiguration,
 } from "./audit-jev-support.js";
@@ -29,6 +39,12 @@ const ENDPOINT = "https://openrouter.ai/api/alpha/decisions";
 const MODEL = "~typesafe/jev-latest";
 const templates = [tournamentOrderTemplate, tournamentOrderV2Template, openDivisionTemplate, championshipBridgeTemplate, championshipCircuitTemplate];
 const targetedTemplates = [tournamentOrderV2Template, openDivisionTemplate, championshipBridgeTemplate, championshipCircuitTemplate];
+const apiKey = process.env.OPENROUTER_API_KEY;
+
+function requestSemanticBatch(payload: Parameters<typeof requestJevDecisionBatch>[1]) {
+  if (!apiKey) throw new Error("OPENROUTER_API_KEY is not set; JEV semantic results are unavailable.");
+  return requestJevDecisionBatch(apiKey, payload, ENDPOINT);
+}
 
 function describeConstraint(clue: Clue): string {
   const constraint = clue.constraint;
@@ -40,40 +56,6 @@ function describeConstraint(clue: Clue): string {
   return `The positions of ${constraint.left.value} in ${constraint.left.category} and ${constraint.right.value} in ${constraint.right.category} differ by exactly ${constraint.distance}.`;
 }
 
-async function decisionBatch(apiKey: string, clues: readonly AuditedClue[]) {
-  const state = { clues: clues.map(({ clueId, text, expectedSemantics }) => ({ clueId, text, expectedSemantics })) };
-  const questions: Record<string, unknown> = {};
-  for (const [index] of clues.entries()) {
-    const path = `clues[${index}]`;
-    questions[`${index}_faithful`] = {
-      type: "noul",
-      instructions: `Does \`${path}.text\` accurately and completely express \`${path}.expectedSemantics\`? Treat a reversed ordering, missing exactness, changed negation, or changed relationship as inaccurate.`,
-      criteria: { true: "The wording preserves every semantic constraint.", false: "The wording changes, omits, or contradicts a semantic constraint." },
-    };
-    questions[`${index}_ambiguous`] = {
-      type: "noul",
-      instructions: `Could a typical English-speaking logic-puzzle player reasonably interpret \`${path}.text\` in more than one way that changes its constraint?`,
-      criteria: { true: "Materially ambiguous to a player.", false: "Has one clear constraint interpretation." },
-    };
-    questions[`${index}_readability`] = {
-      type: "score",
-      instructions: `How readable and natural is \`${path}.text\` for a judo logic-puzzle player? Judge wording only, not puzzle difficulty.`,
-      criteria: ["Awkward or unclear", "Understandable but awkward", "Clear and natural"],
-    };
-  }
-  const response = await fetch(ENDPOINT, {
-    method: "POST",
-    headers: { "content-type": "application/json", authorization: `Bearer ${apiKey}` },
-    body: JSON.stringify({ model: MODEL, state, questions }),
-  });
-  if (!response.ok) throw new Error(`JEV request failed (${response.status}): ${await response.text()}`);
-  const rawBody = await response.json() as unknown;
-  const body = rawBody !== null && typeof rawBody === "object" && !Array.isArray(rawBody)
-    ? rawBody as { model?: string; answers?: unknown; usage?: { input_tokens?: number; output_tokens?: number; cost?: number } }
-    : {};
-  return { ...body, answers: readJevAnswerMap(body.answers) };
-}
-
 function reportAuditProgress(progress: { phase: "difficulty" | "targeted"; templateId: string; requestedDifficultyLevel?: number; completed: number; total: number }) {
   const interval = Math.max(1, Math.ceil(progress.total / 10));
   if (progress.completed !== 1 && progress.completed !== progress.total && progress.completed % interval !== 0) return;
@@ -81,15 +63,20 @@ function reportAuditProgress(progress: { phase: "difficulty" | "targeted"; templ
   console.error(`${progress.phase} audit ${scope}: ${progress.completed}/${progress.total}`);
 }
 
-function initialClue(clue: Clue, templateId: string, seed: string): AuditedClue {
+function initialClue(clue: Clue, templateId: string, seed: string, difficulty: { level: AuditedClue["logicalDifficultyLevel"]; modelVersion: string }, locale?: string): AuditedClue {
   return {
     templateId,
     seed,
     clueId: clue.id,
     text: clue.text,
     expectedSemantics: describeConstraint(clue),
+    constraintKind: clue.constraint.kind,
+    structuredSemantics: clue.constraint,
     phraseVariant: clue.phraseVariant,
     languageVersion: clue.languageVersion,
+    ...(locale === undefined ? {} : { locale }),
+    logicalDifficultyLevel: difficulty.level,
+    difficultyModelVersion: difficulty.modelVersion,
     evaluationStatus: "pending",
     missingAnswers: [],
     flagged: false,
@@ -97,9 +84,29 @@ function initialClue(clue: Clue, templateId: string, seed: string): AuditedClue 
   };
 }
 
+function initialPuzzle(puzzle: ReturnType<typeof generatePuzzle>, templateTitle: string): AuditedPuzzle {
+  return {
+    templateId: puzzle.templateId,
+    templateTitle,
+    seed: puzzle.seed,
+    logicalDifficultyLevel: puzzle.difficulty.level,
+    difficultyModelVersion: puzzle.difficulty.modelVersion,
+    clues: puzzle.clues.map(clue => ({
+      clueId: clue.id,
+      text: clue.text,
+      expectedSemantics: describeConstraint(clue),
+      constraintKind: clue.constraint.kind,
+      structuredSemantics: clue.constraint,
+      phraseVariant: clue.phraseVariant,
+      languageVersion: clue.languageVersion,
+    })),
+    flagReasons: [],
+    evaluationStatus: "pending",
+    missingAnswers: [],
+  };
+}
+
 const args = parseAuditArguments(process.argv.slice(2));
-const apiKey = process.env.OPENROUTER_API_KEY;
-if (!apiKey) throw new Error("OPENROUTER_API_KEY must be set; the key is intentionally not read from project files.");
 
 const invocationStartedAt = new Date().toISOString();
 const defaultBase = `reports/jev-audit-${invocationStartedAt.replaceAll(":", "-").replaceAll(".", "-")}`;
@@ -113,6 +120,9 @@ const configuration: JevRunConfiguration = {
   batchSize: args.batchSize,
   endpoint: ENDPOINT,
   requestedModel: MODEL,
+  semanticAssessmentSchemaVersion: SEMANTIC_ASSESSMENT_SCHEMA_VERSION,
+  puzzleReview: args.puzzleReview,
+  reviewThresholds: JEV_REVIEW_THRESHOLDS,
 };
 
 console.error(`JEV audit output: ${target}`);
@@ -123,7 +133,9 @@ if (args.resume) {
   checkpoint = await readAuditCheckpoint(checkpointPath);
   if (!checkpoint) throw new Error(`cannot resume: no checkpoint found at ${checkpointPath}`);
   assertCheckpointConfiguration(checkpoint.configuration, configuration);
-  console.error(`Resuming checkpoint: ${checkpoint.clues.filter(clue => clue.evaluatedAt).length}/${checkpoint.clues.length} clues already processed.`);
+  checkpoint.clues = checkpoint.clues.map(clue => clue.evaluationStatus === "unavailable" ? { ...clue, evaluationStatus: "pending", missingAnswers: [] } : clue);
+  checkpoint.puzzles = checkpoint.puzzles.map(puzzle => puzzle.evaluationStatus === "unavailable" ? { ...puzzle, evaluationStatus: "pending", missingAnswers: [] } : puzzle);
+console.error(`Resuming checkpoint: ${checkpoint.clues.filter(clue => clue.evaluationStatus !== "pending").length}/${checkpoint.clues.length} clues already processed.`);
 }
 
 if (!checkpoint) {
@@ -134,74 +146,128 @@ if (!checkpoint) {
     ...auditTargetedDifficultyCorpus(template, { sampleSize: args.difficultySamples, onProgress: reportAuditProgress }),
   }));
   const clues: AuditedClue[] = [];
+  const puzzles: AuditedPuzzle[] = [];
   for (const template of templates) {
     const reportInterval = Math.max(1, Math.ceil(args.clueSamples / 10));
     for (let sample = 0; sample < args.clueSamples; sample += 1) {
       const seed = `jev-wording-${sample}`;
-      clues.push(...generatePuzzle(template, seed).clues.map(clue => initialClue(clue, template.id, seed)));
+      const puzzle = generatePuzzle(template, seed);
+      clues.push(...puzzle.clues.map(clue => initialClue(clue, template.id, seed, puzzle.difficulty, template.metadata?.locales.default)));
+      puzzles.push(initialPuzzle(puzzle, template.title));
       if ((sample + 1) % reportInterval === 0 || sample + 1 === args.clueSamples) {
         console.error(`generated wording clues ${template.id}: ${sample + 1}/${args.clueSamples}`);
       }
     }
   }
   checkpoint = {
-    version: 1,
+    version: 2,
     startedAt: invocationStartedAt,
     configuration,
     difficultyAudit,
     targetedDifficultyAudit,
     clues,
+    puzzles,
     totalCost: 0,
-    resolvedModel: MODEL,
+    resolvedModel: "unresolved",
+    totalInputTokens: 0,
+    totalOutputTokens: 0,
   };
   await writeAuditCheckpoint(checkpointPath, checkpoint);
 }
 
 const totalBatches = Math.ceil(checkpoint.clues.length / configuration.batchSize);
-const processedBeforeRun = checkpoint.clues.filter(clue => clue.evaluatedAt).length;
-console.error(`JEV wording audit: ${processedBeforeRun}/${checkpoint.clues.length} clues processed; ${totalBatches} total batches.`);
+const processedBeforeRun = checkpoint.clues.filter(clue => clue.evaluationStatus !== "pending").length;
+console.error(`JEV semantic audit: ${processedBeforeRun}/${checkpoint.clues.length} clues processed; ${totalBatches} total batches.`);
+let providerUnavailable = false;
 try {
   for (let offset = 0; offset < checkpoint.clues.length; offset += configuration.batchSize) {
     const batch = checkpoint.clues.slice(offset, offset + configuration.batchSize);
-    const pending = batch.filter(clue => !clue.evaluatedAt);
+    const pending = batch.filter(clue => clue.evaluationStatus === "pending");
     if (pending.length === 0) continue;
-    const response = await decisionBatch(apiKey, pending);
+    const response = await requestSemanticBatch(buildClueDecisionPayload(MODEL, pending));
     checkpoint.resolvedModel = response.model ?? checkpoint.resolvedModel;
-    checkpoint.totalCost += response.usage?.cost ?? 0;
+    checkpoint.totalCost += response.usage.cost ?? 0;
+    checkpoint.totalInputTokens += response.usage.inputTokens ?? 0;
+    checkpoint.totalOutputTokens += response.usage.outputTokens ?? 0;
     for (const [index, clue] of pending.entries()) {
-      checkpoint.clues[offset + batch.indexOf(clue)] = applyJevAnswers(clue, response.answers!, index);
+      checkpoint.clues[offset + batch.indexOf(clue)] = applyJevAnswers(clue, response.answers, index);
     }
     await writeAuditCheckpoint(checkpointPath, checkpoint);
-    const reviewed = checkpoint.clues.filter(clue => clue.evaluatedAt).length;
+    const reviewed = checkpoint.clues.filter(clue => clue.evaluationStatus !== "pending").length;
     console.error(`JEV reviewed ${reviewed}/${checkpoint.clues.length} clues; batch ${Math.ceil((offset + 1) / configuration.batchSize)}/${totalBatches}`);
   }
+  if (configuration.puzzleReview) {
+    for (let offset = 0; offset < checkpoint.puzzles.length; offset += configuration.batchSize) {
+      const batch = checkpoint.puzzles.slice(offset, offset + configuration.batchSize);
+      const pending = batch.filter(puzzle => puzzle.evaluationStatus === "pending");
+      if (pending.length === 0) continue;
+      const response = await requestSemanticBatch(buildPuzzleDecisionPayload(MODEL, pending));
+      checkpoint.resolvedModel = response.model ?? checkpoint.resolvedModel;
+      checkpoint.totalCost += response.usage.cost ?? 0;
+      checkpoint.totalInputTokens += response.usage.inputTokens ?? 0;
+      checkpoint.totalOutputTokens += response.usage.outputTokens ?? 0;
+      for (const [index, puzzle] of pending.entries()) {
+        checkpoint.puzzles[offset + batch.indexOf(puzzle)] = applyJevPuzzleAnswers(puzzle, response.answers, index);
+      }
+      await writeAuditCheckpoint(checkpointPath, checkpoint);
+      const reviewed = checkpoint.puzzles.filter(puzzle => puzzle.evaluatedAt).length;
+      console.error(`JEV reviewed ${reviewed}/${checkpoint.puzzles.length} puzzle sets`);
+    }
+  }
 } catch (error) {
-  console.error(`Audit stopped. Checkpoint saved at ${checkpointPath}; resume with --out ${outputBase} --resume.`);
-  throw error;
+  providerUnavailable = true;
+  checkpoint.clues = checkpoint.clues.map(clue => clue.evaluationStatus === "pending" ? markClueUnavailable(clue) : clue);
+  if (configuration.puzzleReview) checkpoint.puzzles = checkpoint.puzzles.map(puzzle => puzzle.evaluationStatus === "pending" ? markPuzzleUnavailable(puzzle) : puzzle);
+  console.error(`JEV provider unavailable: ${error instanceof Error ? error.message : String(error)}. Semantic results are marked unavailable; checkpoint kept at ${checkpointPath} for retry with --out ${outputBase} --resume.`);
+  await writeAuditCheckpoint(checkpointPath, checkpoint);
 }
 
 const flaggedClues = checkpoint.clues.filter(clue => clue.flagged);
 const incompleteClues = checkpoint.clues.filter(clue => clue.evaluationStatus === "incomplete");
+const unavailableClues = checkpoint.clues.filter(clue => clue.evaluationStatus === "unavailable");
+const completePuzzles = checkpoint.puzzles.filter(puzzle => puzzle.evaluationStatus === "complete");
+const incompletePuzzles = checkpoint.puzzles.filter(puzzle => puzzle.evaluationStatus === "incomplete");
+const unavailablePuzzles = checkpoint.puzzles.filter(puzzle => puzzle.evaluationStatus === "unavailable");
+const completeClueCount = checkpoint.clues.filter(clue => clue.evaluationStatus === "complete").length;
+const clueAuditStatus = completeClueCount === checkpoint.clues.length
+  ? "complete"
+  : completeClueCount === 0 && unavailableClues.length === checkpoint.clues.length
+    ? "unavailable"
+    : "partial";
 const report: JevAuditReport = {
   startedAt: checkpoint.startedAt,
   generatedAt: new Date().toISOString(),
   configuration: { ...configuration, resolvedModel: checkpoint.resolvedModel },
   difficultyAudit: checkpoint.difficultyAudit,
   targetedDifficultyAudit: checkpoint.targetedDifficultyAudit,
+  semanticCalibrationEvidence: aggregateSemanticCalibrationEvidence(checkpoint.clues, checkpoint.puzzles),
   clueAudit: {
     model: checkpoint.resolvedModel,
     sampledClues: checkpoint.clues.length,
     totalCost: checkpoint.totalCost,
+    totalInputTokens: checkpoint.totalInputTokens,
+    totalOutputTokens: checkpoint.totalOutputTokens,
+    status: clueAuditStatus,
     flaggedClues,
     incompleteClues,
+    unavailableClues,
     clues: checkpoint.clues,
+  },
+  puzzleAudit: {
+    enabled: configuration.puzzleReview,
+    sampledPuzzles: configuration.puzzleReview ? checkpoint.puzzles.length : 0,
+    completePuzzles: completePuzzles.length,
+    incompletePuzzles: incompletePuzzles.length,
+    unavailablePuzzles: configuration.puzzleReview ? unavailablePuzzles.length : 0,
+    flaggedPuzzles: configuration.puzzleReview ? checkpoint.puzzles.filter(puzzle => puzzleReviewFlagReasons(puzzle).length > 0) : [],
+    puzzles: configuration.puzzleReview ? checkpoint.puzzles : [],
   },
 };
 
 await mkdir(dirname(target), { recursive: true });
 await writeFile(target, `${JSON.stringify(report, null, 2)}\n`);
 await writeFile(markdownTarget, buildAuditMarkdown(report));
-await unlink(checkpointPath).catch(error => {
+if (!providerUnavailable) await unlink(checkpointPath).catch(error => {
   if (!error || typeof error !== "object" || !("code" in error) || error.code !== "ENOENT") throw error;
 });
 console.log(JSON.stringify({
@@ -210,5 +276,8 @@ console.log(JSON.stringify({
   reviewedClues: checkpoint.clues.length,
   flaggedClues: flaggedClues.length,
   incompleteEvaluations: incompleteClues.length,
+  unavailableEvaluations: unavailableClues.length,
+  semanticAssessmentSchemaVersion: configuration.semanticAssessmentSchemaVersion,
+  puzzleReview: configuration.puzzleReview,
   cost: checkpoint.totalCost,
 }, null, 2));
