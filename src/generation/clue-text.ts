@@ -99,9 +99,10 @@ function renderConstraint(template: PuzzleTemplate, constraint: ClueConstraint, 
   const right = termSubject(constraint.right.category, constraint.right.value);
   const positionWords = ["zero", "one", "two", "three", "four"];
   const distance = positionWords[constraint.distance] ?? String(constraint.distance);
+  const place = constraint.distance === 1 ? "place" : "places";
   return index === 0
-    ? `In the ${orderedContext(template).toLowerCase()}, the positions of ${left} and ${right} differed by exactly ${distance}.`
-    : `The positions of ${left} and ${right} in the ${orderedContext(template).toLowerCase()} differed by exactly ${distance}.`;
+    ? `In the ${orderedContext(template).toLowerCase()}, ${left} and ${right} were exactly ${distance} ${place} apart.`
+    : `${left} and ${right} were exactly ${distance} ${place} apart in the ${orderedContext(template).toLowerCase()}.`;
 }
 
 /** Render semantic constraints through a deterministic, bounded phrase catalogue. */

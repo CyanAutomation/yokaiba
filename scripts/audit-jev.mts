@@ -2,7 +2,7 @@ import { mkdir, unlink, writeFile } from "node:fs/promises";
 import { dirname, resolve } from "node:path";
 import {
   auditDifficultyCorpus,
-  auditTargetedDifficultyCorpus,
+  auditProductionDifficultyCorpus,
   generatePuzzle,
   type Clue,
 } from "../src/index.js";
@@ -16,6 +16,7 @@ import {
   applyJevPuzzleAnswers,
   aggregateSemanticCalibrationEvidence,
   assertCheckpointConfiguration,
+  checkpointTargetedDifficultyLevels,
   buildClueDecisionPayload,
   buildAuditMarkdown,
   buildPuzzleDecisionPayload,
@@ -24,6 +25,8 @@ import {
   parseAuditArguments,
   puzzleReviewFlagReasons,
   readAuditCheckpoint,
+  readJevAuditReport,
+  rebuildPuzzleReviewCorpus,
   requestJevDecisionBatch,
   writeAuditCheckpoint,
   SEMANTIC_ASSESSMENT_SCHEMA_VERSION,
@@ -114,19 +117,29 @@ const outputBase = args.outputBase ?? defaultBase;
 const target = resolve(`${outputBase}.json`);
 const markdownTarget = target.replace(/\.json$/, ".md");
 const checkpointPath = resolve(`${outputBase}.checkpoint.json`);
-const configuration: JevRunConfiguration = {
-  difficultySamples: args.difficultySamples,
-  clueSamples: args.clueSamples,
-  batchSize: args.batchSize,
-  endpoint: ENDPOINT,
-  requestedModel: MODEL,
-  semanticAssessmentSchemaVersion: SEMANTIC_ASSESSMENT_SCHEMA_VERSION,
-  puzzleReview: args.puzzleReview,
-  reviewThresholds: JEV_REVIEW_THRESHOLDS,
-};
+const sourceReport = args.puzzleReviewFrom ? await readJevAuditReport(resolve(args.puzzleReviewFrom)) : undefined;
+const sourceOutputPath = args.puzzleReviewFrom ? resolve(args.puzzleReviewFrom) : undefined;
+if (sourceOutputPath === target) throw new Error("--puzzle-review-from and --out must identify different report files");
+let configuration: JevRunConfiguration;
+if (sourceReport) {
+  const { resolvedModel: _resolvedModel, ...sourceConfiguration } = sourceReport.configuration;
+  configuration = { ...sourceConfiguration, batchSize: args.batchSize, puzzleReview: true };
+} else {
+  configuration = {
+    difficultySamples: args.difficultySamples,
+    clueSamples: args.clueSamples,
+    batchSize: args.batchSize,
+    endpoint: ENDPOINT,
+    requestedModel: MODEL,
+    semanticAssessmentSchemaVersion: SEMANTIC_ASSESSMENT_SCHEMA_VERSION,
+    puzzleReview: args.puzzleReview,
+    reviewThresholds: JEV_REVIEW_THRESHOLDS,
+  };
+}
 
 console.error(`JEV audit output: ${target}`);
-console.error(`Starting deterministic audits: ${args.difficultySamples} difficulty samples/template, ${args.clueSamples} wording samples/template.`);
+if (sourceReport) console.error(`Reusing puzzle samples from: ${sourceOutputPath}`);
+else console.error(`Starting deterministic audits: ${configuration.difficultySamples} samples/template, ${configuration.clueSamples} wording samples/template.`);
 
 let checkpoint: AuditCheckpoint | undefined;
 if (args.resume) {
@@ -135,43 +148,91 @@ if (args.resume) {
   assertCheckpointConfiguration(checkpoint.configuration, configuration);
   checkpoint.clues = checkpoint.clues.map(clue => clue.evaluationStatus === "unavailable" ? { ...clue, evaluationStatus: "pending", missingAnswers: [] } : clue);
   checkpoint.puzzles = checkpoint.puzzles.map(puzzle => puzzle.evaluationStatus === "unavailable" ? { ...puzzle, evaluationStatus: "pending", missingAnswers: [] } : puzzle);
-console.error(`Resuming checkpoint: ${checkpoint.clues.filter(clue => clue.evaluationStatus !== "pending").length}/${checkpoint.clues.length} clues already processed.`);
-}
-
-if (!checkpoint) {
-  const difficultyAudit = templates.map(template => ({
-    ...auditDifficultyCorpus(template, { sampleSize: args.difficultySamples, onProgress: reportAuditProgress }),
-  }));
-  const targetedDifficultyAudit = targetedTemplates.map(template => ({
-    ...auditTargetedDifficultyCorpus(template, { sampleSize: args.difficultySamples, onProgress: reportAuditProgress }),
-  }));
-  const clues: AuditedClue[] = [];
-  const puzzles: AuditedPuzzle[] = [];
-  for (const template of templates) {
-    const reportInterval = Math.max(1, Math.ceil(args.clueSamples / 10));
-    for (let sample = 0; sample < args.clueSamples; sample += 1) {
-      const seed = `jev-wording-${sample}`;
-      const puzzle = generatePuzzle(template, seed);
-      clues.push(...puzzle.clues.map(clue => initialClue(clue, template.id, seed, puzzle.difficulty, template.metadata?.locales.default)));
-      puzzles.push(initialPuzzle(puzzle, template.title));
-      if ((sample + 1) % reportInterval === 0 || sample + 1 === args.clueSamples) {
-        console.error(`generated wording clues ${template.id}: ${sample + 1}/${args.clueSamples}`);
-      }
-    }
-  }
+  console.error(`Resuming checkpoint: ${checkpoint.difficultyAudit.length} raw and ${checkpoint.productionDifficultyAudit.length} progressive templates, ${checkpoint.targetedDifficultyAudit.reduce((sum, row) => sum + row.levels.length, 0)} targeted levels, ${checkpoint.clues.filter(clue => clue.evaluationStatus !== "pending").length}/${checkpoint.clues.length} clues processed.`);
+} else if (sourceReport) {
   checkpoint = {
-    version: 2,
+    version: 3,
+    startedAt: sourceReport.startedAt,
+    configuration,
+    difficultyAudit: sourceReport.difficultyAudit,
+    productionDifficultyAudit: sourceReport.productionDifficultyAudit,
+    targetedDifficultyAudit: sourceReport.targetedDifficultyAudit,
+    clues: sourceReport.clueAudit.clues,
+    puzzles: rebuildPuzzleReviewCorpus(sourceReport, Object.fromEntries(templates.map(template => [template.id, template.title]))),
+    totalCost: sourceReport.clueAudit.totalCost,
+    resolvedModel: sourceReport.configuration.resolvedModel ?? sourceReport.clueAudit.model,
+    totalInputTokens: sourceReport.clueAudit.totalInputTokens,
+    totalOutputTokens: sourceReport.clueAudit.totalOutputTokens,
+  };
+  await writeAuditCheckpoint(checkpointPath, checkpoint);
+  console.error(`Prepared ${checkpoint.puzzles.length} puzzle reviews from ${checkpoint.clues.length} saved clues.`);
+} else {
+  checkpoint = {
+    version: 3,
     startedAt: invocationStartedAt,
     configuration,
-    difficultyAudit,
-    targetedDifficultyAudit,
-    clues,
-    puzzles,
+    difficultyAudit: [],
+    productionDifficultyAudit: [],
+    targetedDifficultyAudit: [],
+    clues: [],
+    puzzles: [],
     totalCost: 0,
     resolvedModel: "unresolved",
     totalInputTokens: 0,
     totalOutputTokens: 0,
   };
+  await writeAuditCheckpoint(checkpointPath, checkpoint);
+}
+
+if (!sourceReport) {
+  for (const template of templates) {
+    if (checkpoint.difficultyAudit.some(row => row.templateId === template.id)) continue;
+    checkpoint.difficultyAudit.push(auditDifficultyCorpus(template, { sampleSize: configuration.difficultySamples, onProgress: reportAuditProgress }));
+    await writeAuditCheckpoint(checkpointPath, checkpoint);
+    console.error(`checkpoint saved after raw difficulty template ${template.id}`);
+  }
+  for (const template of templates) {
+    if (checkpoint.productionDifficultyAudit.some(row => row.templateId === template.id)) continue;
+    checkpoint.productionDifficultyAudit.push(auditProductionDifficultyCorpus(template, { sampleSize: configuration.difficultySamples, onProgress: reportAuditProgress }));
+    await writeAuditCheckpoint(checkpointPath, checkpoint);
+    console.error(`checkpoint saved after progressive difficulty template ${template.id}`);
+  }
+  for (const template of targetedTemplates) {
+    const priorLevels = new Set(checkpoint.targetedDifficultyAudit.find(row => row.templateId === template.id)?.levels.map(row => row.requestedDifficultyLevel) ?? []);
+    await checkpointTargetedDifficultyLevels(checkpoint, checkpointPath, template, reportAuditProgress);
+    const completedLevels = checkpoint.targetedDifficultyAudit.find(row => row.templateId === template.id)?.levels ?? [];
+    for (const result of completedLevels) {
+      if (!priorLevels.has(result.requestedDifficultyLevel)) console.error(`checkpoint saved after targeted ${template.id} level ${result.requestedDifficultyLevel}`);
+    }
+  }
+  for (const template of templates) {
+    if (checkpoint.clues.some(clue => clue.templateId === template.id)) continue;
+    const clues: AuditedClue[] = [];
+    const puzzles: AuditedPuzzle[] = [];
+    const reportInterval = Math.max(1, Math.ceil(configuration.clueSamples / 10));
+    for (let sample = 0; sample < configuration.clueSamples; sample += 1) {
+      const seed = `jev-wording-${sample}`;
+      const puzzle = generatePuzzle(template, seed);
+      clues.push(...puzzle.clues.map(clue => initialClue(clue, template.id, seed, puzzle.difficulty, template.metadata?.locales.default)));
+      puzzles.push(initialPuzzle(puzzle, template.title));
+      if ((sample + 1) % reportInterval === 0 || sample + 1 === configuration.clueSamples) {
+        console.error(`generated wording clues ${template.id}: ${sample + 1}/${configuration.clueSamples}`);
+      }
+    }
+    checkpoint.clues.push(...clues);
+    checkpoint.puzzles.push(...puzzles);
+    await writeAuditCheckpoint(checkpointPath, checkpoint);
+  }
+} else if (checkpoint.productionDifficultyAudit.length < templates.length) {
+  for (const template of templates) {
+    if (checkpoint.productionDifficultyAudit.some(row => row.templateId === template.id)) continue;
+    checkpoint.productionDifficultyAudit.push(auditProductionDifficultyCorpus(template, { sampleSize: configuration.difficultySamples, onProgress: reportAuditProgress }));
+    await writeAuditCheckpoint(checkpointPath, checkpoint);
+    console.error(`checkpoint saved after progressive difficulty template ${template.id}`);
+  }
+}
+
+if (checkpoint) {
   await writeAuditCheckpoint(checkpointPath, checkpoint);
 }
 
@@ -218,7 +279,8 @@ try {
   providerUnavailable = true;
   checkpoint.clues = checkpoint.clues.map(clue => clue.evaluationStatus === "pending" ? markClueUnavailable(clue) : clue);
   if (configuration.puzzleReview) checkpoint.puzzles = checkpoint.puzzles.map(puzzle => puzzle.evaluationStatus === "pending" ? markPuzzleUnavailable(puzzle) : puzzle);
-  console.error(`JEV provider unavailable: ${error instanceof Error ? error.message : String(error)}. Semantic results are marked unavailable; checkpoint kept at ${checkpointPath} for retry with --out ${outputBase} --resume.`);
+  const resumePuzzleFlag = configuration.puzzleReview ? " --puzzle-review" : "";
+  console.error(`JEV provider unavailable: ${error instanceof Error ? error.message : String(error)}. Semantic results are marked unavailable; checkpoint kept at ${checkpointPath}. Resume with --out ${outputBase} --difficulty-samples ${configuration.difficultySamples} --clue-samples ${configuration.clueSamples} --batch-size ${configuration.batchSize}${resumePuzzleFlag} --resume.`);
   await writeAuditCheckpoint(checkpointPath, checkpoint);
 }
 
@@ -239,6 +301,7 @@ const report: JevAuditReport = {
   generatedAt: new Date().toISOString(),
   configuration: { ...configuration, resolvedModel: checkpoint.resolvedModel },
   difficultyAudit: checkpoint.difficultyAudit,
+  productionDifficultyAudit: checkpoint.productionDifficultyAudit,
   targetedDifficultyAudit: checkpoint.targetedDifficultyAudit,
   semanticCalibrationEvidence: aggregateSemanticCalibrationEvidence(checkpoint.clues, checkpoint.puzzles),
   clueAudit: {

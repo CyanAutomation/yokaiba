@@ -1,7 +1,8 @@
 import { mkdir, readFile, rename, rm, writeFile } from "node:fs/promises";
 import { dirname } from "node:path";
 import { randomUUID } from "node:crypto";
-import type { ClueConstraint, Difficulty, DifficultyCorpusAudit, TargetedDifficultyCorpusAudit } from "../src/index.js";
+import { auditTargetedDifficultyLevel } from "../src/generation/audit.js";
+import type { ClueConstraint, Difficulty, DifficultyAuditProgressCallback, DifficultyCorpusAudit, PuzzleTemplate, TargetedDifficultyCorpusAudit } from "../src/index.js";
 
 export const SEMANTIC_ASSESSMENT_SCHEMA_VERSION = "yokaiba-jev-semantic-v1";
 
@@ -137,15 +138,17 @@ export interface AuditArguments {
   clueSamples: number;
   batchSize: number;
   outputBase?: string;
+  puzzleReviewFrom?: string;
   resume: boolean;
   puzzleReview: boolean;
 }
 
 export interface AuditCheckpoint {
-  version: 2;
+  version: 3;
   startedAt: string;
   configuration: JevRunConfiguration;
   difficultyAudit: DifficultyCorpusAudit[];
+  productionDifficultyAudit: DifficultyCorpusAudit[];
   targetedDifficultyAudit: TargetedDifficultyCorpusAudit[];
   clues: AuditedClue[];
   puzzles: AuditedPuzzle[];
@@ -160,6 +163,7 @@ export interface JevAuditReport {
   generatedAt: string;
   configuration: JevRunConfiguration & { resolvedModel: string };
   difficultyAudit: DifficultyCorpusAudit[];
+  productionDifficultyAudit: DifficultyCorpusAudit[];
   targetedDifficultyAudit: TargetedDifficultyCorpusAudit[];
   semanticCalibrationEvidence: SemanticPuzzleEvidence[];
   clueAudit: {
@@ -203,7 +207,7 @@ function stringArgument(args: readonly string[], name: string): string | undefin
 }
 
 export function parseAuditArguments(args: readonly string[]): AuditArguments {
-  const knownFlags = new Set(["--samples", "--difficulty-samples", "--clue-samples", "--batch-size", "--out", "--resume", "--puzzle-review"]);
+  const knownFlags = new Set(["--samples", "--difficulty-samples", "--clue-samples", "--batch-size", "--out", "--resume", "--puzzle-review", "--puzzle-review-from"]);
   for (let index = 0; index < args.length; index += 1) {
     const arg = args[index]!;
     if (!arg.startsWith("--")) throw new Error(`unexpected argument: ${arg}`);
@@ -215,15 +219,18 @@ export function parseAuditArguments(args: readonly string[]): AuditArguments {
 
   const sharedSamples = positiveIntegerArgument(args, "--samples", 100);
   const outputBase = stringArgument(args, "--out");
+  const puzzleReviewFrom = stringArgument(args, "--puzzle-review-from");
   const resume = args.includes("--resume");
   if (resume && !outputBase) throw new Error("--resume requires --out so the checkpoint path stays stable");
+  if (resume && puzzleReviewFrom) throw new Error("--resume and --puzzle-review-from cannot be combined");
   return {
     difficultySamples: positiveIntegerArgument(args, "--difficulty-samples", sharedSamples),
     clueSamples: positiveIntegerArgument(args, "--clue-samples", sharedSamples),
     batchSize: positiveIntegerArgument(args, "--batch-size", 20),
     outputBase,
+    puzzleReviewFrom,
     resume,
-    puzzleReview: args.includes("--puzzle-review"),
+    puzzleReview: args.includes("--puzzle-review") || puzzleReviewFrom !== undefined,
   };
 }
 
@@ -505,6 +512,61 @@ export async function writeAuditCheckpoint(path: string, checkpoint: AuditCheckp
   }
 }
 
+function normalizeDifficultyAuditRows(value: unknown): DifficultyCorpusAudit[] {
+  if (!Array.isArray(value)) return [];
+  return value.map((item, index) => {
+    if (item === null || typeof item !== "object" || Array.isArray(item)) throw new Error(`invalid difficulty audit row at index ${index}`);
+    const row = item as Partial<DifficultyCorpusAudit>;
+    if (typeof row.sampleSize !== "number") throw new Error(`invalid difficulty audit sample size at index ${index}`);
+    return {
+      ...row,
+      generated: Number.isInteger(row.generated) ? row.generated : row.sampleSize,
+      unavailable: Number.isInteger(row.unavailable) ? row.unavailable : 0,
+    } as DifficultyCorpusAudit;
+  });
+}
+
+/** Complete missing targeted levels, persisting after each one for resumable long audits. */
+export async function checkpointTargetedDifficultyLevels(
+  checkpoint: AuditCheckpoint,
+  checkpointPath: string,
+  template: PuzzleTemplate,
+  onProgress?: DifficultyAuditProgressCallback,
+  auditLevel: typeof auditTargetedDifficultyLevel = auditTargetedDifficultyLevel,
+): Promise<void> {
+  const [minimumLevel, maximumLevel] = template.metadata?.difficultyCalibration.levelRange ?? [1, 12];
+  let audit = checkpoint.targetedDifficultyAudit.find(row => row.templateId === template.id);
+  if (!audit) {
+    audit = {
+      templateId: template.id,
+      modelVersion: "unresolved",
+      sampleSize: checkpoint.configuration.difficultySamples,
+      seedPrefix: "targeted-difficulty-audit",
+      levels: [],
+    };
+    checkpoint.targetedDifficultyAudit.push(audit);
+    await writeAuditCheckpoint(checkpointPath, checkpoint);
+  }
+  if (audit.sampleSize !== checkpoint.configuration.difficultySamples) {
+    throw new Error(`targeted difficulty checkpoint sample size does not match ${template.id}`);
+  }
+  for (let level = minimumLevel; level <= maximumLevel; level += 1) {
+    if (audit.levels.some(result => result.requestedDifficultyLevel === level)) continue;
+    const result = auditLevel(template, level as Difficulty["level"], {
+      sampleSize: checkpoint.configuration.difficultySamples,
+      seedPrefix: audit.seedPrefix,
+      onProgress,
+    });
+    if (audit.modelVersion !== "unresolved" && audit.modelVersion !== result.modelVersion) {
+      throw new Error(`difficulty model version changed while auditing ${template.id}`);
+    }
+    audit.modelVersion = result.modelVersion;
+    audit.levels.push(result.level);
+    audit.levels.sort((left, right) => left.requestedDifficultyLevel - right.requestedDifficultyLevel);
+    await writeAuditCheckpoint(checkpointPath, checkpoint);
+  }
+}
+
 export async function readAuditCheckpoint(path: string): Promise<AuditCheckpoint | undefined> {
   let source: string;
   try {
@@ -513,11 +575,69 @@ export async function readAuditCheckpoint(path: string): Promise<AuditCheckpoint
     if (error && typeof error === "object" && "code" in error && error.code === "ENOENT") return undefined;
     throw error;
   }
-  const checkpoint = JSON.parse(source) as AuditCheckpoint;
-  if (!checkpoint || checkpoint.version !== 2 || !Array.isArray(checkpoint.clues) || !Array.isArray(checkpoint.puzzles) || !Array.isArray(checkpoint.difficultyAudit) || !Array.isArray(checkpoint.targetedDifficultyAudit)) {
+  const checkpoint = JSON.parse(source) as {
+    version?: unknown;
+    clues?: unknown;
+    puzzles?: unknown;
+    difficultyAudit?: unknown;
+    productionDifficultyAudit?: unknown;
+    targetedDifficultyAudit?: unknown;
+    [key: string]: unknown;
+  };
+  if (!checkpoint || (checkpoint.version !== 2 && checkpoint.version !== 3) || !Array.isArray(checkpoint.clues) || !Array.isArray(checkpoint.puzzles) || !Array.isArray(checkpoint.difficultyAudit) || !Array.isArray(checkpoint.targetedDifficultyAudit)) {
     throw new Error(`invalid audit checkpoint: ${path}`);
   }
-  return checkpoint;
+  return {
+    ...checkpoint as unknown as AuditCheckpoint,
+    version: 3,
+    difficultyAudit: normalizeDifficultyAuditRows(checkpoint.difficultyAudit),
+    productionDifficultyAudit: normalizeDifficultyAuditRows(checkpoint.productionDifficultyAudit),
+  };
+}
+
+/** Read current or pre-production-path JEV reports for reusable puzzle review. */
+export async function readJevAuditReport(path: string): Promise<JevAuditReport> {
+  const report = JSON.parse(await readFile(path, "utf8")) as Partial<JevAuditReport>;
+  if (!report || typeof report.startedAt !== "string" || !report.configuration || !Array.isArray(report.difficultyAudit)
+    || !Array.isArray(report.targetedDifficultyAudit) || !Array.isArray(report.semanticCalibrationEvidence)
+    || !report.clueAudit || !Array.isArray(report.clueAudit.clues) || !report.puzzleAudit) {
+    throw new Error(`invalid JEV audit report: ${path}`);
+  }
+  return {
+    ...report,
+    difficultyAudit: normalizeDifficultyAuditRows(report.difficultyAudit),
+    productionDifficultyAudit: normalizeDifficultyAuditRows(report.productionDifficultyAudit),
+  } as JevAuditReport;
+}
+
+/** Rebuild puzzle-level review inputs from a report's paired semantic clue sample. */
+export function rebuildPuzzleReviewCorpus(
+  report: JevAuditReport,
+  templateTitles: Readonly<Record<string, string>>,
+): AuditedPuzzle[] {
+  if (report.puzzleAudit.enabled && report.puzzleAudit.puzzles.length > 0) return report.puzzleAudit.puzzles;
+  const cluesByPuzzle = new Map<string, AuditedClue[]>();
+  for (const clue of report.clueAudit.clues) {
+    const key = JSON.stringify([clue.templateId, clue.seed]);
+    cluesByPuzzle.set(key, [...(cluesByPuzzle.get(key) ?? []), clue]);
+  }
+  return report.semanticCalibrationEvidence.map(evidence => {
+    const clues = cluesByPuzzle.get(JSON.stringify([evidence.templateId, evidence.seed])) ?? [];
+    if (clues.length === 0) throw new Error(`report has no clue sample for ${evidence.templateId} / ${evidence.seed}`);
+    return {
+      templateId: evidence.templateId,
+      templateTitle: templateTitles[evidence.templateId] ?? evidence.templateId,
+      seed: evidence.seed,
+      logicalDifficultyLevel: evidence.logicalDifficultyLevel,
+      difficultyModelVersion: evidence.difficultyModelVersion,
+      clues: clues.map(({ clueId, text, expectedSemantics, constraintKind, structuredSemantics, phraseVariant, languageVersion }) => ({
+        clueId, text, expectedSemantics, constraintKind, structuredSemantics, phraseVariant, languageVersion,
+      })),
+      flagReasons: [],
+      evaluationStatus: "pending",
+      missingAnswers: [],
+    };
+  });
 }
 
 function escapeTableCell(value: string) {
@@ -548,23 +668,36 @@ export function buildAuditMarkdown(report: JevAuditReport): string {
     `Clues reviewed: ${clueAudit.sampledClues}; status: ${clueAudit.status}; review leads: ${clueAudit.flaggedClues.length}; incomplete: ${clueAudit.incompleteClues.length}; unavailable: ${clueAudit.unavailableClues.length}; reported cost: $${clueAudit.totalCost.toFixed(6)} (${clueAudit.totalInputTokens} input / ${clueAudit.totalOutputTokens} output tokens).`,
     `Puzzle-level review: ${report.puzzleAudit.enabled ? "enabled" : "disabled"}; ${report.puzzleAudit.completePuzzles} complete / ${report.puzzleAudit.sampledPuzzles} sampled; ${report.puzzleAudit.flaggedPuzzles.length} review leads.`,
     "",
-    "## Deterministic difficulty audit",
+    "## Raw generation distribution",
     "",
-    "| Template | Level distribution | No-guess trace |",
-    "| --- | --- | --- |",
-    ...report.difficultyAudit.map(row => `| ${row.templateId} | ${row.levelCounts.map((count, index) => `${index + 1}: ${count}`).filter(entry => !entry.endsWith(": 0")).join(", ")} | ${row.humanTrace.complete} complete / ${row.humanTrace.incomplete} incomplete |`),
+    "| Template | Generated / requested | Unavailable | Level distribution | No-guess trace |",
+    "| --- | ---: | ---: | --- | --- |",
+    ...report.difficultyAudit.map(row => `| ${row.templateId} | ${row.generated}/${row.sampleSize} | ${row.unavailable} | ${row.levelCounts.map((count, index) => `${index + 1}: ${count}`).filter(entry => !entry.endsWith(": 0")).join(", ")} | ${row.humanTrace.complete} complete / ${row.generated} generated (${row.humanTrace.incomplete} incomplete) |`),
+    "",
+    "The raw distribution calls the base generator directly. Templates with `requiresHumanSolve` use a progressive strategy search on the ordinary production API path.",
+    "",
+    "## Progressive delivery distribution",
+    "",
+    "| Template | Generated / requested | Unavailable | Level distribution | No-guess trace |",
+    "| --- | ---: | ---: | --- | --- |",
+    ...report.productionDifficultyAudit.map(row => `| ${row.templateId} | ${row.generated}/${row.sampleSize} | ${row.unavailable} | ${row.levelCounts.map((count, index) => `${index + 1}: ${count}`).filter(entry => !entry.endsWith(": 0")).join(", ")} | ${row.humanTrace.complete} complete / ${row.generated} generated (${row.humanTrace.incomplete} incomplete) |`),
+    ...(report.productionDifficultyAudit.length === 0 ? ["No progressive delivery results were collected."] : []),
     "",
     "## Targeted difficulty audit",
     "",
-    "| Template | Level | Exact target | No-guess trace | Fallbacks |",
-    "| --- | ---: | ---: | ---: | ---: |",
+    "| Template | Level | Exact target | No-guess trace | Fallback use | Fallback attempt p50 / p95 / max |",
+    "| --- | ---: | ---: | ---: | ---: | ---: |",
   ];
   for (const template of report.targetedDifficultyAudit) {
     for (const level of template.levels) {
-      lines.push(`| ${template.templateId} | ${level.requestedDifficultyLevel} | ${targetedExactCount(level)}/${level.generated} | ${level.humanTrace.complete}/${level.generated} | ${level.fallback.used}/${level.generated} (maximum attempt ${level.fallback.maximumAttempt}) |`);
+      const percentiles = level.fallback.attempts
+        ? `p50 ${level.fallback.attempts.p50}, p95 ${level.fallback.attempts.p95}`
+        : "p50 n/a, p95 n/a";
+      lines.push(`| ${template.templateId} | ${level.requestedDifficultyLevel} | ${targetedExactCount(level)}/${level.generated} | ${level.humanTrace.complete}/${level.generated} | ${level.fallback.used}/${level.generated} | ${percentiles}, max ${level.fallback.maximumAttempt} |`);
     }
   }
   if (report.targetedDifficultyAudit.length === 0) lines.push("No targeted difficulty results were collected.");
+  lines.push("Fallback attempt percentiles include only seeds that required fallback and use the nearest-rank definition.");
   lines.push(
     "",
     "## Semantic and logical calibration evidence",
