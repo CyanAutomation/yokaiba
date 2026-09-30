@@ -310,13 +310,13 @@ test("relational clues name the competitors without mid-sentence capitalization"
     assert.match(beforeClue.text, /competitor who finished 2nd.*competitor who finished 4th/i);
     assert.match(beforeClue.text, /(came before|was earlier than)/i);
     assert.doesNotMatch(beforeClue.text, /In the .*?, The competitor/);
-    assert.ok(rendered.some(clue => /positions of .*Tatami 4.*competitor who finished 3rd.*differed by exactly one/i.test(clue.text)));
+    assert.ok(rendered.some(clue => /competitor on Tatami 4.*competitor who finished 3rd.*exactly one place apart/i.test(clue.text)));
   }
 
   assert.deepEqual(coveredVariants, new Set(["before-0", "before-1"]));
 });
 
-test("ordered clue prose avoids a duplicated order word and states position differences explicitly", () => {
+test("ordered clue prose avoids a duplicated order word and states exact place distances", () => {
   const clues: Clue[] = [
     { id: "tatami-before", constraint: { kind: "before", left: { category: "tatami", value: "Tatami 2" }, right: { category: "tatami", value: "Tatami 1" } }, text: "" },
     { id: "weight-distance", constraint: { kind: "distance", left: { category: "weight", value: "-73 kg" }, right: { category: "tatami", value: "Tatami 1" }, distance: 3 }, text: "" },
@@ -326,8 +326,8 @@ test("ordered clue prose avoids a duplicated order word and states position diff
     const rendered = renderClues(tournamentOrderTemplate, seed, clues);
     assert.ok(rendered.every(clue => !/order order/i.test(clue.text)));
     const distance = rendered.find(clue => clue.id === "weight-distance")!;
-    assert.match(distance.text, /positions of .* -73 kg competitor.*competitor on Tatami 1.*differed by exactly three/i);
-    assert.doesNotMatch(distance.text, /positions? (?:away|from)|positions? separated/i);
+    assert.match(distance.text, /-73 kg competitor.*competitor on Tatami 1.*exactly three places apart/i);
+    assert.doesNotMatch(distance.text, /positions of .* differed by exactly/i);
   }
 });
 
