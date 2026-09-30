@@ -1,16 +1,19 @@
 import assert from "node:assert/strict";
-import { mkdtemp, rm } from "node:fs/promises";
+import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import test from "node:test";
 import { exhaustivePuzzleSolver } from "../src/constraints/solver.js";
 import { generatePuzzle } from "../src/generation/generator.js";
 import { tournamentOrderTemplate } from "../src/templates/tournament-order.js";
+import { tournamentOrderV2Template } from "../src/templates/tournament-order-v2.js";
+import type { Difficulty, PuzzleTemplate } from "../src/index.js";
 import {
   applyJevAnswers,
   applyJevPuzzleAnswers,
   aggregateSemanticCalibrationEvidence,
   assertCheckpointConfiguration,
+  checkpointTargetedDifficultyLevels,
   buildClueDecisionPayload,
   buildAuditMarkdown,
   buildPuzzleDecisionPayload,
@@ -18,9 +21,11 @@ import {
   markClueUnavailable,
   parseAuditArguments,
   puzzleReviewFlagReasons,
+  rebuildPuzzleReviewCorpus,
   readJevAnswerMap,
   readJevDecisionResponse,
   readAuditCheckpoint,
+  readJevAuditReport,
   requestJevDecisionBatch,
   SEMANTIC_ASSESSMENT_SCHEMA_VERSION,
   writeAuditCheckpoint,
@@ -76,6 +81,7 @@ test("audit arguments support shared and independent sample sizes and explicit r
     clueSamples: 10,
     batchSize: 20,
     outputBase: undefined,
+    puzzleReviewFrom: undefined,
     resume: false,
     puzzleReview: false,
   });
@@ -87,10 +93,14 @@ test("audit arguments support shared and independent sample sizes and explicit r
     clueSamples: 7,
     batchSize: 5,
     outputBase: "reports/run",
+    puzzleReviewFrom: undefined,
     resume: true,
     puzzleReview: false,
   });
   assert.equal(parseAuditArguments(["--puzzle-review"]).puzzleReview, true);
+  assert.equal(parseAuditArguments(["--puzzle-review-from", "reports/previous.json"]).puzzleReview, true);
+  assert.throws(() => parseAuditArguments(["--resume", "--out", "reports/run", "--puzzle-review-from", "reports/previous.json"]), /cannot be combined/);
+  assert.equal(parseAuditArguments(["--puzzle-review-from", "reports/previous.json"]).puzzleReviewFrom, "reports/previous.json");
   assert.throws(() => parseAuditArguments(["--resume"]), /--resume requires --out/);
   assert.throws(() => parseAuditArguments(["--clue-samples", "0"]), /positive integer/);
 });
@@ -156,15 +166,20 @@ test("audit Markdown reports targeted delivery, fallbacks, confidence, and incom
     generatedAt: "2026-09-29T00:01:00.000Z",
     configuration: { ...configuration, resolvedModel: "test-model" },
     difficultyAudit: [{
-      templateId: "test-template", modelVersion: "difficulty-v1", sampleSize: 1, seedPrefix: "seed",
+      templateId: "test-template", modelVersion: "difficulty-v1", sampleSize: 1, generated: 1, unavailable: 0, seedPrefix: "seed",
       levelCounts: [1, ...Array<number>(11).fill(0)], humanTrace: { complete: 1, incomplete: 0 },
       clues: { average: 4, minimum: 4, maximum: 4 },
+    }],
+    productionDifficultyAudit: [{
+      templateId: "test-template", modelVersion: "difficulty-v1", sampleSize: 1, generated: 0, unavailable: 1, seedPrefix: "seed",
+      levelCounts: Array<number>(12).fill(0), humanTrace: { complete: 0, incomplete: 0 },
+      clues: { average: 0, minimum: 0, maximum: 0 },
     }],
     targetedDifficultyAudit: [{
       templateId: "test-template", modelVersion: "difficulty-v1", sampleSize: 1, seedPrefix: "seed",
       levels: [{
         requestedDifficultyLevel: 1, generated: 1, assessedLevelCounts: [1, ...Array<number>(11).fill(0)],
-        humanTrace: { complete: 1, incomplete: 0 }, fallback: { used: 1, maximumAttempt: 3 },
+        humanTrace: { complete: 1, incomplete: 0 }, fallback: { used: 1, maximumAttempt: 3, attempts: { p50: 3, p95: 3 } },
         clues: { average: 4, minimum: 4, maximum: 4 },
       }],
     }],
@@ -182,25 +197,47 @@ test("audit Markdown reports targeted delivery, fallbacks, confidence, and incom
 
   const markdown = buildAuditMarkdown(report);
   assert.match(markdown, /Targeted difficulty audit/);
+  assert.match(markdown, /Raw generation distribution/);
+  assert.match(markdown, /Progressive delivery distribution/);
+  assert.match(markdown, /0\/1 \| 1 \|/);
   assert.match(markdown, /Fallback/);
-  assert.match(markdown, /maximum attempt 3/);
+  assert.match(markdown, /p50 3, p95 3, max 3/);
   assert.match(markdown, /Incomplete JEV evaluations/);
   assert.match(markdown, /faithful, readability/);
   assert.match(markdown, /confidence/i);
   assert.match(markdown, /Semantic and logical calibration evidence/);
   assert.match(markdown, /yokaiba-difficulty-v4/);
   assert.match(markdown, /probabilistic JEV assessments/);
+  const legacyReport: JevAuditReport = {
+    ...report,
+    targetedDifficultyAudit: report.targetedDifficultyAudit.map(template => ({
+      ...template,
+      levels: template.levels.map(level => ({
+        ...level,
+        fallback: { used: level.fallback.used, maximumAttempt: level.fallback.maximumAttempt },
+      })),
+    })),
+  };
+  assert.match(buildAuditMarkdown(legacyReport), /p50 n\/a, p95 n\/a, max 3/);
 });
 
 test("audit checkpoints round-trip atomically and reject mismatched run settings", async () => {
   const directory = await mkdtemp(join(tmpdir(), "jev-audit-test-"));
   const checkpointPath = join(directory, "audit.checkpoint.json");
   const checkpoint: AuditCheckpoint = {
-    version: 2,
+    version: 3,
     startedAt: "2026-09-29T00:00:00.000Z",
     configuration,
     difficultyAudit: [],
-    targetedDifficultyAudit: [],
+    productionDifficultyAudit: [],
+    targetedDifficultyAudit: [{
+      templateId: "test-template", modelVersion: "difficulty-v1", sampleSize: 1, seedPrefix: "seed",
+      levels: [{
+        requestedDifficultyLevel: 1, generated: 1, assessedLevelCounts: [1, ...Array<number>(11).fill(0)],
+        humanTrace: { complete: 1, incomplete: 0 }, fallback: { used: 0, maximumAttempt: 0, attempts: { p50: 0, p95: 0 } },
+        clues: { average: 4, minimum: 4, maximum: 4 },
+      }],
+    }],
     clues: [clue()],
     puzzles: [puzzle()],
     totalCost: 0,
@@ -213,6 +250,98 @@ test("audit checkpoints round-trip atomically and reject mismatched run settings
     assert.deepEqual(await readAuditCheckpoint(checkpointPath), checkpoint);
     assert.doesNotThrow(() => assertCheckpointConfiguration(checkpoint.configuration, configuration));
     assert.throws(() => assertCheckpointConfiguration(checkpoint.configuration, { ...configuration, clueSamples: 4 }), /does not match/);
+
+    const legacyCheckpoint = JSON.parse(JSON.stringify(checkpoint)) as Record<string, unknown>;
+    delete legacyCheckpoint.productionDifficultyAudit;
+    legacyCheckpoint.version = 2;
+    const legacyTargets = legacyCheckpoint.targetedDifficultyAudit as Array<Record<string, unknown>>;
+    for (const target of legacyTargets) {
+      const levels = target.levels as Array<Record<string, unknown>>;
+      for (const level of levels) {
+        const fallback = level.fallback as Record<string, unknown>;
+        delete fallback.attempts;
+      }
+    }
+    await writeFile(checkpointPath, `${JSON.stringify(legacyCheckpoint)}\n`);
+    const migrated = await readAuditCheckpoint(checkpointPath);
+    assert.equal(migrated?.version, 3);
+    assert.deepEqual(migrated?.productionDifficultyAudit, []);
+  } finally {
+    await rm(directory, { recursive: true, force: true });
+  }
+});
+
+test("targeted difficulty checkpoint resumes at the first unfinished level", async () => {
+  const directory = await mkdtemp(join(tmpdir(), "jev-level-checkpoint-test-"));
+  const checkpointPath = join(directory, "audit.checkpoint.json");
+  const checkpoint: AuditCheckpoint = {
+    version: 3,
+    startedAt: "2026-09-29T00:00:00.000Z",
+    configuration,
+    difficultyAudit: [],
+    productionDifficultyAudit: [],
+    targetedDifficultyAudit: [],
+    clues: [],
+    puzzles: [],
+    totalCost: 0,
+    resolvedModel: "test-model",
+    totalInputTokens: 0,
+    totalOutputTokens: 0,
+  };
+  const calls: number[] = [];
+  let interruptAtLevelThree = true;
+  const fakeAuditLevel = (_template: PuzzleTemplate, level: Difficulty["level"]) => {
+    calls.push(level);
+    if (interruptAtLevelThree && level === 3) throw new Error("simulated interruption");
+    const levelCounts = Array<number>(12).fill(0);
+    levelCounts[level - 1] = 1;
+    return {
+      modelVersion: "difficulty-v1",
+      level: {
+        requestedDifficultyLevel: level,
+        generated: 1,
+        assessedLevelCounts: levelCounts,
+        humanTrace: { complete: 1, incomplete: 0 },
+        fallback: { used: 0, maximumAttempt: 0, attempts: { p50: 0, p95: 0 } },
+        clues: { average: 4, minimum: 4, maximum: 4 },
+      },
+    };
+  };
+  try {
+    await writeAuditCheckpoint(checkpointPath, checkpoint);
+    await assert.rejects(
+      checkpointTargetedDifficultyLevels(checkpoint, checkpointPath, tournamentOrderV2Template, undefined, fakeAuditLevel),
+      /simulated interruption/,
+    );
+    assert.deepEqual(checkpoint.targetedDifficultyAudit[0]?.levels.map(level => level.requestedDifficultyLevel), [1, 2]);
+    calls.length = 0;
+    interruptAtLevelThree = false;
+    await checkpointTargetedDifficultyLevels(checkpoint, checkpointPath, tournamentOrderV2Template, undefined, fakeAuditLevel);
+    assert.deepEqual(calls, [3, 4]);
+    assert.deepEqual(checkpoint.targetedDifficultyAudit[0]?.levels.map(level => level.requestedDifficultyLevel), [1, 2, 3, 4]);
+  } finally {
+    await rm(directory, { recursive: true, force: true });
+  }
+});
+
+test("older JEV reports can be loaded for follow-up puzzle review", async () => {
+  const directory = await mkdtemp(join(tmpdir(), "jev-report-test-"));
+  const reportPath = join(directory, "audit.json");
+  const source: Record<string, unknown> = {
+    startedAt: "2026-09-29T00:00:00.000Z",
+    generatedAt: "2026-09-29T00:01:00.000Z",
+    configuration: { ...configuration, resolvedModel: "test-model" },
+    difficultyAudit: [],
+    targetedDifficultyAudit: [],
+    semanticCalibrationEvidence: [],
+    clueAudit: { model: "test-model", sampledClues: 0, totalCost: 0, totalInputTokens: 0, totalOutputTokens: 0, status: "complete", flaggedClues: [], incompleteClues: [], unavailableClues: [], clues: [] },
+    puzzleAudit: { enabled: false, sampledPuzzles: 0, completePuzzles: 0, incompletePuzzles: 0, unavailablePuzzles: 0, flaggedPuzzles: [], puzzles: [] },
+  };
+  try {
+    await writeFile(reportPath, `${JSON.stringify(source)}\n`);
+    const report = await readJevAuditReport(reportPath);
+    assert.deepEqual(report.productionDifficultyAudit, []);
+    assert.deepEqual(report.clueAudit.clues, []);
   } finally {
     await rm(directory, { recursive: true, force: true });
   }
@@ -260,6 +389,34 @@ test("optional puzzle review records language-versus-logic evidence without repl
   assert.equal(evidence[0]?.logicalDifficultyLevel, 3);
   assert.equal(evidence[0]?.semanticAssessment.readability, 2);
   assert.equal(evidence[0]?.puzzleReview?.linguisticDifficultyComparedToLogical, 1.8);
+});
+
+test("puzzle review rebuilds sampled puzzle clue sets from an earlier report", () => {
+  const sourceClue = { ...clue(), evaluationStatus: "complete" as const, evaluatedAt: "2026-09-29T00:00:00.000Z" };
+  const report: JevAuditReport = {
+    startedAt: "2026-09-29T00:00:00.000Z",
+    generatedAt: "2026-09-29T00:01:00.000Z",
+    configuration: { ...configuration, resolvedModel: "test-model" },
+    difficultyAudit: [],
+    productionDifficultyAudit: [],
+    targetedDifficultyAudit: [],
+    semanticCalibrationEvidence: [{
+      templateId: "test-template", seed: "seed-1", logicalDifficultyLevel: 3, difficultyModelVersion: "yokaiba-difficulty-v4",
+      semanticAssessment: { evaluatedClues: 1, totalClues: 1 },
+    }],
+    clueAudit: {
+      model: "test-model", sampledClues: 1, totalCost: 0, totalInputTokens: 0, totalOutputTokens: 0,
+      status: "complete", flaggedClues: [], incompleteClues: [], unavailableClues: [], clues: [sourceClue],
+    },
+    puzzleAudit: { enabled: false, sampledPuzzles: 0, completePuzzles: 0, incompletePuzzles: 0, unavailablePuzzles: 0, flaggedPuzzles: [], puzzles: [] },
+  };
+
+  const [rebuilt] = rebuildPuzzleReviewCorpus(report, { "test-template": "Test Order" });
+  assert.equal(rebuilt?.templateTitle, "Test Order");
+  assert.equal(rebuilt?.seed, "seed-1");
+  assert.equal(rebuilt?.logicalDifficultyLevel, 3);
+  assert.equal(rebuilt?.clues[0]?.text, sourceClue.text);
+  assert.equal(rebuilt?.evaluationStatus, "pending");
 });
 
 test("provider failure marks the semantic assessment unavailable without changing deterministic evidence", async () => {
