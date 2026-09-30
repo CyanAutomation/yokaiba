@@ -1,10 +1,12 @@
 import type { Difficulty, PuzzleTemplate } from "../domain/types.js";
-import { generatePuzzle, generatePuzzleAtDifficultyWithFallback } from "./generator.js";
+import { DifficultyUnavailableError, generateProgressivePuzzle, generatePuzzle, generatePuzzleAtDifficultyWithFallback } from "./generator.js";
 
 export interface DifficultyCorpusAudit {
   templateId: string;
   modelVersion: string;
   sampleSize: number;
+  generated: number;
+  unavailable: number;
   seedPrefix: string;
   levelCounts: number[];
   humanTrace: { complete: number; incomplete: number };
@@ -17,14 +19,21 @@ export interface TargetedDifficultyCorpusAudit {
   modelVersion: string;
   sampleSize: number;
   seedPrefix: string;
-  levels: Array<{
-    requestedDifficultyLevel: Difficulty["level"];
-    generated: number;
-    assessedLevelCounts: number[];
-    humanTrace: { complete: number; incomplete: number };
-    fallback: { used: number; maximumAttempt: number };
-    clues: { average: number; minimum: number; maximum: number };
-  }>;
+  levels: TargetedDifficultyLevelAudit[];
+}
+
+export interface TargetedDifficultyLevelAudit {
+  requestedDifficultyLevel: Difficulty["level"];
+  generated: number;
+  assessedLevelCounts: number[];
+  humanTrace: { complete: number; incomplete: number };
+  fallback: { used: number; maximumAttempt: number; attempts?: { p50: number; p95: number } };
+  clues: { average: number; minimum: number; maximum: number };
+}
+
+export interface TargetedDifficultyLevelResult {
+  modelVersion: string;
+  level: TargetedDifficultyLevelAudit;
 }
 
 export interface DifficultyAuditRecord {
@@ -82,25 +91,112 @@ export function auditDifficultyCorpus(template: PuzzleTemplate, options: { sampl
   const seedPrefix = options.seedPrefix ?? "difficulty-audit";
   if (!Number.isInteger(sampleSize) || sampleSize < 1) throw new RangeError("sampleSize must be a positive integer");
 
+  return auditCorpusWithGenerator(template, sampleSize, seedPrefix, generatePuzzle, options.onProgress);
+}
+
+/** Report the no-target generation distribution returned by the API's progressive path. */
+export function auditProductionDifficultyCorpus(template: PuzzleTemplate, options: { sampleSize?: number; seedPrefix?: string; onProgress?: DifficultyAuditProgressCallback } = {}): DifficultyCorpusAudit {
+  const sampleSize = options.sampleSize ?? template.metadata?.difficultyCalibration.corpus.sampleSize ?? 1_000;
+  const seedPrefix = options.seedPrefix ?? "difficulty-audit";
+  if (!Number.isInteger(sampleSize) || sampleSize < 1) throw new RangeError("sampleSize must be a positive integer");
+
+  return auditCorpusWithGenerator(template, sampleSize, seedPrefix, generateProgressivePuzzle, options.onProgress);
+}
+
+function auditCorpusWithGenerator(
+  template: PuzzleTemplate,
+  sampleSize: number,
+  seedPrefix: string,
+  generator: typeof generatePuzzle,
+  onProgress?: DifficultyAuditProgressCallback,
+): DifficultyCorpusAudit {
+
   const records: DifficultyAuditRecord[] = [];
   let modelVersion: string | undefined;
+  let unavailable = 0;
   for (let index = 0; index < sampleSize; index += 1) {
-    const puzzle = generatePuzzle(template, `${seedPrefix}-${index}`);
+    let puzzle: ReturnType<typeof generatePuzzle>;
+    try {
+      puzzle = generator(template, `${seedPrefix}-${index}`);
+    } catch (error) {
+      if (!(error instanceof DifficultyUnavailableError)) throw error;
+      unavailable += 1;
+      onProgress?.({ phase: "difficulty", templateId: template.id, completed: index + 1, total: sampleSize });
+      continue;
+    }
     modelVersion ??= puzzle.difficulty.modelVersion;
     records.push({
       level: puzzle.difficulty.level,
       humanTraceComplete: puzzle.difficulty.evidence.humanSolve.solved,
       clueCount: puzzle.clues.length,
     });
-    options.onProgress?.({ phase: "difficulty", templateId: template.id, completed: index + 1, total: sampleSize });
+    onProgress?.({ phase: "difficulty", templateId: template.id, completed: index + 1, total: sampleSize });
   }
+  const statistics: DifficultyCorpusStatistics = records.length > 0
+    ? aggregateDifficultyAuditRecords(records)
+    : { levelCounts: Array<number>(12).fill(0), humanTrace: { complete: 0, incomplete: 0 }, clues: { average: 0, minimum: 0, maximum: 0 } };
   return {
     templateId: template.id,
-    modelVersion: modelVersion!,
+    modelVersion: modelVersion ?? "unavailable",
     sampleSize,
+    generated: records.length,
+    unavailable,
     seedPrefix,
-    ...aggregateDifficultyAuditRecords(records),
+    ...statistics,
   };
+}
+
+/** Run one requested level independently so a caller can checkpoint between levels. */
+export function auditTargetedDifficultyLevel(
+  template: PuzzleTemplate,
+  requestedDifficultyLevel: Difficulty["level"],
+  options: { sampleSize?: number; seedPrefix?: string; onProgress?: DifficultyAuditProgressCallback } = {},
+): TargetedDifficultyLevelResult {
+  const sampleSize = options.sampleSize ?? template.metadata?.difficultyCalibration.corpus.sampleSize ?? 1_000;
+  const seedPrefix = options.seedPrefix ?? "targeted-difficulty-audit";
+  if (!Number.isInteger(sampleSize) || sampleSize < 1) throw new RangeError("sampleSize must be a positive integer");
+  const [minimumLevel, maximumLevel] = template.metadata?.difficultyCalibration.levelRange ?? [1, 12];
+  if (requestedDifficultyLevel < minimumLevel || requestedDifficultyLevel > maximumLevel) {
+    throw new RangeError(`${template.id} does not advertise difficulty level ${requestedDifficultyLevel}`);
+  }
+
+  const records: DifficultyAuditRecord[] = [];
+  const fallbackAttempts: number[] = [];
+  let modelVersion: string | undefined;
+  for (let index = 0; index < sampleSize; index += 1) {
+    const puzzle = generatePuzzleAtDifficultyWithFallback(template, `${seedPrefix}-${requestedDifficultyLevel}-${index}`, requestedDifficultyLevel);
+    modelVersion ??= puzzle.difficulty.modelVersion;
+    records.push({ level: puzzle.difficulty.level, humanTraceComplete: puzzle.difficulty.evidence.humanSolve.solved, clueCount: puzzle.clues.length });
+    options.onProgress?.({ phase: "targeted", templateId: template.id, requestedDifficultyLevel, completed: index + 1, total: sampleSize });
+    if (puzzle.seedFallbackAttempt !== undefined) fallbackAttempts.push(puzzle.seedFallbackAttempt);
+  }
+  const statistics = aggregateDifficultyAuditRecords(records);
+  return {
+    modelVersion: modelVersion!,
+    level: {
+      requestedDifficultyLevel,
+      generated: sampleSize,
+      assessedLevelCounts: statistics.levelCounts,
+      humanTrace: statistics.humanTrace,
+      fallback: {
+        used: fallbackAttempts.length,
+        maximumAttempt: fallbackAttempts.length > 0 ? Math.max(...fallbackAttempts) : 0,
+        attempts: fallbackAttemptPercentiles(fallbackAttempts),
+      },
+      clues: statistics.clues,
+    },
+  };
+}
+
+/** Summarize one-based fallback attempts with the nearest-rank percentile definition. */
+export function fallbackAttemptPercentiles(attempts: readonly number[]): { p50: number; p95: number } {
+  if (attempts.some(attempt => !Number.isInteger(attempt) || attempt < 1)) {
+    throw new RangeError("fallback attempts must be positive integers");
+  }
+  if (attempts.length === 0) return { p50: 0, p95: 0 };
+  const sorted = [...attempts].sort((left, right) => left - right);
+  const nearestRank = (percentile: number) => sorted[Math.ceil(percentile * sorted.length) - 1]!;
+  return { p50: nearestRank(0.5), p95: nearestRank(0.95) };
 }
 
 /**
@@ -113,24 +209,12 @@ export function auditTargetedDifficultyCorpus(template: PuzzleTemplate, options:
   const seedPrefix = options.seedPrefix ?? "targeted-difficulty-audit";
   if (!Number.isInteger(sampleSize) || sampleSize < 1) throw new RangeError("sampleSize must be a positive integer");
   const [minimumLevel, maximumLevel] = template.metadata?.difficultyCalibration.levelRange ?? [1, 12];
-  let modelVersion: string | undefined;
-  const levels = Array.from({ length: maximumLevel - minimumLevel + 1 }, (_value, offset) => {
-    const requestedDifficultyLevel = (minimumLevel + offset) as Difficulty["level"];
-    const records: DifficultyAuditRecord[] = [];
-    let fallbackUsed = 0;
-    let maximumAttempt = 0;
-    for (let index = 0; index < sampleSize; index += 1) {
-      const puzzle = generatePuzzleAtDifficultyWithFallback(template, `${seedPrefix}-${requestedDifficultyLevel}-${index}`, requestedDifficultyLevel);
-      modelVersion ??= puzzle.difficulty.modelVersion;
-      records.push({ level: puzzle.difficulty.level, humanTraceComplete: puzzle.difficulty.evidence.humanSolve.solved, clueCount: puzzle.clues.length });
-      options.onProgress?.({ phase: "targeted", templateId: template.id, requestedDifficultyLevel, completed: index + 1, total: sampleSize });
-      if (puzzle.seedFallbackAttempt !== undefined) {
-        fallbackUsed += 1;
-        maximumAttempt = Math.max(maximumAttempt, puzzle.seedFallbackAttempt);
-      }
-    }
-    const statistics = aggregateDifficultyAuditRecords(records);
-    return { requestedDifficultyLevel, generated: sampleSize, assessedLevelCounts: statistics.levelCounts, humanTrace: statistics.humanTrace, fallback: { used: fallbackUsed, maximumAttempt }, clues: statistics.clues };
-  });
+  const results = Array.from({ length: maximumLevel - minimumLevel + 1 }, (_value, offset) => auditTargetedDifficultyLevel(
+    template,
+    (minimumLevel + offset) as Difficulty["level"],
+    { sampleSize, seedPrefix, onProgress: options.onProgress },
+  ));
+  const modelVersion = results[0]?.modelVersion;
+  const levels = results.map(result => result.level);
   return { templateId: template.id, modelVersion: modelVersion!, sampleSize, seedPrefix, levels };
 }
