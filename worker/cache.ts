@@ -8,8 +8,8 @@ export interface GeneratedPuzzleCacheEntry {
 }
 
 const GENERATED_PUZZLE_CACHE_TTL_MS = 300_000;
-export const MAX_GENERATED_PUZZLE_CACHE_ENTRIES = 128;
-export const MAX_GENERATED_PUZZLE_CACHE_BODY_BYTES = 16 * 1024 * 1024;
+const MAX_GENERATED_PUZZLE_CACHE_ENTRIES = 128;
+const MAX_GENERATED_PUZZLE_CACHE_BODY_BYTES = 16 * 1024 * 1024;
 
 /** An LRU cache that owns both entry-count and cached-body byte accounting. */
 export class GeneratedPuzzleCache {
@@ -78,7 +78,7 @@ export class GeneratedPuzzleCache {
   }
 }
 
-export function responseFromGeneratedPuzzleSnapshot(entry: GeneratedPuzzleCacheEntry): Response {
+function responseFromGeneratedPuzzleSnapshot(entry: GeneratedPuzzleCacheEntry): Response {
   const headers = new Headers(entry.headers.map(([name, value]) => [name, value]));
   headers.set("etag", entry.etag);
   return new Response(entry.body.slice(0), {
@@ -159,7 +159,7 @@ export async function cacheGeneratedPuzzle(cache: GeneratedPuzzleCache, key: str
   return responseFromGeneratedPuzzleSnapshot(entry);
 }
 
-export async function contentEtag(response: Response): Promise<string> {
+async function contentEtag(response: Response): Promise<string> {
   return contentEtagFromBytes(await response.clone().arrayBuffer());
 }
 

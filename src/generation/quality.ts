@@ -73,73 +73,97 @@ export function isClueTextReadable(text: string): boolean {
   return Boolean(text.trim()) && !/\b(undefined|null)\b/i.test(text);
 }
 
+type DirectConstraint = Extract<Clue["constraint"], { kind: "matches" | "notMatches" }>;
+type RelationalConstraint = Exclude<Clue["constraint"], DirectConstraint>;
+type PossibleRows = Map<string, Array<Set<string>>>;
+
+function applyDirectConstraint(constraint: DirectConstraint, baseValues: readonly string[], possible: PossibleRows): boolean {
+  const row = baseValues.indexOf(constraint.subject);
+  const cells = possible.get(constraint.category)!;
+  if (constraint.kind === "matches") {
+    if (cells[row].size === 1 && cells[row].has(constraint.value)) return false;
+    cells[row] = new Set([constraint.value]);
+    return true;
+  }
+  return cells[row].delete(constraint.value);
+}
+
+function rowsForTerm(categoryId: string, value: string, baseCategory: string, baseValues: readonly string[], possible: PossibleRows): number[] {
+  if (categoryId === baseCategory) {
+    const row = baseValues.indexOf(value);
+    return row < 0 ? [] : [row];
+  }
+  const cells = possible.get(categoryId);
+  if (!cells) return [];
+  return cells.flatMap((cell, row) => cell.has(value) ? [row] : []);
+}
+
+function removeTermFromRows(categoryId: string, value: string, disallowedRows: Set<number>, baseCategory: string, possible: PossibleRows): boolean {
+  if (categoryId === baseCategory) return false;
+  const cells = possible.get(categoryId)!;
+  let changed = false;
+  for (const row of disallowedRows) changed = cells[row].delete(value) || changed;
+  return changed;
+}
+
+function satisfiesRelationship(constraint: RelationalConstraint, left: number, right: number): boolean {
+  switch (constraint.kind) {
+    case "before": return left < right;
+    case "sameRow": return left === right;
+    case "distance": return Math.abs(left - right) === constraint.distance;
+    case "adjacent": return Math.abs(left - right) === 1;
+  }
+}
+
+function applyRelationalConstraint(constraint: RelationalConstraint, baseCategory: string, baseValues: readonly string[], possible: PossibleRows): boolean {
+  const leftRows = rowsForTerm(constraint.left.category, constraint.left.value, baseCategory, baseValues, possible);
+  const rightRows = rowsForTerm(constraint.right.category, constraint.right.value, baseCategory, baseValues, possible);
+  const satisfies = (left: number, right: number) => satisfiesRelationship(constraint, left, right);
+  const leftDisallowed = new Set(leftRows.filter(left => !rightRows.some(right => satisfies(left, right))));
+  const rightDisallowed = new Set(rightRows.filter(right => !leftRows.some(left => satisfies(left, right))));
+  const leftChanged = removeTermFromRows(constraint.left.category, constraint.left.value, leftDisallowed, baseCategory, possible);
+  const rightChanged = removeTermFromRows(constraint.right.category, constraint.right.value, rightDisallowed, baseCategory, possible);
+  return leftChanged || rightChanged;
+}
+
+function applyDeduction(clue: Clue, spec: PuzzleSpec, baseValues: readonly string[], possible: PossibleRows): boolean {
+  const constraint = clue.constraint;
+  if (constraint.kind === "matches" || constraint.kind === "notMatches") return applyDirectConstraint(constraint, baseValues, possible);
+  return applyRelationalConstraint(constraint, spec.baseCategory, baseValues, possible);
+}
+
+function propagateAllDifferent(baseValues: readonly string[], possible: PossibleRows): boolean {
+  let changed = false;
+  for (const cells of possible.values()) {
+    const assigned = new Set(cells.filter(cell => cell.size === 1).map(cell => [...cell][0]));
+    for (const cell of cells) if (cell.size > 1) for (const value of assigned) changed = cell.delete(value) || changed;
+    const remainingValues = baseValues.flatMap((_baseValue, row) => [...cells[row]]);
+    for (const value of remainingValues) {
+      const possibleRows = cells.flatMap((cell, row) => cell.has(value) ? [row] : []);
+      if (possibleRows.length === 1 && cells[possibleRows[0]].size > 1) {
+        cells[possibleRows[0]] = new Set([value]);
+        changed = true;
+      }
+    }
+  }
+  return changed;
+}
+
 /** A no-guess human model using direct, all-different, ordering, and adjacency elimination. */
 export function evaluateHumanDeductionTrace(spec: PuzzleSpec, clues: readonly Clue[]): PuzzleQuality["humanSolve"] {
   const base = spec.categories.find(category => category.id === spec.baseCategory)!;
-  const possible = new Map<string, Array<Set<string>>>();
+  const possible: PossibleRows = new Map();
   for (const category of spec.categories) if (category.id !== spec.baseCategory) possible.set(category.id, base.values.map(() => new Set(category.values)));
   const totalCost = clues.reduce((total, clue) => total + COST[clue.constraint.kind], 0);
   const hardestStep = clues.reduce((hardest, clue) => Math.max(hardest, COST[clue.constraint.kind]), 0);
-
-  const termRows = (categoryId: string, value: string) => {
-    if (categoryId === spec.baseCategory) {
-      const row = base.values.indexOf(value);
-      return row < 0 ? [] : [row];
-    }
-    const cells = possible.get(categoryId);
-    if (!cells) return [];
-    return cells.flatMap((cell, row) => cell.has(value) ? [row] : []);
-  };
-  const removeTermRows = (categoryId: string, value: string, disallowedRows: Set<number>) => {
-    if (categoryId === spec.baseCategory) return false;
-    const cells = possible.get(categoryId)!;
-    let changed = false;
-    for (const row of disallowedRows) changed = cells[row].delete(value) || changed;
-    return changed;
-  };
 
   let changed = true;
   let deductionPasses = 0;
   while (changed) {
     deductionPasses += 1;
     changed = false;
-    for (const clue of clues) {
-      const constraint = clue.constraint;
-      if (constraint.kind === "matches" || constraint.kind === "notMatches") {
-        const row = base.values.indexOf(constraint.subject);
-        const cells = possible.get(constraint.category)!;
-        if (constraint.kind === "matches" && (cells[row].size !== 1 || !cells[row].has(constraint.value))) {
-          cells[row] = new Set([constraint.value]);
-          changed = true;
-        }
-        if (constraint.kind === "notMatches") changed = cells[row].delete(constraint.value) || changed;
-        continue;
-      }
-      const leftRows = termRows(constraint.left.category, constraint.left.value);
-      const rightRows = termRows(constraint.right.category, constraint.right.value);
-      const satisfies = constraint.kind === "before"
-        ? (left: number, right: number) => left < right
-        : constraint.kind === "sameRow"
-          ? (left: number, right: number) => left === right
-          : constraint.kind === "distance"
-            ? (left: number, right: number) => Math.abs(left - right) === constraint.distance
-            : (left: number, right: number) => Math.abs(left - right) === 1;
-      changed = removeTermRows(constraint.left.category, constraint.left.value,
-        new Set(leftRows.filter(left => !rightRows.some(right => satisfies(left, right))))) || changed;
-      changed = removeTermRows(constraint.right.category, constraint.right.value,
-        new Set(rightRows.filter(right => !leftRows.some(left => satisfies(left, right))))) || changed;
-    }
-    for (const cells of possible.values()) {
-      const assigned = new Set(cells.filter(cell => cell.size === 1).map(cell => [...cell][0]));
-      for (const cell of cells) if (cell.size > 1) for (const value of assigned) changed = cell.delete(value) || changed;
-      for (const value of base.values.map((_baseValue, row) => [...cells[row]]).flat()) {
-        const possibleRows = cells.flatMap((cell, row) => cell.has(value) ? [row] : []);
-        if (possibleRows.length === 1 && cells[possibleRows[0]].size > 1) {
-          cells[possibleRows[0]] = new Set([value]);
-          changed = true;
-        }
-      }
-    }
+    for (const clue of clues) changed = applyDeduction(clue, spec, base.values, possible) || changed;
+    changed = propagateAllDifferent(base.values, possible) || changed;
   }
   return { solved: [...possible.values()].every(cells => cells.every(cell => cell.size === 1)), usedGuessing: false as const, totalCost, hardestStep, deductionPasses };
 }
