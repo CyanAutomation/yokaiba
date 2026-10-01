@@ -360,6 +360,46 @@ test("targeted difficulty never substitutes a different seed", () => {
   assert.throws(() => generatePuzzleAtDifficulty(twoRowTemplate, "strict-seed", 5), DifficultyUnavailableError);
 });
 
+test("seed fallback reuses a valid target puzzle without an expensive strategy search", () => {
+  const requestedSeed = "codex-audit-20260930-b4c2";
+  let solverCalls = 0;
+  const solver: PuzzleSolver = {
+    version: exhaustivePuzzleSolver.version,
+    solve: (...args) => exhaustivePuzzleSolver.solve(...args),
+    countSolutions: (...args) => {
+      solverCalls += 1;
+      return exhaustivePuzzleSolver.countSolutions(...args);
+    },
+  };
+
+  const puzzle = generatePuzzleAtDifficultyWithFallback(openDivisionTemplate, requestedSeed, 5, solver);
+
+  assert.equal(puzzle.seed, requestedSeed);
+  assert.equal(puzzle.difficulty.level, 5);
+  assert.equal(puzzle.difficulty.evidence.humanSolve.solved, true);
+  assert.ok(solverCalls < 500, `expected a bounded puzzle search, saw ${solverCalls} solver calls`);
+});
+
+test("seed fallback skips off-target guess-only candidates without retargeting each one", () => {
+  const requestedSeed = "codex-audit-20260930-a7f3-open";
+  let solverCalls = 0;
+  const solver: PuzzleSolver = {
+    version: exhaustivePuzzleSolver.version,
+    solve: (...args) => exhaustivePuzzleSolver.solve(...args),
+    countSolutions: (...args) => {
+      solverCalls += 1;
+      return exhaustivePuzzleSolver.countSolutions(...args);
+    },
+  };
+
+  const puzzle = generatePuzzleAtDifficultyWithFallback(openDivisionTemplate, requestedSeed, 5, solver);
+
+  assert.equal(puzzle.difficulty.level, 5);
+  assert.equal(puzzle.difficulty.evidence.humanSolve.solved, true);
+  assert.equal(puzzle.seedFallbackAttempt, 1);
+  assert.ok(solverCalls < 500, `expected fallback to skip off-target candidates cheaply, saw ${solverCalls} solver calls`);
+});
+
 test("the beginner curriculum can generate every calibrated difficulty from one seed", () => {
   for (const level of [1, 2, 3, 4] as const) {
     const puzzle = generatePuzzleAtDifficulty(tournamentOrderTemplate, "curriculum-ready", level);
@@ -436,6 +476,7 @@ test("targeted corpus audits prove every requested course level rather than samp
 
 test("fallback bounds dense strategy search to protect production CPU while compact boards retain full search", () => {
   assert.equal(difficultyStrategyLimitForFallback(tournamentOrderV2Template), 64);
+  assert.equal(difficultyStrategyLimitForFallback(openDivisionTemplate), 8);
   assert.equal(difficultyStrategyLimitForFallback(championshipCircuitTemplate), 8);
 });
 
