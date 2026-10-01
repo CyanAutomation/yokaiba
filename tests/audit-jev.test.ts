@@ -105,6 +105,49 @@ test("audit arguments support shared and independent sample sizes and explicit r
   assert.throws(() => parseAuditArguments(["--clue-samples", "0"]), /positive integer/);
 });
 
+test("audit arguments reject unknown, positional, missing, and malformed options", () => {
+  for (const args of [
+    ["unexpected"],
+    ["--unknown", "value"],
+    ["--samples"],
+    ["--out", "--resume"],
+    ["--batch-size", "1.5"],
+    ["--difficulty-samples", "-1"],
+    ["--puzzle-review-from"],
+  ]) {
+    assert.throws(() => parseAuditArguments(args));
+  }
+});
+
+test("JEV decision requests send the structured payload and normalize the provider response", async () => {
+  let capturedUrl = "";
+  let capturedInit: RequestInit | undefined;
+  const result = await requestJevDecisionBatch(
+    "test-secret",
+    buildClueDecisionPayload("test-model", [clue()]),
+    "https://example.test/decisions",
+    async (input, init) => {
+      capturedUrl = String(input);
+      capturedInit = init;
+      return new Response(JSON.stringify({
+        model: "resolved-model",
+        answers: { "0_readability": { score: 1.8 } },
+        usage: { prompt_tokens: 14, completion_tokens: 6 },
+      }), { status: 200, headers: { "content-type": "application/json" } });
+    },
+  );
+
+  assert.equal(capturedUrl, "https://example.test/decisions");
+  assert.equal(capturedInit?.method, "POST");
+  assert.equal(new Headers(capturedInit?.headers).get("authorization"), "Bearer test-secret");
+  assert.equal(JSON.parse(String(capturedInit?.body)).model, "test-model");
+  assert.deepEqual(result, {
+    model: "resolved-model",
+    answers: { "0_readability": { score: 1.8 } },
+    usage: { inputTokens: 14, outputTokens: 6 },
+  });
+});
+
 test("JEV answers preserve confidence and report incomplete metrics without inventing flags", () => {
   const partial = applyJevAnswers(clue(), {
     "0_faithful": { noul: 0.4, confidence: 0.91 },

@@ -105,6 +105,18 @@ function compileConstraints(spec: PuzzleSpec, clues: readonly Clue[]): CompiledC
     };
   };
   const requirements = (...categoryIds: string[]) => [...new Set(categoryIds.filter(categoryId => categoryId !== base.id))];
+  const relation = (
+    left: { category: string; value: string },
+    right: { category: string; value: string },
+    satisfies: (leftPosition: number, rightPosition: number) => boolean,
+  ): CompiledConstraint => {
+    const leftPosition = position(left.category, left.value);
+    const rightPosition = position(right.category, right.value);
+    return {
+      requiredCategories: requirements(left.category, right.category),
+      satisfies: assignments => satisfies(leftPosition(assignments), rightPosition(assignments)),
+    };
+  };
 
   return clues.map(({ constraint }) => {
     switch (constraint.kind) {
@@ -118,38 +130,12 @@ function compileConstraints(spec: PuzzleSpec, clues: readonly Clue[]): CompiledC
         const valuePosition = position(constraint.category, constraint.value);
         return { requiredCategories: requirements(constraint.category), satisfies: assignments => subjectPosition(assignments) !== valuePosition(assignments) };
       }
-      case "before": {
-        const leftPosition = position(constraint.left.category, constraint.left.value);
-        const rightPosition = position(constraint.right.category, constraint.right.value);
-        return {
-          requiredCategories: requirements(constraint.left.category, constraint.right.category),
-          satisfies: assignments => leftPosition(assignments) < rightPosition(assignments),
-        };
-      }
-      case "adjacent": {
-        const leftPosition = position(constraint.left.category, constraint.left.value);
-        const rightPosition = position(constraint.right.category, constraint.right.value);
-        return {
-          requiredCategories: requirements(constraint.left.category, constraint.right.category),
-          satisfies: assignments => Math.abs(leftPosition(assignments) - rightPosition(assignments)) === 1,
-        };
-      }
-      case "sameRow": {
-        const leftPosition = position(constraint.left.category, constraint.left.value);
-        const rightPosition = position(constraint.right.category, constraint.right.value);
-        return {
-          requiredCategories: requirements(constraint.left.category, constraint.right.category),
-          satisfies: assignments => leftPosition(assignments) === rightPosition(assignments),
-        };
-      }
+      case "before": return relation(constraint.left, constraint.right, (left, right) => left < right);
+      case "adjacent": return relation(constraint.left, constraint.right, (left, right) => Math.abs(left - right) === 1);
+      case "sameRow": return relation(constraint.left, constraint.right, (left, right) => left === right);
       case "distance": {
         if (!Number.isInteger(constraint.distance) || constraint.distance < 1) throw new Error("distance clues require a positive integer distance");
-        const leftPosition = position(constraint.left.category, constraint.left.value);
-        const rightPosition = position(constraint.right.category, constraint.right.value);
-        return {
-          requiredCategories: requirements(constraint.left.category, constraint.right.category),
-          satisfies: assignments => Math.abs(leftPosition(assignments) - rightPosition(assignments)) === constraint.distance,
-        };
+        return relation(constraint.left, constraint.right, (left, right) => Math.abs(left - right) === constraint.distance);
       }
     }
   });

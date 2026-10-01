@@ -3,8 +3,33 @@ import test from "node:test";
 
 // @ts-expect-error The deployment scripts are intentionally plain JavaScript entry points.
 import { waitForExpectedDeployment } from "../scripts/deployment-probe.mjs";
+// @ts-expect-error The deployment configuration helper is a plain JavaScript entry point.
+import { readDeploymentConfig } from "../scripts/deployment-config.mjs";
 
 const expected = { expectedBuildVersion: "1.2.3", expectedBuildSha: "abc123" };
+
+test("deployment configuration validates required metadata and returns a canonical origin", () => {
+  assert.deepEqual(readDeploymentConfig({
+    DEPLOYMENT_URL: "https://yokaiba.example/",
+    EXPECTED_BUILD_VERSION: "1.2.3",
+    EXPECTED_BUILD_SHA: "abc123",
+  }), {
+    baseUrl: new URL("https://yokaiba.example/"),
+    expectedBuildVersion: "1.2.3",
+    expectedBuildSha: "abc123",
+  });
+  assert.throws(() => readDeploymentConfig({}), /DEPLOYMENT_URL must contain/);
+  assert.throws(() => readDeploymentConfig({ DEPLOYMENT_URL: "https://yokaiba.example" }), /EXPECTED_BUILD_SHA must contain/);
+  assert.throws(() => readDeploymentConfig({
+    DEPLOYMENT_URL: "https://yokaiba.example/path",
+    EXPECTED_BUILD_VERSION: "1.2.3",
+    EXPECTED_BUILD_SHA: "abc123",
+  }), /without a path, query, or fragment/);
+});
+
+test("deployment configuration preserves the health workflow's origin wording", () => {
+  assert.throws(() => readDeploymentConfig({}, "freshly deployed Worker origin"), /freshly deployed Worker origin/);
+});
 
 function health(version: string, sha: string, requestId: string) {
   return new Response(JSON.stringify({ status: "ok", build: { serviceVersion: version, buildSha: sha } }), {

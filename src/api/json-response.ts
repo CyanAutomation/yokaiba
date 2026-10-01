@@ -4,5 +4,3 @@ export function json(body: unknown, status = 200, headers?: HeadersInit) {
     headers: { "content-type": "application/json; charset=utf-8", ...(headers ?? {}) },
   });
 }
-
-export default json;
