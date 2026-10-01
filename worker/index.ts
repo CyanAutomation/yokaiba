@@ -281,16 +281,201 @@ function allowedOrigin(request: Request, hostnames: string[]) {
   try { return hostnames.includes(new URL(origin).hostname); } catch { return false; }
 }
 
+interface ProviderFailures {
+  rest: boolean;
+  verify: boolean;
+  mcpPreAuth: boolean;
+  mcp: boolean;
+  mcpGenerate: boolean;
+}
+
+interface RequestContext {
+  readonly startedAt: number;
+  readonly requestId: string;
+  readonly path: string;
+  readonly restRequest: boolean;
+  readonly responseCorsHeaders?: Record<string, string>;
+  rateLimitDecision?: RateLimitDecision;
+  rateLimitScope?: string;
+}
+
+function buildInfo(env: Env) {
+  return { serviceVersion: env.BUILD_VERSION ?? "0.1.0", buildSha: env.BUILD_SHA ?? "local" };
+}
+
+function configuredRestLimit(path: string, env: Env): string {
+  if (path === "/v1/puzzles/verify") return env.VERIFY_RATE_LIMIT ?? "10";
+  if (path === "/v1/puzzles/hint") return env.HINT_RATE_LIMIT ?? "10";
+  return env.REST_RATE_LIMIT ?? "60";
+}
+
+function finalizeResponse(response: Response, request: Request, env: Env, context: RequestContext): Response {
+  response.headers.set("x-request-id", context.requestId);
+  if (context.restRequest) {
+    const configuredLimit = configuredRestLimit(context.path, env);
+    response.headers.set("ratelimit-limit", configuredLimit);
+    response.headers.set("ratelimit-policy", `${configuredLimit};w=60`);
+    if (context.rateLimitDecision?.remaining !== undefined) response.headers.set("ratelimit-remaining", String(context.rateLimitDecision.remaining));
+    else if (response.status === 429) response.headers.set("ratelimit-remaining", "0");
+    if (context.rateLimitDecision?.resetAt !== undefined) response.headers.set("ratelimit-reset", String(context.rateLimitDecision.resetAt));
+  }
+  if (context.responseCorsHeaders) for (const [name, value] of Object.entries(context.responseCorsHeaders)) response.headers.set(name, value);
+  if (response.status === 429) console.log(JSON.stringify({ event: "rate_limited", requestId: context.requestId, path: context.path, scope: context.rateLimitScope ?? "unknown" }));
+  console.log(JSON.stringify({ event: "request", requestId: context.requestId, method: request.method, path: context.path, status: response.status, durationMs: Date.now() - context.startedAt }));
+  return response;
+}
+
+function tooManyRequests(): Response {
+  return new Response(JSON.stringify({ error: { code: "rate_limited", message: "Too many requests" } }), {
+    status: 429,
+    headers: { "content-type": "application/json; charset=utf-8", "retry-after": "60" },
+  });
+}
+
+function readinessResponse(env: Env, build: ReturnType<typeof buildInfo>, failures: ProviderFailures): Response {
+  return json({
+    status: "ready", build,
+    rateLimitProvider: env.REST_RATE_LIMITER && !failures.rest ? "configured" : "fallback",
+    verifyRateLimitProvider: env.VERIFY_RATE_LIMITER && !failures.verify ? "configured" : "fallback",
+    mcpPreAuthRateLimitProvider: env.MCP_PREAUTH_RATE_LIMITER && !failures.mcpPreAuth ? "configured" : "fallback",
+    mcpRateLimitProvider: env.MCP_RATE_LIMITER && !failures.mcp ? "configured" : "fallback",
+    mcpGenerateRateLimitProvider: env.MCP_GENERATE_RATE_LIMITER && !failures.mcpGenerate ? "configured" : "fallback",
+  });
+}
+
+async function staticRoute(path: string, request: Request, env: Env, build: ReturnType<typeof buildInfo>, failures: ProviderFailures): Promise<Response | undefined> {
+  if (path === "/") return new Response(null, { status: 302, headers: { location: new URL("/docs", request.url).toString(), "cache-control": "no-store" } });
+  if (path === "/healthz") return json({ status: "ok", build });
+  if (path === "/readyz") return readinessResponse(env, build, failures);
+  if (path === "/docs" || path === "/docs/") return swaggerUiResponse();
+  if (path === "/openapi/v1.yaml") return staticAsset(request, env, "/openapi/v1.yaml", "application/yaml; charset=utf-8");
+  return undefined;
+}
+
+function corsPreflight(request: Request, cors: Record<string, string> | undefined): Response {
+  const requestedMethod = request.headers.get("access-control-request-method");
+  const requestedHeaders = request.headers.get("access-control-request-headers")?.split(",").map(value => value.trim().toLowerCase()).filter(Boolean) ?? [];
+  if (!cors || !["GET", "POST"].includes(requestedMethod?.toUpperCase() ?? "") || requestedHeaders.some(header => header !== "content-type")) {
+    return json({ error: { code: "forbidden", message: "Origin is not allowed" } }, 403);
+  }
+  return new Response(null, { status: 204 });
+}
+
+interface RestRequestDependencies {
+  readonly options: WorkerOptions;
+  readonly cache: GeneratedPuzzleCache;
+  readonly inFlight: Map<string, Promise<Response>>;
+  readonly clock: () => number;
+  readonly build: ReturnType<typeof buildInfo>;
+}
+
+async function routeRestRequest(request: Request, path: string, env: Env, ctx: ExecutionContext, dependencies: RestRequestDependencies): Promise<Response> {
+  const route = () => path === "/v1/puzzles/generate" && dependencies.options.generatePuzzleResponse
+    ? dependencies.options.generatePuzzleResponse(request)
+    : createRestRouter(templates, { puzzleTokenSecret: env.PUZZLE_TOKEN_SECRET, ...dependencies.build })(request);
+  const cacheKey = request.method === "GET" && path === "/v1/puzzles/generate"
+    ? await generatedPuzzleCacheKey(request, env.PUZZLE_TOKEN_SECRET)
+    : undefined;
+  let response: Response;
+  if (!cacheKey) {
+    response = await route();
+  } else {
+    const cached = cachedGeneratedPuzzle(dependencies.cache, cacheKey, dependencies.clock());
+    if (cached) {
+      response = cached;
+    } else {
+      let generation = dependencies.inFlight.get(cacheKey);
+      if (!generation) {
+        generation = (async () => cacheGeneratedPuzzle(dependencies.cache, cacheKey, await route(), dependencies.clock()))();
+        dependencies.inFlight.set(cacheKey, generation);
+      }
+      try {
+        response = (await generation).clone();
+      } finally {
+        if (dependencies.inFlight.get(cacheKey) === generation) dependencies.inFlight.delete(cacheKey);
+      }
+    }
+  }
+  if (path === "/v1/puzzles/generate") observeDifficultyGeneration(response, ctx);
+  return cachePublicGet(response, request);
+}
+
+interface McpRequestDependencies {
+  readonly rateLimited: RateLimiter;
+  readonly failures: ProviderFailures;
+  readonly finish: (response: Response) => Response;
+  readonly setRateLimit: (scope: string, decision: RateLimitDecision) => boolean;
+}
+
+async function resolveMcpRateLimit(
+  request: Request,
+  provider: Env["MCP_RATE_LIMITER"] | undefined,
+  rawLimit: string | undefined,
+  scope: string,
+  rateLimited: RateLimiter,
+  onProviderFailure: () => void,
+  key?: string,
+): Promise<RateLimitDecision> {
+  return await providerRateLimitDecision(provider, request, onProviderFailure, key)
+    ?? asRateLimitDecision(rateLimited(request, rawLimit, scope));
+}
+
+async function authenticatedMcpPrincipal(request: Request, env: Env, finish: (response: Response) => Response): Promise<string | Response> {
+  const authenticatedApiKey = authenticatedMcpApiKey(request, env);
+  if (!configuredMcpApiKeys(env) || !env.MCP_ALLOWED_HOSTNAMES) return finish(json({ error: { code: "not_configured", message: "MCP credentials and allowed hosts are required" } }, 503));
+  if (!authenticatedApiKey) return finish(json({ error: { code: "unauthorized", message: "A valid API key is required" } }, 401));
+  const hostnames = env.MCP_ALLOWED_HOSTNAMES.split(",").map(value => value.trim()).filter(Boolean);
+  const rejectedHost = hostHeaderValidationResponse(request, hostnames);
+  if (rejectedHost) return finish(rejectedHost);
+  if (!allowedOrigin(request, hostnames)) return finish(json({ error: { code: "forbidden", message: "Origin is not allowed" } }, 403));
+  return `api-key:${await apiKeyFingerprint(authenticatedApiKey)}`;
+}
+
+async function routeMcpRequest(request: Request, env: Env, dependencies: McpRequestDependencies): Promise<Response> {
+  const preAuthDecision = await resolveMcpRateLimit(
+    request,
+    env.MCP_PREAUTH_RATE_LIMITER,
+    env.MCP_PREAUTH_RATE_LIMIT ?? env.MCP_RATE_LIMIT ?? "10",
+    "mcp-preauth",
+    dependencies.rateLimited,
+    () => { dependencies.failures.mcpPreAuth = true; },
+  );
+  if (dependencies.setRateLimit("mcp-preauth", preAuthDecision)) return dependencies.finish(tooManyRequests());
+
+  const principal = await authenticatedMcpPrincipal(request, env, dependencies.finish);
+  if (principal instanceof Response) return principal;
+  const principalLimit = await resolveMcpRateLimit(
+    request,
+    env.MCP_RATE_LIMITER,
+    env.MCP_RATE_LIMIT,
+    "mcp",
+    dependencies.rateLimited,
+    () => { dependencies.failures.mcp = true; },
+    `${principal}:mcp`,
+  );
+  if (dependencies.setRateLimit("mcp", principalLimit)) return dependencies.finish(tooManyRequests());
+
+  if (await mcpToolName(request) === "generate_puzzle") {
+    const generationLimit = await resolveMcpRateLimit(
+      request,
+      env.MCP_GENERATE_RATE_LIMITER,
+      env.MCP_GENERATE_RATE_LIMIT ?? "10",
+      "mcp-generate",
+      dependencies.rateLimited,
+      () => { dependencies.failures.mcpGenerate = true; },
+      `${principal}:generate_puzzle`,
+    );
+    if (dependencies.setRateLimit("mcp-generate", generationLimit)) return dependencies.finish(tooManyRequests());
+  }
+  return dependencies.finish(await mcp.fetch(request));
+}
+
 export function createWorker(options: WorkerOptions = {}) {
   const clock = options.clock ?? Date.now;
   const rateLimited = options.rateLimiter ?? createRateLimiter(options.localRateLimitStore, clock);
   const generatedPuzzleCache = options.generatedPuzzleCache ?? new GeneratedPuzzleCache();
   const generatedPuzzleRequests = new Map<string, Promise<Response>>();
-  let rateLimitProviderFailed = false;
-  let verifyRateLimitProviderFailed = false;
-  let mcpPreAuthRateLimitProviderFailed = false;
-  let mcpRateLimitProviderFailed = false;
-  let mcpGenerateRateLimitProviderFailed = false;
+  const failures: ProviderFailures = { rest: false, verify: false, mcpPreAuth: false, mcp: false, mcpGenerate: false };
   return {
     async fetch(request: Request, env: Env, ctx: ExecutionContext): Promise<Response> {
       const startedAt = Date.now();
@@ -305,141 +490,48 @@ export function createWorker(options: WorkerOptions = {}) {
         return response;
       }
       const restRequest = path.startsWith("/v1/");
-      const responseCorsHeaders = restRequest ? corsHeaders(request.headers.get("origin"), configuredOrigins(env.REST_ALLOWED_ORIGINS)) : undefined;
-      let rateLimitDecision: RateLimitDecision | undefined;
-      let rateLimitScope: string | undefined;
-      const finish = (response: Response) => {
-        response.headers.set("x-request-id", requestId);
-        if (restRequest) {
-          const configuredLimit = path === "/v1/puzzles/verify" ? env.VERIFY_RATE_LIMIT ?? "10" : path === "/v1/puzzles/hint" ? env.HINT_RATE_LIMIT ?? "10" : env.REST_RATE_LIMIT ?? "60";
-          response.headers.set("ratelimit-limit", configuredLimit);
-          response.headers.set("ratelimit-policy", `${configuredLimit};w=60`);
-          if (rateLimitDecision?.remaining !== undefined) response.headers.set("ratelimit-remaining", String(rateLimitDecision.remaining));
-          else if (response.status === 429) response.headers.set("ratelimit-remaining", "0");
-          if (rateLimitDecision?.resetAt !== undefined) response.headers.set("ratelimit-reset", String(rateLimitDecision.resetAt));
-        }
-        if (responseCorsHeaders) for (const [name, value] of Object.entries(responseCorsHeaders)) response.headers.set(name, value);
-        if (response.status === 429) console.log(JSON.stringify({ event: "rate_limited", requestId, path, scope: rateLimitScope ?? "unknown" }));
-        console.log(JSON.stringify({ event: "request", requestId, method: request.method, path, status: response.status, durationMs: Date.now() - startedAt }));
-        return response;
+      const context: RequestContext = {
+        startedAt,
+        requestId,
+        path,
+        restRequest,
+        responseCorsHeaders: restRequest ? corsHeaders(request.headers.get("origin"), configuredOrigins(env.REST_ALLOWED_ORIGINS)) : undefined,
       };
-      const build = { serviceVersion: env.BUILD_VERSION ?? "0.1.0", buildSha: env.BUILD_SHA ?? "local" };
-      if (path === "/") return finish(new Response(null, { status: 302, headers: { location: new URL("/docs", request.url).toString(), "cache-control": "no-store" } }));
-      if (path === "/healthz") return finish(json({ status: "ok", build }));
-      if (path === "/readyz") return finish(json({
-        status: "ready", build,
-        rateLimitProvider: env.REST_RATE_LIMITER && !rateLimitProviderFailed ? "configured" : "fallback",
-        verifyRateLimitProvider: env.VERIFY_RATE_LIMITER && !verifyRateLimitProviderFailed ? "configured" : "fallback",
-        mcpPreAuthRateLimitProvider: env.MCP_PREAUTH_RATE_LIMITER && !mcpPreAuthRateLimitProviderFailed ? "configured" : "fallback",
-        mcpRateLimitProvider: env.MCP_RATE_LIMITER && !mcpRateLimitProviderFailed ? "configured" : "fallback",
-        mcpGenerateRateLimitProvider: env.MCP_GENERATE_RATE_LIMITER && !mcpGenerateRateLimitProviderFailed ? "configured" : "fallback",
-      }));
-      if (path === "/docs" || path === "/docs/") return finish(swaggerUiResponse());
-      if (path === "/openapi/v1.yaml") return finish(await staticAsset(request, env, "/openapi/v1.yaml", "application/yaml; charset=utf-8"));
-      if (restRequest && request.method === "OPTIONS") {
-        const requestedMethod = request.headers.get("access-control-request-method");
-        const requestedHeaders = request.headers.get("access-control-request-headers")?.split(",").map(value => value.trim().toLowerCase()).filter(Boolean) ?? [];
-        if (!responseCorsHeaders || !["GET", "POST"].includes(requestedMethod?.toUpperCase() ?? "") || requestedHeaders.some(header => header !== "content-type")) return finish(json({ error: { code: "forbidden", message: "Origin is not allowed" } }, 403));
-        return finish(new Response(null, { status: 204 }));
+      const finish = (response: Response) => finalizeResponse(response, request, env, context);
+      const build = buildInfo(env);
+
+      const staticResponse = await staticRoute(path, request, env, build, failures);
+      if (staticResponse) return finish(staticResponse);
+      if (restRequest && request.method === "OPTIONS") return finish(corsPreflight(request, context.responseCorsHeaders));
+
+      if (restRequest) {
+        context.rateLimitDecision = await restRateLimitDecision(rateLimited, request, env,
+          () => { failures.rest = true; },
+          () => { failures.verify = true; });
+        context.rateLimitScope = path === "/v1/puzzles/verify" || path === "/v1/puzzles/hint" ? "protected-puzzle" : "rest";
+        if (context.rateLimitDecision.limited) return finish(tooManyRequests());
       }
-      if (restRequest) rateLimitDecision = await restRateLimitDecision(
-        rateLimited,
-        request,
-        env,
-        () => { rateLimitProviderFailed = true; },
-        () => { verifyRateLimitProviderFailed = true; },
-      );
-      if (restRequest) rateLimitScope = path === "/v1/puzzles/verify" || path === "/v1/puzzles/hint" ? "protected-puzzle" : "rest";
-      if (rateLimitDecision?.limited) {
-        return finish(new Response(JSON.stringify({ error: { code: "rate_limited", message: "Too many requests" } }), {
-          status: 429,
-          headers: { "content-type": "application/json; charset=utf-8", "retry-after": "60" },
-        }));
+
+      if (path === "/mcp") {
+        return routeMcpRequest(request, env, {
+          rateLimited,
+          failures,
+          finish,
+          setRateLimit: (scope, decision) => {
+            context.rateLimitScope = scope;
+            context.rateLimitDecision = decision;
+            return decision.limited;
+          },
+        });
       }
-      if (path !== "/mcp") {
-        const routeRequest = () => path === "/v1/puzzles/generate" && options.generatePuzzleResponse
-          ? options.generatePuzzleResponse(request)
-          : createRestRouter(templates, { puzzleTokenSecret: env.PUZZLE_TOKEN_SECRET, ...build })(request);
-        const cacheKey = request.method === "GET" && path === "/v1/puzzles/generate"
-          ? await generatedPuzzleCacheKey(request, env.PUZZLE_TOKEN_SECRET)
-          : undefined;
-        let responseForRequest: Response;
-        if (cacheKey) {
-          const cachedResponse = cachedGeneratedPuzzle(generatedPuzzleCache, cacheKey, clock());
-          if (cachedResponse) {
-            responseForRequest = cachedResponse;
-          } else {
-            let generation = generatedPuzzleRequests.get(cacheKey);
-            if (!generation) {
-              generation = (async () => cacheGeneratedPuzzle(
-                generatedPuzzleCache,
-                cacheKey,
-                await routeRequest(),
-                clock(),
-              ))();
-              generatedPuzzleRequests.set(cacheKey, generation);
-            }
-            try {
-              responseForRequest = (await generation).clone();
-            } finally {
-              if (generatedPuzzleRequests.get(cacheKey) === generation) generatedPuzzleRequests.delete(cacheKey);
-            }
-          }
-        } else {
-          responseForRequest = await routeRequest();
-        }
-        if (path === "/v1/puzzles/generate") observeDifficultyGeneration(responseForRequest, ctx);
-        return finish(await cachePublicGet(responseForRequest, request));
-      }
-      rateLimitScope = "mcp-preauth";
-      rateLimitDecision = await providerRateLimitDecision(
-        env.MCP_PREAUTH_RATE_LIMITER,
-        request,
-        () => { mcpPreAuthRateLimitProviderFailed = true; },
-      ) ?? asRateLimitDecision(rateLimited(request, env.MCP_PREAUTH_RATE_LIMIT ?? env.MCP_RATE_LIMIT ?? "10", "mcp-preauth"));
-      if (rateLimitDecision.limited) {
-        return finish(new Response(JSON.stringify({ error: { code: "rate_limited", message: "Too many requests" } }), {
-          status: 429,
-          headers: { "content-type": "application/json; charset=utf-8", "retry-after": "60" },
-        }));
-      }
-      const authenticatedApiKey = authenticatedMcpApiKey(request, env);
-      if (!configuredMcpApiKeys(env) || !env.MCP_ALLOWED_HOSTNAMES) return finish(json({ error: { code: "not_configured", message: "MCP credentials and allowed hosts are required" } }, 503));
-      if (!authenticatedApiKey) return finish(json({ error: { code: "unauthorized", message: "A valid API key is required" } }, 401));
-      const hostnames = env.MCP_ALLOWED_HOSTNAMES.split(",").map(value => value.trim()).filter(Boolean);
-      const rejectedHost = hostHeaderValidationResponse(request, hostnames);
-      if (rejectedHost) return finish(rejectedHost);
-      if (!allowedOrigin(request, hostnames)) return finish(json({ error: { code: "forbidden", message: "Origin is not allowed" } }, 403));
-      const principal = `api-key:${await apiKeyFingerprint(authenticatedApiKey)}`;
-      rateLimitScope = "mcp";
-      rateLimitDecision = await providerRateLimitDecision(
-        env.MCP_RATE_LIMITER,
-        request,
-        () => { mcpRateLimitProviderFailed = true; },
-        `${principal}:mcp`,
-      ) ?? asRateLimitDecision(rateLimited(request, env.MCP_RATE_LIMIT, "mcp"));
-      if (rateLimitDecision.limited) {
-        return finish(new Response(JSON.stringify({ error: { code: "rate_limited", message: "Too many requests" } }), {
-          status: 429,
-          headers: { "content-type": "application/json; charset=utf-8", "retry-after": "60" },
-        }));
-      }
-      if (await mcpToolName(request) === "generate_puzzle") {
-        rateLimitScope = "mcp-generate";
-        rateLimitDecision = await providerRateLimitDecision(
-          env.MCP_GENERATE_RATE_LIMITER,
-          request,
-          () => { mcpGenerateRateLimitProviderFailed = true; },
-          `${principal}:generate_puzzle`,
-        ) ?? asRateLimitDecision(rateLimited(request, env.MCP_GENERATE_RATE_LIMIT ?? "10", "mcp-generate"));
-        if (rateLimitDecision.limited) {
-          return finish(new Response(JSON.stringify({ error: { code: "rate_limited", message: "Too many requests" } }), {
-            status: 429,
-            headers: { "content-type": "application/json; charset=utf-8", "retry-after": "60" },
-          }));
-        }
-      }
-      return finish(await mcp.fetch(request));
+      const response = await routeRestRequest(request, path, env, ctx, {
+        options,
+        cache: generatedPuzzleCache,
+        inFlight: generatedPuzzleRequests,
+        clock,
+        build,
+      });
+      return finish(response);
     },
   } satisfies ExportedHandler<Env>;
 }
