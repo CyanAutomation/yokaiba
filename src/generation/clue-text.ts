@@ -26,8 +26,7 @@ function negativeResultAction(value: string) {
 function termSubject(categoryId: string, value: string) {
   if (categoryId === "weight") return `the ${value} competitor`;
   if (categoryId === "tatami") return `the competitor on ${value}`;
-  if (categoryId === "placing") return `the competitor who finished ${value}`;
-  if (categoryId === "result") return `the competitor who finished ${value}`;
+  if (categoryId === "placing" || categoryId === "result") return `the competitor who finished ${value}`;
   if (categoryId === "medal") return resultSubject(value);
   return `the competitor with ${value}`;
 }
@@ -35,8 +34,7 @@ function termSubject(categoryId: string, value: string) {
 function subjectAction(categoryId: string, value: string) {
   if (categoryId === "weight") return `fought in the ${value} division`;
   if (categoryId === "tatami") return `competed on ${value}`;
-  if (categoryId === "placing") return `finished in ${value} place`;
-  if (categoryId === "result") return `finished in ${value} place`;
+  if (categoryId === "placing" || categoryId === "result") return `finished in ${value} place`;
   if (categoryId === "medal") return resultAction(value);
   return `had ${value}`;
 }
@@ -62,47 +60,57 @@ function chooseVariant(seed: string, clue: Clue, count: number, previousFamily?:
   return index;
 }
 
-function renderConstraint(template: PuzzleTemplate, constraint: ClueConstraint, index: number): string {
-  if (constraint.kind === "matches") {
-    const action = subjectAction(constraint.category, constraint.value);
-    return `${constraint.subject} ${action}.`;
-  }
-  if (constraint.kind === "notMatches") {
-    const action = negativeAction(constraint.category, constraint.value);
-    return `${constraint.subject} did not ${action}.`;
-  }
-  if (constraint.kind === "sameRow") {
-    const subject = termSubject(constraint.left.category, constraint.left.value);
-    const action = subjectAction(constraint.right.category, constraint.right.value);
-    if (index === 0) return `${subject[0]!.toUpperCase()}${subject.slice(1)} ${action}.`;
-    if (constraint.right.category === "placing") return `${constraint.right.value} place went to ${subject}.`;
-    if (constraint.right.category === "tatami") return `${subject[0]!.toUpperCase()}${subject.slice(1)} was scheduled on ${constraint.right.value}.`;
-    if (constraint.right.category === "weight") return `${subject[0]!.toUpperCase()}${subject.slice(1)} competed in the ${constraint.right.value} division.`;
-    if (constraint.right.category === "medal") return `${subject[0]!.toUpperCase()}${subject.slice(1)} ${resultAction(constraint.right.value)}.`;
-    return `${subject[0]!.toUpperCase()}${subject.slice(1)} had ${constraint.right.value}.`;
-  }
-  if (constraint.kind === "before") {
-    const left = termSubject(constraint.left.category, constraint.left.value);
-    const right = termSubject(constraint.right.category, constraint.right.value);
-    return index === 0
-      ? `In the ${orderedContext(template).toLowerCase()}, ${left} came before ${right}.`
-      : `In the ${orderedContext(template).toLowerCase()}, ${left} was earlier than ${right}.`;
-  }
-  if (constraint.kind === "adjacent") {
-    const left = termSubject(constraint.left.category, constraint.left.value);
-    const right = termSubject(constraint.right.category, constraint.right.value);
-    return index === 0
-      ? `In the ${orderedContext(template).toLowerCase()}, ${left} and ${right} occupied consecutive positions.`
-      : `In the ${orderedContext(template).toLowerCase()}, ${left} was immediately next to ${right}.`;
-  }
+function renderSameRow(constraint: Extract<ClueConstraint, { kind: "sameRow" }>, index: number): string {
+  const subject = termSubject(constraint.left.category, constraint.left.value);
+  const capitalizedSubject = capitalise(subject);
+  const action = subjectAction(constraint.right.category, constraint.right.value);
+  if (index === 0) return `${capitalizedSubject} ${action}.`;
+  if (constraint.right.category === "placing") return `${constraint.right.value} place went to ${subject}.`;
+  if (constraint.right.category === "tatami") return `${capitalizedSubject} was scheduled on ${constraint.right.value}.`;
+  if (constraint.right.category === "weight") return `${capitalizedSubject} competed in the ${constraint.right.value} division.`;
+  if (constraint.right.category === "medal") return `${capitalizedSubject} ${resultAction(constraint.right.value)}.`;
+  return `${capitalizedSubject} had ${constraint.right.value}.`;
+}
+
+function orderedTerms(constraint: Extract<ClueConstraint, { kind: "before" | "adjacent" | "distance" }>) {
   const left = termSubject(constraint.left.category, constraint.left.value);
   const right = termSubject(constraint.right.category, constraint.right.value);
+  return { left, right };
+}
+
+function renderBefore(template: PuzzleTemplate, constraint: Extract<ClueConstraint, { kind: "before" }>, index: number): string {
+  const { left, right } = orderedTerms(constraint);
+  const relation = index === 0 ? `${left} came before ${right}` : `${left} was earlier than ${right}`;
+  return `In the ${orderedContext(template).toLowerCase()}, ${relation}.`;
+}
+
+function renderAdjacent(template: PuzzleTemplate, constraint: Extract<ClueConstraint, { kind: "adjacent" }>, index: number): string {
+  const { left, right } = orderedTerms(constraint);
+  const relation = index === 0
+    ? `${left} and ${right} occupied consecutive positions`
+    : `${left} was immediately next to ${right}`;
+  return `In the ${orderedContext(template).toLowerCase()}, ${relation}.`;
+}
+
+function renderDistance(template: PuzzleTemplate, constraint: Extract<ClueConstraint, { kind: "distance" }>, index: number): string {
+  const { left, right } = orderedTerms(constraint);
   const positionWords = ["zero", "one", "two", "three", "four"];
   const distance = positionWords[constraint.distance] ?? String(constraint.distance);
   const place = constraint.distance === 1 ? "place" : "places";
   return index === 0
     ? `In the ${orderedContext(template).toLowerCase()}, ${left} and ${right} were exactly ${distance} ${place} apart.`
     : `${left} and ${right} were exactly ${distance} ${place} apart in the ${orderedContext(template).toLowerCase()}.`;
+}
+
+function renderConstraint(template: PuzzleTemplate, constraint: ClueConstraint, index: number): string {
+  switch (constraint.kind) {
+    case "matches": return `${constraint.subject} ${subjectAction(constraint.category, constraint.value)}.`;
+    case "notMatches": return `${constraint.subject} did not ${negativeAction(constraint.category, constraint.value)}.`;
+    case "sameRow": return renderSameRow(constraint, index);
+    case "before": return renderBefore(template, constraint, index);
+    case "adjacent": return renderAdjacent(template, constraint, index);
+    case "distance": return renderDistance(template, constraint, index);
+  }
 }
 
 /** Render semantic constraints through a deterministic, bounded phrase catalogue. */

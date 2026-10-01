@@ -35,6 +35,7 @@ import {
   type AuditedClue,
   type AuditedPuzzle,
   type JevAuditReport,
+  type JevDecisionResponse,
   type JevRunConfiguration,
 } from "./audit-jev-support.js";
 
@@ -191,12 +192,7 @@ if (!sourceReport) {
     await writeAuditCheckpoint(checkpointPath, checkpoint);
     console.error(`checkpoint saved after raw difficulty template ${template.id}`);
   }
-  for (const template of templates) {
-    if (checkpoint.productionDifficultyAudit.some(row => row.templateId === template.id)) continue;
-    checkpoint.productionDifficultyAudit.push(auditProductionDifficultyCorpus(template, { sampleSize: configuration.difficultySamples, onProgress: reportAuditProgress }));
-    await writeAuditCheckpoint(checkpointPath, checkpoint);
-    console.error(`checkpoint saved after progressive difficulty template ${template.id}`);
-  }
+  await addMissingProductionDifficultyAudits(checkpoint);
   for (const template of targetedTemplates) {
     const priorLevels = new Set(checkpoint.targetedDifficultyAudit.find(row => row.templateId === template.id)?.levels.map(row => row.requestedDifficultyLevel) ?? []);
     await checkpointTargetedDifficultyLevels(checkpoint, checkpointPath, template, reportAuditProgress);
@@ -224,16 +220,30 @@ if (!sourceReport) {
     await writeAuditCheckpoint(checkpointPath, checkpoint);
   }
 } else if (checkpoint.productionDifficultyAudit.length < templates.length) {
+  await addMissingProductionDifficultyAudits(checkpoint);
+}
+
+if (checkpoint) {
+  await writeAuditCheckpoint(checkpointPath, checkpoint);
+}
+
+async function addMissingProductionDifficultyAudits(checkpoint: AuditCheckpoint): Promise<void> {
   for (const template of templates) {
     if (checkpoint.productionDifficultyAudit.some(row => row.templateId === template.id)) continue;
-    checkpoint.productionDifficultyAudit.push(auditProductionDifficultyCorpus(template, { sampleSize: configuration.difficultySamples, onProgress: reportAuditProgress }));
+    checkpoint.productionDifficultyAudit.push(auditProductionDifficultyCorpus(template, {
+      sampleSize: configuration.difficultySamples,
+      onProgress: reportAuditProgress,
+    }));
     await writeAuditCheckpoint(checkpointPath, checkpoint);
     console.error(`checkpoint saved after progressive difficulty template ${template.id}`);
   }
 }
 
-if (checkpoint) {
-  await writeAuditCheckpoint(checkpointPath, checkpoint);
+function accumulateResponseUsage(checkpoint: AuditCheckpoint, response: JevDecisionResponse): void {
+  checkpoint.resolvedModel = response.model ?? checkpoint.resolvedModel;
+  checkpoint.totalCost += response.usage.cost ?? 0;
+  checkpoint.totalInputTokens += response.usage.inputTokens ?? 0;
+  checkpoint.totalOutputTokens += response.usage.outputTokens ?? 0;
 }
 
 const totalBatches = Math.ceil(checkpoint.clues.length / configuration.batchSize);
@@ -246,10 +256,7 @@ try {
     const pending = batch.filter(clue => clue.evaluationStatus === "pending");
     if (pending.length === 0) continue;
     const response = await requestSemanticBatch(buildClueDecisionPayload(MODEL, pending));
-    checkpoint.resolvedModel = response.model ?? checkpoint.resolvedModel;
-    checkpoint.totalCost += response.usage.cost ?? 0;
-    checkpoint.totalInputTokens += response.usage.inputTokens ?? 0;
-    checkpoint.totalOutputTokens += response.usage.outputTokens ?? 0;
+    accumulateResponseUsage(checkpoint, response);
     for (const [index, clue] of pending.entries()) {
       checkpoint.clues[offset + batch.indexOf(clue)] = applyJevAnswers(clue, response.answers, index);
     }
@@ -263,10 +270,7 @@ try {
       const pending = batch.filter(puzzle => puzzle.evaluationStatus === "pending");
       if (pending.length === 0) continue;
       const response = await requestSemanticBatch(buildPuzzleDecisionPayload(MODEL, pending));
-      checkpoint.resolvedModel = response.model ?? checkpoint.resolvedModel;
-      checkpoint.totalCost += response.usage.cost ?? 0;
-      checkpoint.totalInputTokens += response.usage.inputTokens ?? 0;
-      checkpoint.totalOutputTokens += response.usage.outputTokens ?? 0;
+      accumulateResponseUsage(checkpoint, response);
       for (const [index, puzzle] of pending.entries()) {
         checkpoint.puzzles[offset + batch.indexOf(puzzle)] = applyJevPuzzleAnswers(puzzle, response.answers, index);
       }

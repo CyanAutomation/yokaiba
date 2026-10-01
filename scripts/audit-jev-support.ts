@@ -242,49 +242,67 @@ function optionalConfidence(answer: JevAnswer | undefined) {
   return finiteInRange(answer?.confidence, 0, 1) ? answer.confidence : undefined;
 }
 
+function readMetricAnswer(
+  answers: Record<string, JevAnswer | undefined>,
+  index: number,
+  metric: string,
+  field: "noul" | "score",
+  maximum: number,
+) {
+  const answer = answers[`${index}_${metric}`];
+  const value = answer?.[field];
+  return {
+    value: finiteInRange(value, 0, maximum) ? value : undefined,
+    confidence: optionalConfidence(answer),
+  };
+}
+
+function missingMetricNames(metrics: Record<string, { value: number | undefined }>): string[] {
+  return Object.entries(metrics).filter(([, metric]) => metric.value === undefined).map(([name]) => name);
+}
+
+function belowThreshold(value: number | undefined, threshold: number, label: string): string | undefined {
+  return value !== undefined && value < threshold ? `${label} below ${threshold.toFixed(2)}` : undefined;
+}
+
+function aboveThreshold(value: number | undefined, threshold: number, label: string): string | undefined {
+  return value !== undefined && value > threshold ? `${label} above ${threshold.toFixed(2)}` : undefined;
+}
+
 export function applyJevAnswers(
   clue: AuditedClue,
   answers: Record<string, JevAnswer | undefined>,
   index: number,
   evaluatedAt = new Date().toISOString(),
 ): AuditedClue {
-  const faithfulAnswer = answers[`${index}_faithful`];
-  const ambiguousAnswer = answers[`${index}_ambiguous`];
-  const readabilityAnswer = answers[`${index}_readability`];
-  const linguisticComplexityAnswer = answers[`${index}_linguisticComplexity`];
-  const relationshipExplicitnessAnswer = answers[`${index}_relationshipExplicitness`];
-  const faithful = finiteInRange(faithfulAnswer?.noul, 0, 1) ? faithfulAnswer.noul : undefined;
-  const ambiguous = finiteInRange(ambiguousAnswer?.noul, 0, 1) ? ambiguousAnswer.noul : undefined;
-  const readability = finiteInRange(readabilityAnswer?.score, 0, 2) ? readabilityAnswer.score : undefined;
-  const linguisticComplexity = finiteInRange(linguisticComplexityAnswer?.score, 0, 2) ? linguisticComplexityAnswer.score : undefined;
-  const relationshipExplicitness = finiteInRange(relationshipExplicitnessAnswer?.score, 0, 2) ? relationshipExplicitnessAnswer.score : undefined;
-  const missingAnswers = [
-    faithful === undefined ? "faithful" : undefined,
-    ambiguous === undefined ? "ambiguous" : undefined,
-    readability === undefined ? "readability" : undefined,
-    linguisticComplexity === undefined ? "linguisticComplexity" : undefined,
-    relationshipExplicitness === undefined ? "relationshipExplicitness" : undefined,
-  ].filter((value): value is string => value !== undefined);
+  const metrics = {
+    faithful: readMetricAnswer(answers, index, "faithful", "noul", 1),
+    ambiguous: readMetricAnswer(answers, index, "ambiguous", "noul", 1),
+    readability: readMetricAnswer(answers, index, "readability", "score", 2),
+    linguisticComplexity: readMetricAnswer(answers, index, "linguisticComplexity", "score", 2),
+    relationshipExplicitness: readMetricAnswer(answers, index, "relationshipExplicitness", "score", 2),
+  };
+  const missingAnswers = missingMetricNames(metrics);
   const flagReasons = [
-    faithful !== undefined && faithful < JEV_REVIEW_THRESHOLDS.faithfulnessBelow ? `faithfulness below ${JEV_REVIEW_THRESHOLDS.faithfulnessBelow.toFixed(2)}` : undefined,
-    ambiguous !== undefined && ambiguous > JEV_REVIEW_THRESHOLDS.ambiguityAbove ? `ambiguity above ${JEV_REVIEW_THRESHOLDS.ambiguityAbove.toFixed(2)}` : undefined,
-    readability !== undefined && readability < JEV_REVIEW_THRESHOLDS.readabilityBelow ? `readability below ${JEV_REVIEW_THRESHOLDS.readabilityBelow.toFixed(2)}` : undefined,
-    linguisticComplexity !== undefined && linguisticComplexity > JEV_REVIEW_THRESHOLDS.linguisticComplexityAbove ? `linguistic complexity above ${JEV_REVIEW_THRESHOLDS.linguisticComplexityAbove.toFixed(2)}` : undefined,
-    relationshipExplicitness !== undefined && relationshipExplicitness < JEV_REVIEW_THRESHOLDS.relationshipExplicitnessBelow ? `relationship explicitness below ${JEV_REVIEW_THRESHOLDS.relationshipExplicitnessBelow.toFixed(2)}` : undefined,
+    belowThreshold(metrics.faithful.value, JEV_REVIEW_THRESHOLDS.faithfulnessBelow, "faithfulness"),
+    aboveThreshold(metrics.ambiguous.value, JEV_REVIEW_THRESHOLDS.ambiguityAbove, "ambiguity"),
+    belowThreshold(metrics.readability.value, JEV_REVIEW_THRESHOLDS.readabilityBelow, "readability"),
+    aboveThreshold(metrics.linguisticComplexity.value, JEV_REVIEW_THRESHOLDS.linguisticComplexityAbove, "linguistic complexity"),
+    belowThreshold(metrics.relationshipExplicitness.value, JEV_REVIEW_THRESHOLDS.relationshipExplicitnessBelow, "relationship explicitness"),
   ].filter((value): value is string => value !== undefined);
 
   return {
     ...clue,
-    faithful,
-    faithfulConfidence: optionalConfidence(faithfulAnswer),
-    ambiguous,
-    ambiguousConfidence: optionalConfidence(ambiguousAnswer),
-    readability,
-    readabilityConfidence: optionalConfidence(readabilityAnswer),
-    linguisticComplexity,
-    linguisticComplexityConfidence: optionalConfidence(linguisticComplexityAnswer),
-    relationshipExplicitness,
-    relationshipExplicitnessConfidence: optionalConfidence(relationshipExplicitnessAnswer),
+    faithful: metrics.faithful.value,
+    faithfulConfidence: metrics.faithful.confidence,
+    ambiguous: metrics.ambiguous.value,
+    ambiguousConfidence: metrics.ambiguous.confidence,
+    readability: metrics.readability.value,
+    readabilityConfidence: metrics.readability.confidence,
+    linguisticComplexity: metrics.linguisticComplexity.value,
+    linguisticComplexityConfidence: metrics.linguisticComplexity.confidence,
+    relationshipExplicitness: metrics.relationshipExplicitness.value,
+    relationshipExplicitnessConfidence: metrics.relationshipExplicitness.confidence,
     evaluationStatus: missingAnswers.length === 0 ? "complete" : "incomplete",
     missingAnswers,
     evaluatedAt,
@@ -299,30 +317,23 @@ export function applyJevPuzzleAnswers(
   index: number,
   evaluatedAt = new Date().toISOString(),
 ): AuditedPuzzle {
-  const repetitionAnswer = answers[`${index}_wordingRepetition`];
-  const terminologyAnswer = answers[`${index}_terminologyInconsistency`];
-  const varietyAnswer = answers[`${index}_phrasingVariety`];
-  const relativeDifficultyAnswer = answers[`${index}_linguisticDifficultyComparedToLogical`];
-  const wordingRepetition = finiteInRange(repetitionAnswer?.noul, 0, 1) ? repetitionAnswer.noul : undefined;
-  const terminologyInconsistency = finiteInRange(terminologyAnswer?.noul, 0, 1) ? terminologyAnswer.noul : undefined;
-  const phrasingVariety = finiteInRange(varietyAnswer?.score, 0, 2) ? varietyAnswer.score : undefined;
-  const linguisticDifficultyComparedToLogical = finiteInRange(relativeDifficultyAnswer?.score, 0, 2) ? relativeDifficultyAnswer.score : undefined;
-  const missingAnswers = [
-    wordingRepetition === undefined ? "wordingRepetition" : undefined,
-    terminologyInconsistency === undefined ? "terminologyInconsistency" : undefined,
-    phrasingVariety === undefined ? "phrasingVariety" : undefined,
-    linguisticDifficultyComparedToLogical === undefined ? "linguisticDifficultyComparedToLogical" : undefined,
-  ].filter((value): value is string => value !== undefined);
+  const metrics = {
+    wordingRepetition: readMetricAnswer(answers, index, "wordingRepetition", "noul", 1),
+    terminologyInconsistency: readMetricAnswer(answers, index, "terminologyInconsistency", "noul", 1),
+    phrasingVariety: readMetricAnswer(answers, index, "phrasingVariety", "score", 2),
+    linguisticDifficultyComparedToLogical: readMetricAnswer(answers, index, "linguisticDifficultyComparedToLogical", "score", 2),
+  };
+  const missingAnswers = missingMetricNames(metrics);
   const result: AuditedPuzzle = {
     ...puzzle,
-    wordingRepetition,
-    wordingRepetitionConfidence: optionalConfidence(repetitionAnswer),
-    terminologyInconsistency,
-    terminologyInconsistencyConfidence: optionalConfidence(terminologyAnswer),
-    phrasingVariety,
-    phrasingVarietyConfidence: optionalConfidence(varietyAnswer),
-    linguisticDifficultyComparedToLogical,
-    linguisticDifficultyComparedToLogicalConfidence: optionalConfidence(relativeDifficultyAnswer),
+    wordingRepetition: metrics.wordingRepetition.value,
+    wordingRepetitionConfidence: metrics.wordingRepetition.confidence,
+    terminologyInconsistency: metrics.terminologyInconsistency.value,
+    terminologyInconsistencyConfidence: metrics.terminologyInconsistency.confidence,
+    phrasingVariety: metrics.phrasingVariety.value,
+    phrasingVarietyConfidence: metrics.phrasingVariety.confidence,
+    linguisticDifficultyComparedToLogical: metrics.linguisticDifficultyComparedToLogical.value,
+    linguisticDifficultyComparedToLogicalConfidence: metrics.linguisticDifficultyComparedToLogical.confidence,
     evaluationStatus: missingAnswers.length === 0 ? "complete" : "incomplete",
     missingAnswers,
     evaluatedAt,
