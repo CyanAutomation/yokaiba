@@ -11,6 +11,10 @@ export const GENERATOR_VERSION = "yokaiba-generator-v5";
 export const SOLVER_VERSION = exhaustivePuzzleSolver.version;
 const MAX_DIFFICULTY_STRATEGIES = 64;
 const DENSE_FALLBACK_STRATEGY_LIMIT = 8;
+const LEVEL_TWO_CLUE_PROFILES = [
+  [0, 1, 2], [0, 2, 1], [1, 0, 2],
+  [1, 2, 0], [2, 0, 1], [2, 1, 0],
+] as const;
 
 // RNG and shuffle are provided by ./rng.ts
 
@@ -32,11 +36,18 @@ function makeSolution(template: PuzzleTemplate, next: () => number): Solution {
   };
 }
 
-function directCandidates(template: PuzzleTemplate, solution: Solution, next: () => number): Clue[] {
+function generationDimensions(template: PuzzleTemplate) {
   const base = template.categories.find(category => category.id === template.baseCategory)!;
+  return {
+    base,
+    categories: template.categories.filter(category => category.id !== template.baseCategory),
+  };
+}
+
+function directCandidates(template: PuzzleTemplate, solution: Solution, next: () => number): Clue[] {
+  const { base, categories } = generationDimensions(template);
   const candidates: Clue[] = [];
-  for (const category of template.categories) {
-    if (category.id === template.baseCategory) continue;
+  for (const category of categories) {
     for (const [row, value] of solution.assignments[category.id].entries()) {
       const subject = base.values[row];
       candidates.push({
@@ -49,71 +60,89 @@ function directCandidates(template: PuzzleTemplate, solution: Solution, next: ()
   return shuffled(candidates, next);
 }
 
+function negativeCandidates(base: PuzzleTemplate["categories"][number], category: PuzzleTemplate["categories"][number], assignment: readonly string[], next: () => number): Clue[] {
+  return assignment.map((actualValue, row) => {
+    const alternatives = category.values.filter(value => value !== actualValue);
+    const value = alternatives[Math.floor(next() * alternatives.length)];
+    return {
+      id: `not-matches-${category.id}-${row}`,
+      constraint: { kind: "notMatches", subject: base.values[row], category: category.id, value },
+      text: "",
+    };
+  });
+}
+
+function orderedCandidates(category: PuzzleTemplate["categories"][number], assignment: readonly string[]): Clue[] {
+  if (!category.ordered) return [];
+  const candidates: Clue[] = [];
+  for (let leftRow = 0; leftRow < assignment.length; leftRow += 1) {
+    for (let rightRow = leftRow + 1; rightRow < assignment.length; rightRow += 1) {
+      const left = { category: category.id, value: assignment[leftRow]! };
+      const right = { category: category.id, value: assignment[rightRow]! };
+      candidates.push({
+        id: `before-${category.id}-${leftRow}-${rightRow}`,
+        constraint: { kind: "before", left, right },
+        text: "",
+      });
+      if (rightRow === leftRow + 1) {
+        candidates.push({
+          id: `adjacent-${category.id}-${leftRow}-${rightRow}`,
+          constraint: { kind: "adjacent", left, right },
+          text: "",
+        });
+      }
+    }
+  }
+  return candidates;
+}
+
+function sameRowAndDistanceCandidates(
+  base: PuzzleTemplate["categories"][number],
+  leftCategory: PuzzleTemplate["categories"][number],
+  rightCategory: PuzzleTemplate["categories"][number],
+  solution: Solution,
+): Clue[] {
+  const leftAssignment = solution.assignments[leftCategory.id]!;
+  const rightAssignment = solution.assignments[rightCategory.id]!;
+  const candidates: Clue[] = [];
+  for (let row = 0; row < base.values.length; row += 1) {
+    const left = { category: leftCategory.id, value: leftAssignment[row]! };
+    const right = { category: rightCategory.id, value: rightAssignment[row]! };
+    candidates.push({
+      id: `same-row-${leftCategory.id}-${rightCategory.id}-${row}`,
+      constraint: { kind: "sameRow", left, right },
+      text: "",
+    });
+    for (let otherRow = row + 1; otherRow < base.values.length; otherRow += 1) {
+      const distance = otherRow - row;
+      const distantRight = { category: rightCategory.id, value: rightAssignment[otherRow]! };
+      candidates.push({
+        id: `distance-${leftCategory.id}-${rightCategory.id}-${row}-${otherRow}`,
+        constraint: { kind: "distance", left, right: distantRight, distance },
+        text: "",
+      });
+    }
+  }
+  return candidates;
+}
+
 /**
  * Create true relational and negative statements from the hidden assignment.
  * The wording deliberately references the tournament lineup, rather than
  * exposing implementation terms such as row indexes or permutations.
  */
 function relationalCandidates(template: PuzzleTemplate, solution: Solution, next: () => number): Clue[] {
-  const base = template.categories.find(category => category.id === template.baseCategory)!;
-  const candidates: Clue[] = [];
-  for (const category of template.categories) {
-    if (category.id === template.baseCategory) continue;
+  const { base, categories } = generationDimensions(template);
+  const candidates = categories.flatMap(category => {
     const assignment = solution.assignments[category.id];
-    for (const [row, actualValue] of assignment.entries()) {
-      const alternatives = category.values.filter(value => value !== actualValue);
-      const value = alternatives[Math.floor(next() * alternatives.length)];
-      candidates.push({
-        id: `not-matches-${category.id}-${row}`,
-        constraint: { kind: "notMatches", subject: base.values[row], category: category.id, value },
-        text: "",
-      });
-    }
-    if (!category.ordered) continue;
-    for (let leftRow = 0; leftRow < assignment.length; leftRow += 1) {
-      for (let rightRow = leftRow + 1; rightRow < assignment.length; rightRow += 1) {
-        const left = { category: category.id, value: assignment[leftRow] };
-        const right = { category: category.id, value: assignment[rightRow] };
-        candidates.push({
-          id: `before-${category.id}-${leftRow}-${rightRow}`,
-          constraint: { kind: "before", left, right },
-          text: "",
-        });
-        if (rightRow === leftRow + 1) {
-          candidates.push({
-            id: `adjacent-${category.id}-${leftRow}-${rightRow}`,
-            constraint: { kind: "adjacent", left, right },
-          text: "",
-          });
-        }
-      }
-    }
-  }
-  const dimensions = template.categories.filter(category => category.id !== base.id);
-  for (let leftIndex = 0; leftIndex < dimensions.length; leftIndex += 1) {
-    for (let rightIndex = leftIndex + 1; rightIndex < dimensions.length; rightIndex += 1) {
-      const leftCategory = dimensions[leftIndex]!;
-      const rightCategory = dimensions[rightIndex]!;
-      const leftAssignment = solution.assignments[leftCategory.id]!;
-      const rightAssignment = solution.assignments[rightCategory.id]!;
-      for (let row = 0; row < base.values.length; row += 1) {
-        const left = { category: leftCategory.id, value: leftAssignment[row]! };
-        const right = { category: rightCategory.id, value: rightAssignment[row]! };
-        candidates.push({
-          id: `same-row-${leftCategory.id}-${rightCategory.id}-${row}`,
-          constraint: { kind: "sameRow", left, right },
-          text: "",
-        });
-        for (let otherRow = row + 1; otherRow < base.values.length; otherRow += 1) {
-          const distance = otherRow - row;
-          const distantRight = { category: rightCategory.id, value: rightAssignment[otherRow]! };
-          candidates.push({
-            id: `distance-${leftCategory.id}-${rightCategory.id}-${row}-${otherRow}`,
-            constraint: { kind: "distance", left, right: distantRight, distance },
-            text: "",
-          });
-        }
-      }
+    return [
+      ...negativeCandidates(base, category, assignment, next),
+      ...orderedCandidates(category, assignment),
+    ];
+  });
+  for (let leftIndex = 0; leftIndex < categories.length; leftIndex += 1) {
+    for (let rightIndex = leftIndex + 1; rightIndex < categories.length; rightIndex += 1) {
+      candidates.push(...sameRowAndDistanceCandidates(base, categories[leftIndex]!, categories[rightIndex]!, solution));
     }
   }
   return shuffled(candidates, next);
@@ -145,29 +174,47 @@ export class DifficultyUnavailableError extends Error {
   }
 }
 
+type ClueKind = Clue["constraint"]["kind"];
+
+function clueFamily(kind: ClueKind): 0 | 1 | 2 {
+  return kind === "matches" ? 0 : kind === "notMatches" ? 1 : 2;
+}
+
+function levelOneWeight(kind: ClueKind): number {
+  return clueFamily(kind);
+}
+
+function levelTwoWeight(kind: ClueKind, strategy: number): number {
+  // Search distinct clue-family orderings. A single ordering cannot reach
+  // the full calibrated band after redundant clues have been removed.
+  return LEVEL_TWO_CLUE_PROFILES[strategy % LEVEL_TWO_CLUE_PROFILES.length]![clueFamily(kind)]!;
+}
+
+function levelThreeWeight(kind: ClueKind): number {
+  return kind === "matches" ? 1 : kind === "notMatches" ? 2 : 0;
+}
+
+function advancedWeight(kind: ClueKind): number {
+  if (kind === "matches") return 3;
+  if (kind === "notMatches") return 2;
+  return kind === "sameRow" || kind === "distance" ? 0 : 1;
+}
+
+function clueWeight(kind: ClueKind, difficultyLevel: number, strategy: number): number {
+  if (difficultyLevel === 1) return levelOneWeight(kind);
+  if (difficultyLevel === 2) return levelTwoWeight(kind, strategy);
+  if (difficultyLevel === 3) return levelThreeWeight(kind);
+  return advancedWeight(kind);
+}
+
 function prioritizeForDifficulty(candidates: readonly Clue[], difficultyLevel: GenerationOptions["difficultyLevel"], next: () => number, strategy = 0) {
   const shuffledCandidates = shuffled(candidates, next);
   if (!difficultyLevel) return shuffledCandidates;
   const eligibleCandidates = difficultyLevel >= 4
     ? shuffledCandidates.filter(clue => clue.constraint.kind !== "matches")
     : shuffledCandidates;
-  const weight = (clue: Clue) => {
-    const kind = clue.constraint.kind;
-    if (difficultyLevel === 1) return kind === "matches" ? 0 : kind === "notMatches" ? 1 : 2;
-    if (difficultyLevel === 2) {
-      // Search distinct clue-family orderings. A single ordering cannot reach
-      // the full calibrated band after redundant clues have been removed.
-      const family = kind === "matches" ? 0 : kind === "notMatches" ? 1 : 2;
-      const profiles = [
-        [0, 1, 2], [0, 2, 1], [1, 0, 2],
-        [1, 2, 0], [2, 0, 1], [2, 1, 0],
-      ];
-      return profiles[strategy % profiles.length]![family]!;
-    }
-    if (difficultyLevel === 3) return kind === "matches" ? 1 : kind === "notMatches" ? 2 : 0;
-    return kind === "matches" ? 3 : kind === "notMatches" ? 2 : kind === "sameRow" || kind === "distance" ? 0 : 1;
-  };
-  return eligibleCandidates.sort((left, right) => weight(left) - weight(right));
+  return eligibleCandidates.sort((left, right) =>
+    clueWeight(left.constraint.kind, difficultyLevel, strategy) - clueWeight(right.constraint.kind, difficultyLevel, strategy));
 }
 
 /**
@@ -241,49 +288,62 @@ export function generateProgressivePuzzle(template: PuzzleTemplate, seed: string
   return generatePuzzleAtDifficulty(template, seed, puzzle.difficulty.level, solver);
 }
 
-/**
- * Deterministically try nearby derived seeds when a caller explicitly permits
- * a target level to use a different puzzle.  The caller's original seed stays
- * in requestedSeed while seed identifies the replayable selected puzzle.
- */
-export function generatePuzzleAtDifficultyWithFallback(template: PuzzleTemplate, requestedSeed: string, difficultyLevel: DifficultyLevel, solver: PuzzleSolver = exhaustivePuzzleSolver, maxAttempts = 32): GeneratedPuzzle {
-  // Compact boards keep the full adaptive search: they do not hit the Worker
-  // CPU ceiling and the targeted path reliably supplies calibrated levels.
-  if (difficultyStrategyLimitForFallback(template) === MAX_DIFFICULTY_STRATEGIES) {
-    try {
-      return generatePuzzleAtDifficulty(template, requestedSeed, difficultyLevel, solver, MAX_DIFFICULTY_STRATEGIES);
-    } catch (error) {
-      if (!(error instanceof DifficultyUnavailableError)) throw error;
-      const requiresHumanSolve = template.metadata?.difficultyCalibration.requiresHumanSolve === true;
-      for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
-        const seed = `${requestedSeed}:fallback:${attempt}`;
-        let puzzle: GeneratedPuzzle;
-        try {
-          puzzle = generateProgressivePuzzle(template, seed, solver);
-        } catch (candidateError) {
-          if (candidateError instanceof DifficultyUnavailableError) continue;
-          throw candidateError;
-        }
-        if (puzzle.difficulty.level === difficultyLevel && (!requiresHumanSolve || puzzle.difficulty.evidence.humanSolve.solved)) {
-          return { ...puzzle, requestedSeed, seedFallbackAttempt: attempt };
-        }
-      }
-      throw error;
-    }
+function satisfiesRequestedDifficulty(puzzle: GeneratedPuzzle, difficultyLevel: DifficultyLevel, requiresHumanSolve: boolean): boolean {
+  return puzzle.difficulty.level === difficultyLevel && (!requiresHumanSolve || puzzle.difficulty.evidence.humanSolve.solved);
+}
+
+function fallbackSeed(requestedSeed: string, attempt: number): string {
+  return attempt === 0 ? requestedSeed : `${requestedSeed}:fallback:${attempt}`;
+}
+
+function tryProgressiveFallbackCandidate(template: PuzzleTemplate, seed: string, solver: PuzzleSolver): GeneratedPuzzle | undefined {
+  try {
+    return generateProgressivePuzzle(template, seed, solver);
+  } catch (error) {
+    if (error instanceof DifficultyUnavailableError) return undefined;
+    throw error;
+  }
+}
+
+function generateCompactFallback(
+  template: PuzzleTemplate,
+  requestedSeed: string,
+  difficultyLevel: DifficultyLevel,
+  solver: PuzzleSolver,
+  maxAttempts: number,
+): GeneratedPuzzle {
+  let unavailableError: DifficultyUnavailableError;
+  try {
+    return generatePuzzleAtDifficulty(template, requestedSeed, difficultyLevel, solver, MAX_DIFFICULTY_STRATEGIES);
+  } catch (error) {
+    if (!(error instanceof DifficultyUnavailableError)) throw error;
+    unavailableError = error;
   }
 
   const requiresHumanSolve = template.metadata?.difficultyCalibration.requiresHumanSolve === true;
+  for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
+    const puzzle = tryProgressiveFallbackCandidate(template, fallbackSeed(requestedSeed, attempt), solver);
+    if (!puzzle) continue;
+    if (satisfiesRequestedDifficulty(puzzle, difficultyLevel, requiresHumanSolve)) {
+      return { ...puzzle, requestedSeed, seedFallbackAttempt: attempt };
+    }
+  }
+  throw unavailableError;
+}
+
+function generateDenseFallback(
+  template: PuzzleTemplate,
+  requestedSeed: string,
+  difficultyLevel: DifficultyLevel,
+  solver: PuzzleSolver,
+  maxAttempts: number,
+): GeneratedPuzzle {
+  const requiresHumanSolve = template.metadata?.difficultyCalibration.requiresHumanSolve === true;
   const observedLevels = new Set<DifficultyLevel>();
-  // Fallback callers explicitly permit a different seed. Generate one normal
-  // deterministic candidate per seed and accept it only when it already meets
-  // the requested band and the template's no-guess requirement. Retargeting
-  // every off-target candidate performs a nested multi-strategy search and can
-  // exceed the Worker CPU budget before the bounded seed scan completes.
   for (let attempt = 0; attempt <= maxAttempts; attempt += 1) {
-    const seed = attempt === 0 ? requestedSeed : `${requestedSeed}:fallback:${attempt}`;
-    const puzzle = generatePuzzle(template, seed, solver);
+    const puzzle = generatePuzzle(template, fallbackSeed(requestedSeed, attempt), solver);
     observedLevels.add(puzzle.difficulty.level);
-    if (puzzle.difficulty.level !== difficultyLevel || (requiresHumanSolve && !puzzle.difficulty.evidence.humanSolve.solved)) continue;
+    if (!satisfiesRequestedDifficulty(puzzle, difficultyLevel, requiresHumanSolve)) continue;
     return {
       ...puzzle,
       requestedSeed,
@@ -297,4 +357,23 @@ export function generatePuzzleAtDifficultyWithFallback(template: PuzzleTemplate,
     difficultyLevel,
     [...observedLevels].filter(level => level !== difficultyLevel).sort((left, right) => left - right),
   );
+}
+
+/**
+ * Deterministically try nearby derived seeds when a caller explicitly permits
+ * a target level to use a different puzzle.  The caller's original seed stays
+ * in requestedSeed while seed identifies the replayable selected puzzle.
+ */
+export function generatePuzzleAtDifficultyWithFallback(template: PuzzleTemplate, requestedSeed: string, difficultyLevel: DifficultyLevel, solver: PuzzleSolver = exhaustivePuzzleSolver, maxAttempts = 32): GeneratedPuzzle {
+  // Compact boards keep the full adaptive search: they do not hit the Worker
+  // CPU ceiling and the targeted path reliably supplies calibrated levels.
+  if (difficultyStrategyLimitForFallback(template) === MAX_DIFFICULTY_STRATEGIES) {
+    return generateCompactFallback(template, requestedSeed, difficultyLevel, solver, maxAttempts);
+  }
+  // Fallback callers explicitly permit a different seed. Generate one normal
+  // deterministic candidate per seed and accept it only when it already meets
+  // the requested band and the template's no-guess requirement. Retargeting
+  // every off-target candidate performs a nested multi-strategy search and can
+  // exceed the Worker CPU budget before the bounded seed scan completes.
+  return generateDenseFallback(template, requestedSeed, difficultyLevel, solver, maxAttempts);
 }
