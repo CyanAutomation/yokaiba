@@ -470,69 +470,101 @@ async function routeMcpRequest(request: Request, env: Env, dependencies: McpRequ
   return dependencies.finish(await mcp.fetch(request));
 }
 
+interface WorkerRuntimeDependencies {
+  readonly options: WorkerOptions;
+  readonly rateLimited: RateLimiter;
+  readonly cache: GeneratedPuzzleCache;
+  readonly inFlight: Map<string, Promise<Response>>;
+  readonly clock: () => number;
+  readonly failures: ProviderFailures;
+}
+
+function invalidUrlResponse(request: Request, startedAt: number, requestId: string): Response {
+  const response = json({ error: { code: "bad_request", message: "Invalid URL" } }, 400);
+  response.headers.set("x-request-id", requestId);
+  console.log(JSON.stringify({ event: "request", requestId, method: request.method, path: "invalid", status: response.status, durationMs: Date.now() - startedAt }));
+  return response;
+}
+
+async function dispatchWorkerRequest(
+  request: Request,
+  path: string,
+  env: Env,
+  ctx: ExecutionContext,
+  context: RequestContext,
+  dependencies: WorkerRuntimeDependencies,
+): Promise<Response> {
+  const finish = (response: Response) => finalizeResponse(response, request, env, context);
+  const build = buildInfo(env);
+  const staticResponse = await staticRoute(path, request, env, build, dependencies.failures);
+  if (staticResponse) return finish(staticResponse);
+  if (context.restRequest && request.method === "OPTIONS") return finish(corsPreflight(request, context.responseCorsHeaders));
+
+  if (context.restRequest) {
+    context.rateLimitDecision = await restRateLimitDecision(dependencies.rateLimited, request, env,
+      () => { dependencies.failures.rest = true; },
+      () => { dependencies.failures.verify = true; });
+    context.rateLimitScope = path === "/v1/puzzles/verify" || path === "/v1/puzzles/hint" ? "protected-puzzle" : "rest";
+    if (context.rateLimitDecision.limited) return finish(tooManyRequests());
+  }
+
+  if (path === "/mcp") {
+    return routeMcpRequest(request, env, {
+      rateLimited: dependencies.rateLimited,
+      failures: dependencies.failures,
+      finish,
+      setRateLimit: (scope, decision) => {
+        context.rateLimitScope = scope;
+        context.rateLimitDecision = decision;
+        return decision.limited;
+      },
+    });
+  }
+  return finish(await routeRestRequest(request, path, env, ctx, {
+    options: dependencies.options,
+    cache: dependencies.cache,
+    inFlight: dependencies.inFlight,
+    clock: dependencies.clock,
+    build,
+  }));
+}
+
+async function handleWorkerRequest(request: Request, env: Env, ctx: ExecutionContext, dependencies: WorkerRuntimeDependencies): Promise<Response> {
+  const startedAt = Date.now();
+  const requestId = crypto.randomUUID();
+  let path: string;
+  try {
+    path = new URL(request.url).pathname;
+  } catch {
+    return invalidUrlResponse(request, startedAt, requestId);
+  }
+  const restRequest = path.startsWith("/v1/");
+  const context: RequestContext = {
+    startedAt,
+    requestId,
+    path,
+    restRequest,
+    responseCorsHeaders: restRequest ? corsHeaders(request.headers.get("origin"), configuredOrigins(env.REST_ALLOWED_ORIGINS)) : undefined,
+  };
+  return dispatchWorkerRequest(request, path, env, ctx, context, dependencies);
+}
+
 export function createWorker(options: WorkerOptions = {}) {
   const clock = options.clock ?? Date.now;
   const rateLimited = options.rateLimiter ?? createRateLimiter(options.localRateLimitStore, clock);
   const generatedPuzzleCache = options.generatedPuzzleCache ?? new GeneratedPuzzleCache();
   const generatedPuzzleRequests = new Map<string, Promise<Response>>();
   const failures: ProviderFailures = { rest: false, verify: false, mcpPreAuth: false, mcp: false, mcpGenerate: false };
+  const dependencies: WorkerRuntimeDependencies = {
+    options,
+    rateLimited,
+    cache: generatedPuzzleCache,
+    inFlight: generatedPuzzleRequests,
+    clock,
+    failures,
+  };
   return {
-    async fetch(request: Request, env: Env, ctx: ExecutionContext): Promise<Response> {
-      const startedAt = Date.now();
-      const requestId = crypto.randomUUID();
-      let path: string;
-      try {
-        path = new URL(request.url).pathname;
-      } catch {
-        const response = json({ error: { code: "bad_request", message: "Invalid URL" } }, 400);
-        response.headers.set("x-request-id", requestId);
-        console.log(JSON.stringify({ event: "request", requestId, method: request.method, path: "invalid", status: response.status, durationMs: Date.now() - startedAt }));
-        return response;
-      }
-      const restRequest = path.startsWith("/v1/");
-      const context: RequestContext = {
-        startedAt,
-        requestId,
-        path,
-        restRequest,
-        responseCorsHeaders: restRequest ? corsHeaders(request.headers.get("origin"), configuredOrigins(env.REST_ALLOWED_ORIGINS)) : undefined,
-      };
-      const finish = (response: Response) => finalizeResponse(response, request, env, context);
-      const build = buildInfo(env);
-
-      const staticResponse = await staticRoute(path, request, env, build, failures);
-      if (staticResponse) return finish(staticResponse);
-      if (restRequest && request.method === "OPTIONS") return finish(corsPreflight(request, context.responseCorsHeaders));
-
-      if (restRequest) {
-        context.rateLimitDecision = await restRateLimitDecision(rateLimited, request, env,
-          () => { failures.rest = true; },
-          () => { failures.verify = true; });
-        context.rateLimitScope = path === "/v1/puzzles/verify" || path === "/v1/puzzles/hint" ? "protected-puzzle" : "rest";
-        if (context.rateLimitDecision.limited) return finish(tooManyRequests());
-      }
-
-      if (path === "/mcp") {
-        return routeMcpRequest(request, env, {
-          rateLimited,
-          failures,
-          finish,
-          setRateLimit: (scope, decision) => {
-            context.rateLimitScope = scope;
-            context.rateLimitDecision = decision;
-            return decision.limited;
-          },
-        });
-      }
-      const response = await routeRestRequest(request, path, env, ctx, {
-        options,
-        cache: generatedPuzzleCache,
-        inFlight: generatedPuzzleRequests,
-        clock,
-        build,
-      });
-      return finish(response);
-    },
+    fetch: (request: Request, env: Env, ctx: ExecutionContext) => handleWorkerRequest(request, env, ctx, dependencies),
   } satisfies ExportedHandler<Env>;
 }
 

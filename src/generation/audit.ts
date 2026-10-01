@@ -86,21 +86,26 @@ export function aggregateDifficultyAuditRecords(records: readonly DifficultyAudi
  * checks. It deliberately reports the bounded no-guess trace separately from
  * player outcomes: this is an engineering diagnostic, not human validation.
  */
-export function auditDifficultyCorpus(template: PuzzleTemplate, options: { sampleSize?: number; seedPrefix?: string; onProgress?: DifficultyAuditProgressCallback } = {}): DifficultyCorpusAudit {
+type DifficultyAuditOptions = { sampleSize?: number; seedPrefix?: string; onProgress?: DifficultyAuditProgressCallback };
+
+function auditFromOptions(
+  template: PuzzleTemplate,
+  options: DifficultyAuditOptions,
+  generator: typeof generatePuzzle,
+): DifficultyCorpusAudit {
   const sampleSize = options.sampleSize ?? template.metadata?.difficultyCalibration.corpus.sampleSize ?? 1_000;
   const seedPrefix = options.seedPrefix ?? "difficulty-audit";
   if (!Number.isInteger(sampleSize) || sampleSize < 1) throw new RangeError("sampleSize must be a positive integer");
+  return auditCorpusWithGenerator(template, sampleSize, seedPrefix, generator, options.onProgress);
+}
 
-  return auditCorpusWithGenerator(template, sampleSize, seedPrefix, generatePuzzle, options.onProgress);
+export function auditDifficultyCorpus(template: PuzzleTemplate, options: DifficultyAuditOptions = {}): DifficultyCorpusAudit {
+  return auditFromOptions(template, options, generatePuzzle);
 }
 
 /** Report the no-target generation distribution returned by the API's progressive path. */
-export function auditProductionDifficultyCorpus(template: PuzzleTemplate, options: { sampleSize?: number; seedPrefix?: string; onProgress?: DifficultyAuditProgressCallback } = {}): DifficultyCorpusAudit {
-  const sampleSize = options.sampleSize ?? template.metadata?.difficultyCalibration.corpus.sampleSize ?? 1_000;
-  const seedPrefix = options.seedPrefix ?? "difficulty-audit";
-  if (!Number.isInteger(sampleSize) || sampleSize < 1) throw new RangeError("sampleSize must be a positive integer");
-
-  return auditCorpusWithGenerator(template, sampleSize, seedPrefix, generateProgressivePuzzle, options.onProgress);
+export function auditProductionDifficultyCorpus(template: PuzzleTemplate, options: DifficultyAuditOptions = {}): DifficultyCorpusAudit {
+  return auditFromOptions(template, options, generateProgressivePuzzle);
 }
 
 function auditCorpusWithGenerator(

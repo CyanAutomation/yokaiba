@@ -84,22 +84,38 @@ function generateAtDifficulty(template: PuzzleTemplate, seed: string, difficulty
   return allowSeedFallback ? generatePuzzleAtDifficultyWithFallback(template, seed, difficultyLevel) : generatePuzzleAtDifficulty(template, seed, difficultyLevel);
 }
 
-function validateAnswer(spec: PuzzleSpec, value: unknown): Solution {
-  if (!value || typeof value !== "object" || Array.isArray(value)) throw new TypeError("answer must be an object");
-  const assignments = (value as Record<string, unknown>).assignments;
-  if (!assignments || typeof assignments !== "object" || Array.isArray(assignments)) throw new TypeError("answer.assignments must be an object");
+function objectRecord(value: unknown, message: string): Record<string, unknown> {
+  if (!value || typeof value !== "object" || Array.isArray(value)) throw new TypeError(message);
+  return value as Record<string, unknown>;
+}
+
+function validateCategoryPermutation(categoryId: string, expectedValues: readonly string[], value: unknown): string[] {
+  if (!Array.isArray(value)
+    || value.length !== expectedValues.length
+    || value.some(candidate => typeof candidate !== "string")
+    || new Set(value).size !== value.length
+    || value.some(candidate => !expectedValues.includes(candidate))) {
+    throw new TypeError(`answer for ${categoryId} must be a complete permutation of its category values`);
+  }
+  return [...value];
+}
+
+function validateAnswerAssignments(spec: PuzzleSpec, value: unknown): Solution["assignments"] {
+  const assignments = objectRecord(value, "answer.assignments must be an object");
   const expected = spec.categories.filter(category => category.id !== spec.baseCategory);
-  const actual = assignments as Record<string, unknown>;
-  if (Object.keys(actual).length !== expected.length || expected.some(category => !(category.id in actual))) throw new TypeError("answer must include every non-base category exactly once");
+  if (Object.keys(assignments).length !== expected.length || expected.some(category => !Object.hasOwn(assignments, category.id))) {
+    throw new TypeError("answer must include every non-base category exactly once");
+  }
   const normalized: Record<string, string[]> = {};
   for (const category of expected) {
-    const values = actual[category.id];
-    if (!Array.isArray(values) || values.length !== category.values.length || values.some(value => typeof value !== "string") || new Set(values).size !== values.length || values.some(value => !category.values.includes(value))) {
-      throw new TypeError(`answer for ${category.id} must be a complete permutation of its category values`);
-    }
-    normalized[category.id] = [...values];
+    normalized[category.id] = validateCategoryPermutation(category.id, category.values, assignments[category.id]);
   }
-  return { assignments: normalized };
+  return normalized;
+}
+
+function validateAnswer(spec: PuzzleSpec, value: unknown): Solution {
+  const answer = objectRecord(value, "answer must be an object");
+  return { assignments: validateAnswerAssignments(spec, answer.assignments) };
 }
 
 function sameSolution(left: Solution, right: Solution): boolean {
@@ -116,6 +132,34 @@ function supportsTokenGeneratorVersion(tokenVersion: string, generatedVersion: s
 }
 
 type HintKind = "clue" | "elimination" | "placement";
+
+function requestedHintKind(value: unknown): HintKind {
+  const kind = value === undefined ? "clue" : value;
+  if (kind !== "clue" && kind !== "elimination" && kind !== "placement") throw new TypeError("kind must be clue, elimination, or placement");
+  return kind;
+}
+
+function placementHint(puzzle: GeneratedPuzzle) {
+  const baseCategory = puzzle.spec.categories.find(candidate => candidate.id === puzzle.spec.baseCategory)!;
+  const category = puzzle.spec.categories.find(candidate => candidate.id !== puzzle.spec.baseCategory)!;
+  return json({
+    kind: "placement",
+    placement: {
+      subject: baseCategory.values[0],
+      category: category.id,
+      value: puzzle.solution.assignments[category.id][0],
+    },
+  });
+}
+
+function clueHint(puzzle: GeneratedPuzzle, kind: Exclude<HintKind, "placement">) {
+  const clue = (kind === "elimination" ? puzzle.clues.find(candidate => candidate.constraint.kind === "notMatches") : undefined) ?? puzzle.clues[0]!;
+  return json({ kind: clue.constraint.kind === "notMatches" && kind === "elimination" ? kind : "clue", clue: { id: clue.id, text: clue.text } });
+}
+
+function hintResponse(puzzle: GeneratedPuzzle, kind: HintKind): Response {
+  return kind === "placement" ? placementHint(puzzle) : clueHint(puzzle, kind);
+}
 
 async function protectedPuzzle(request: Request, templates: Map<string, PuzzleTemplate>, secret: string) {
   const body = await readJsonBody(request);
@@ -204,14 +248,7 @@ async function hintRoute(request: Request, templates: Map<string, PuzzleTemplate
   if (!secret) return json({ error: { code: "not_configured", message: "puzzle hints are not configured" } }, 503);
   try {
     const { value, puzzle } = await protectedPuzzle(request, templates, secret);
-    const kind = value.kind === undefined ? "clue" : value.kind;
-    if (kind !== "clue" && kind !== "elimination" && kind !== "placement") throw new TypeError("kind must be clue, elimination, or placement");
-    if (kind === "placement") {
-      const category = puzzle.spec.categories.find(candidate => candidate.id !== puzzle.spec.baseCategory)!;
-      return json({ kind, placement: { subject: puzzle.spec.categories.find(candidate => candidate.id === puzzle.spec.baseCategory)!.values[0], category: category.id, value: puzzle.solution.assignments[category.id][0] } });
-    }
-    const clue = (kind === "elimination" ? puzzle.clues.find(candidate => candidate.constraint.kind === "notMatches") : undefined) ?? puzzle.clues[0]!;
-    return json({ kind: clue.constraint.kind === "notMatches" && kind === "elimination" ? kind : "clue", clue: { id: clue.id, text: clue.text } });
+    return hintResponse(puzzle, requestedHintKind(value.kind));
   } catch (error) {
     return badRequest(error);
   }
