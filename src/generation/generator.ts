@@ -227,11 +227,11 @@ export function generatePuzzleAtDifficulty(template: PuzzleTemplate, seed: strin
   throw new DifficultyUnavailableError(template.id, seed, difficultyLevel, [...observedLevels].sort((left, right) => left - right));
 }
 
-/** Dense five-row multi-grid boards can exceed Worker CPU limits if fallback first tries every clue ordering. */
+/** Five-row boards with at least two working grids can exceed Worker CPU limits during repeated fallback searches. */
 export function difficultyStrategyLimitForFallback(template: PuzzleTemplate): number {
   const base = template.categories.find(category => category.id === template.baseCategory)!;
   const grids = template.categories.length - 1;
-  return base.values.length >= 5 && grids >= 3 ? DENSE_FALLBACK_STRATEGY_LIMIT : MAX_DIFFICULTY_STRATEGIES;
+  return base.values.length >= 5 && grids >= 2 ? DENSE_FALLBACK_STRATEGY_LIMIT : MAX_DIFFICULTY_STRATEGIES;
 }
 
 /** Generate the normal puzzle unless this versioned template promises no-guess play. */
@@ -247,29 +247,54 @@ export function generateProgressivePuzzle(template: PuzzleTemplate, seed: string
  * in requestedSeed while seed identifies the replayable selected puzzle.
  */
 export function generatePuzzleAtDifficultyWithFallback(template: PuzzleTemplate, requestedSeed: string, difficultyLevel: DifficultyLevel, solver: PuzzleSolver = exhaustivePuzzleSolver, maxAttempts = 32): GeneratedPuzzle {
-  try {
-    return generatePuzzleAtDifficulty(template, requestedSeed, difficultyLevel, solver, difficultyStrategyLimitForFallback(template));
-  } catch (error) {
-    if (!(error instanceof DifficultyUnavailableError)) throw error;
-    const requiresHumanSolve = template.metadata?.difficultyCalibration.requiresHumanSolve === true;
-    // A fallback deliberately uses the normal deterministic clue order. It is
-    // far cheaper than repeating a 64-strategy search for every candidate seed,
-    // and the returned seed remains sufficient to replay the selected puzzle.
-    for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
-      const seed = `${requestedSeed}:fallback:${attempt}`;
-      let puzzle: GeneratedPuzzle;
-      try {
-        puzzle = generateProgressivePuzzle(template, seed, solver);
-      } catch (candidateError) {
-        // A candidate may have the requested score but no no-guess strategy.
-        // It is not a service failure; continue the bounded deterministic scan.
-        if (candidateError instanceof DifficultyUnavailableError) continue;
-        throw candidateError;
+  // Compact boards keep the full adaptive search: they do not hit the Worker
+  // CPU ceiling and the targeted path reliably supplies calibrated levels.
+  if (difficultyStrategyLimitForFallback(template) === MAX_DIFFICULTY_STRATEGIES) {
+    try {
+      return generatePuzzleAtDifficulty(template, requestedSeed, difficultyLevel, solver, MAX_DIFFICULTY_STRATEGIES);
+    } catch (error) {
+      if (!(error instanceof DifficultyUnavailableError)) throw error;
+      const requiresHumanSolve = template.metadata?.difficultyCalibration.requiresHumanSolve === true;
+      for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
+        const seed = `${requestedSeed}:fallback:${attempt}`;
+        let puzzle: GeneratedPuzzle;
+        try {
+          puzzle = generateProgressivePuzzle(template, seed, solver);
+        } catch (candidateError) {
+          if (candidateError instanceof DifficultyUnavailableError) continue;
+          throw candidateError;
+        }
+        if (puzzle.difficulty.level === difficultyLevel && (!requiresHumanSolve || puzzle.difficulty.evidence.humanSolve.solved)) {
+          return { ...puzzle, requestedSeed, seedFallbackAttempt: attempt };
+        }
       }
-      if (puzzle.difficulty.level === difficultyLevel && (!requiresHumanSolve || puzzle.difficulty.evidence.humanSolve.solved)) {
-        return { ...puzzle, requestedSeed, seedFallbackAttempt: attempt };
-      }
+      throw error;
     }
-    throw error;
   }
+
+  const requiresHumanSolve = template.metadata?.difficultyCalibration.requiresHumanSolve === true;
+  const observedLevels = new Set<DifficultyLevel>();
+  // Fallback callers explicitly permit a different seed. Generate one normal
+  // deterministic candidate per seed and accept it only when it already meets
+  // the requested band and the template's no-guess requirement. Retargeting
+  // every off-target candidate performs a nested multi-strategy search and can
+  // exceed the Worker CPU budget before the bounded seed scan completes.
+  for (let attempt = 0; attempt <= maxAttempts; attempt += 1) {
+    const seed = attempt === 0 ? requestedSeed : `${requestedSeed}:fallback:${attempt}`;
+    const puzzle = generatePuzzle(template, seed, solver);
+    observedLevels.add(puzzle.difficulty.level);
+    if (puzzle.difficulty.level !== difficultyLevel || (requiresHumanSolve && !puzzle.difficulty.evidence.humanSolve.solved)) continue;
+    return {
+      ...puzzle,
+      requestedSeed,
+      requestedDifficultyLevel: difficultyLevel,
+      ...(attempt > 0 ? { seedFallbackAttempt: attempt } : {}),
+    };
+  }
+  throw new DifficultyUnavailableError(
+    template.id,
+    requestedSeed,
+    difficultyLevel,
+    [...observedLevels].filter(level => level !== difficultyLevel).sort((left, right) => left - right),
+  );
 }
