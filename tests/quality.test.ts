@@ -64,3 +64,39 @@ test(`deduction passes include the convergence check under ${DIFFICULTY_MODEL_VE
   // Calibration reference: yokaiba-difficulty-v4 counts one changing pass and one stable pass.
   assert.equal(trace.deductionPasses, 2);
 });
+
+test("relational deductions preserve ordering, adjacency, same-row, and exact-distance propagation", () => {
+  const threeRows: PuzzleTemplate = {
+    ...spec,
+    categories: [
+      { id: "person", label: "Person", values: ["Aki", "Ben", "Cia"] },
+      { id: "color", label: "Color", values: ["Red", "Green", "Blue"] },
+    ],
+  };
+  const red = (kind: "before" | "adjacent" | "sameRow" | "distance", distance?: number): Clue => ({
+    id: `red-${kind}`,
+    constraint: kind === "distance"
+      ? { kind, left: { category: "person", value: "Aki" }, right: { category: "color", value: "Red" }, distance: distance! }
+      : { kind, left: { category: "person", value: kind === "sameRow" ? "Aki" : "Ben" }, right: { category: "color", value: "Red" } },
+    text: "A relational clue.",
+  });
+  const benGreen: Clue = {
+    id: "ben-green",
+    constraint: { kind: "matches", subject: "Ben", category: "color", value: "Green" },
+    text: "Ben was associated with green.",
+  };
+  const beforeBenRed: Clue = {
+    id: "ben-before-red",
+    constraint: { kind: "before", left: { category: "person", value: "Ben" }, right: { category: "color", value: "Red" } },
+    text: "Ben finished before red.",
+  };
+
+  for (const clues of [
+    [red("before"), benGreen],
+    [red("adjacent"), beforeBenRed, benGreen],
+    [red("sameRow"), benGreen],
+    [red("distance", 2), benGreen],
+  ]) {
+    assert.equal(evaluateHumanDeductionTrace(threeRows, clues).solved, true);
+  }
+});

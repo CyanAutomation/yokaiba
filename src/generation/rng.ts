@@ -14,5 +14,3 @@ export function shuffled<T>(values: readonly T[], next: () => number): T[] {
   }
   return copy;
 }
-
-export default { random, shuffled };

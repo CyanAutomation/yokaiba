@@ -16,12 +16,12 @@
   },
   "dependencies": {
     "@modelcontextprotocol/server": "^2.0.0",
-    "fallow": "^3.22.0",
     "zod": "^4.0.0"
   },
   "devDependencies": {
     "@cloudflare/workers-types": "^5.20260829.1",
     "@types/node": "^24.0.0",
+    "fallow": "^3.22.0",
     "swagger-ui-dist": "^5.17.14",
     "tsx": "^4.20.0",
     "typescript": "^5.8.0",
