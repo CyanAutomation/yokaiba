@@ -9,20 +9,44 @@ export interface GenerationParameters {
   allowSeedFallback?: true;
 }
 
+function requiredGenerationField(value: unknown, name: "templateId" | "seed"): string {
+  if (typeof value !== "string" || !value.trim()) throw new TypeError(`${name} must be a non-empty string`);
+  if (value.length > MAX_GENERATION_FIELD_LENGTH) throw new TypeError(`${name} must be at most ${MAX_GENERATION_FIELD_LENGTH} characters`);
+  return value;
+}
+
+function optionalDifficultyLevel(value: unknown): Difficulty["level"] | undefined {
+  if (value === undefined) return undefined;
+  if (typeof value !== "number" || !Number.isInteger(value) || value < 1 || value > 12) {
+    throw new TypeError("difficultyLevel must be an integer from 1 to 12");
+  }
+  return value as Difficulty["level"];
+}
+
+function optionalSeedFallback(value: unknown): true | undefined {
+  if (value === undefined || value === false) return undefined;
+  if (value === true) return true;
+  throw new TypeError("allowSeedFallback must be a boolean");
+}
+
+function queryBoolean(value: string | null): boolean | undefined {
+  if (value === null) return undefined;
+  if (value === "true") return true;
+  if (value === "false") return false;
+  throw new TypeError("allowSeedFallback must be a boolean");
+}
+
 /** Validate and normalize the inputs which can affect puzzle generation. */
 export function normalizeGenerationParameters(value: Record<string, unknown>): GenerationParameters {
-  if (typeof value.templateId !== "string" || !value.templateId.trim()) throw new TypeError("templateId must be a non-empty string");
-  if (typeof value.seed !== "string" || !value.seed.trim()) throw new TypeError("seed must be a non-empty string");
-  if (value.templateId.length > MAX_GENERATION_FIELD_LENGTH) throw new TypeError(`templateId must be at most ${MAX_GENERATION_FIELD_LENGTH} characters`);
-  if (value.seed.length > MAX_GENERATION_FIELD_LENGTH) throw new TypeError(`seed must be at most ${MAX_GENERATION_FIELD_LENGTH} characters`);
-  const difficultyLevel = value.difficultyLevel;
-  if (difficultyLevel !== undefined && (typeof difficultyLevel !== "number" || !Number.isInteger(difficultyLevel) || difficultyLevel < 1 || difficultyLevel > 12)) throw new TypeError("difficultyLevel must be an integer from 1 to 12");
-  if (value.allowSeedFallback !== undefined && typeof value.allowSeedFallback !== "boolean") throw new TypeError("allowSeedFallback must be a boolean");
+  const templateId = requiredGenerationField(value.templateId, "templateId");
+  const seed = requiredGenerationField(value.seed, "seed");
+  const difficultyLevel = optionalDifficultyLevel(value.difficultyLevel);
+  const allowSeedFallback = optionalSeedFallback(value.allowSeedFallback);
   return {
-    templateId: value.templateId,
-    seed: value.seed,
+    templateId,
+    seed,
     ...(difficultyLevel === undefined ? {} : { difficultyLevel: difficultyLevel as Difficulty["level"] }),
-    ...(value.allowSeedFallback ? { allowSeedFallback: true as const } : {}),
+    ...(allowSeedFallback ? { allowSeedFallback } : {}),
   };
 }
 
@@ -34,6 +58,6 @@ export function parseGenerationQuery(url: URL): GenerationParameters {
     templateId: url.searchParams.get("templateId"),
     seed: url.searchParams.get("seed"),
     ...(rawDifficulty === null ? {} : { difficultyLevel: Number(rawDifficulty) }),
-    ...(rawFallback === null ? {} : { allowSeedFallback: rawFallback === "true" ? true : rawFallback === "false" ? false : rawFallback }),
+    ...(rawFallback === null ? {} : { allowSeedFallback: queryBoolean(rawFallback) }),
   });
 }

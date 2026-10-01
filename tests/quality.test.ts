@@ -2,10 +2,10 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import {
   DIFFICULTY_MODEL_VERSION,
-  evaluateHumanDeductionTrace,
   type Clue,
   type PuzzleTemplate,
 } from "../src/index.js";
+import { evaluateHumanDeductionTrace } from "../src/generation/quality.js";
 
 const spec: PuzzleTemplate = {
   id: "deduction-scoring-fixture",
