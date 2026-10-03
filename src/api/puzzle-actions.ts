@@ -93,6 +93,7 @@ export function verifyPuzzleAnswer(puzzle: GeneratedPuzzle, answer: unknown): bo
 function placementHint(puzzle: GeneratedPuzzle, hintIndex: number): PuzzleHint {
   const baseCategory = puzzle.spec.categories.find(candidate => candidate.id === puzzle.spec.baseCategory)!;
   const categories = puzzle.spec.categories.filter(candidate => candidate.id !== puzzle.spec.baseCategory);
+  if (categories.length === 0) throw new Error("No non-base categories available for placement hints");
   const totalCells = baseCategory.values.length * categories.length;
   const cellIndex = hintIndex % totalCells;
   const subjectIndex = Math.floor(cellIndex / categories.length);
@@ -112,6 +113,7 @@ function clueHint(puzzle: GeneratedPuzzle, kind: Exclude<HintKind, "placement">,
     ? puzzle.clues.filter(candidate => candidate.constraint.kind === "notMatches")
     : puzzle.clues;
   const pool = candidates.length > 0 ? candidates : puzzle.clues;
+  if (pool.length === 0) throw new Error("No clues available for hints");
   const clue = pool[hintIndex % pool.length]!;
   return { kind: kind === "elimination" && clue.constraint.kind === "notMatches" ? "elimination" : "clue", clue: { id: clue.id, text: clue.text } };
 }
