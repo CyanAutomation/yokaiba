@@ -156,8 +156,11 @@ function telemetryRequest(value: unknown, templates: Map<string, PuzzleTemplate>
   validateTelemetryNumbers(event);
   if (event.smartMarkingEnabled !== undefined && typeof event.smartMarkingEnabled !== "boolean") throw new TypeError("smartMarkingEnabled must be a boolean");
   if (schemaVersion === 1) {
-    for (const field of VERSION_ONE_OUTCOME_FIELDS[event.event]!) {
-      if (typeof event[field] !== "number") throw new TypeError(`${field} is required for ${event.event} schema version 1`);
+    const requiredFields = VERSION_ONE_OUTCOME_FIELDS[event.event];
+    if (requiredFields) {
+      for (const field of requiredFields) {
+        if (typeof event[field] !== "number") throw new TypeError(`${field} is required for ${event.event} schema version 1`);
+      }
     }
   }
   return {
