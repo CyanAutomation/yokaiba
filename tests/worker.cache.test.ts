@@ -165,7 +165,8 @@ test("generated puzzle cache keys canonicalize routing inputs", async () => {
   const key = (url: string) => generatedPuzzleCacheKey(new Request(url), "secret");
   const canonical = await key("https://first.example/v1/puzzles/generate?templateId=template&seed=seed&difficultyLevel=4&allowSeedFallback=true");
 
-  assert.equal(await key("http://second.example/v1/puzzles/generate?ignored=value&allowSeedFallback=true&seed=seed&difficultyLevel=4&templateId=template#fragment"), canonical);
+  assert.equal(await key("http://second.example/v1/puzzles/generate?allowSeedFallback=true&seed=seed&difficultyLevel=4&templateId=template#fragment"), canonical);
+  assert.equal(await key("http://second.example/v1/puzzles/generate?ignored=value&allowSeedFallback=true&seed=seed&difficultyLevel=4&templateId=template"), undefined);
   assert.equal(await key("https://first.example/v1/puzzles/generate?seed=seed&templateId=template&allowSeedFallback=false"), await key("https://first.example/v1/puzzles/generate?templateId=template&seed=seed"));
 
   for (const changed of [

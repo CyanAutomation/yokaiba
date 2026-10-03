@@ -38,6 +38,9 @@ function queryBoolean(value: string | null): boolean | undefined {
 
 /** Validate and normalize the inputs which can affect puzzle generation. */
 export function normalizeGenerationParameters(value: Record<string, unknown>): GenerationParameters {
+  const allowedFields = new Set(["templateId", "seed", "difficultyLevel", "allowSeedFallback"]);
+  const unknownField = Object.keys(value).find(name => !allowedFields.has(name));
+  if (unknownField !== undefined) throw new TypeError(`unknown field ${unknownField}`);
   const templateId = requiredGenerationField(value.templateId, "templateId");
   const seed = requiredGenerationField(value.seed, "seed");
   const difficultyLevel = optionalDifficultyLevel(value.difficultyLevel);
@@ -50,8 +53,14 @@ export function normalizeGenerationParameters(value: Record<string, unknown>): G
   };
 }
 
-/** Parse GET generation inputs, deliberately ignoring parameters the router does not consume. */
+/** Parse GET generation inputs and reject parameters the router does not consume. */
 export function parseGenerationQuery(url: URL): GenerationParameters {
+  const allowedParameters = new Set(["templateId", "seed", "difficultyLevel", "allowSeedFallback"]);
+  const unknownParameter = [...url.searchParams.keys()].find(name => !allowedParameters.has(name));
+  if (unknownParameter !== undefined) throw new TypeError(`unknown query parameter ${unknownParameter}`);
+  for (const name of allowedParameters) {
+    if (url.searchParams.getAll(name).length > 1) throw new TypeError(`${name} must be provided at most once`);
+  }
   const rawDifficulty = url.searchParams.get("difficultyLevel");
   const rawFallback = url.searchParams.get("allowSeedFallback");
   return normalizeGenerationParameters({

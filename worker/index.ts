@@ -21,6 +21,8 @@ interface Env {
   MCP_PREAUTH_RATE_LIMIT?: string;
   /** Optional expensive generate_puzzle MCP requests-per-minute override. Defaults to 10. */
   MCP_GENERATE_RATE_LIMIT?: string;
+  /** Optional bounded verify/hint MCP operations per minute. Defaults to 10 per tool and key. */
+  MCP_PUZZLE_ACTION_RATE_LIMIT?: string;
   /** Comma-separated browser origins permitted to call the public REST API. */
   REST_ALLOWED_ORIGINS?: string;
   /** HMAC secret used to issue and validate browser puzzle tokens. */
@@ -44,12 +46,15 @@ interface Env {
   MCP_RATE_LIMITER?: { limit(options: { key: string }): Promise<{ success: boolean }> };
   /** Optional Cloudflare binding for the expensive MCP generate_puzzle operation. */
   MCP_GENERATE_RATE_LIMITER?: { limit(options: { key: string }): Promise<{ success: boolean }> };
+  /** Optional Cloudflare binding for MCP answer-verification and hint tools. */
+  MCP_PUZZLE_ACTION_RATE_LIMITER?: { limit(options: { key: string }): Promise<{ success: boolean }> };
+  /** Cloudflare Analytics Engine dataset for anonymous puzzle outcome events. */
+  PUZZLE_OUTCOMES?: AnalyticsEngineDataset;
   /** Static public assets, including Swagger UI and the canonical OpenAPI document. */
   ASSETS?: { fetch(request: Request): Promise<Response> };
 }
 
 const templates = [tournamentOrderV2Template, tournamentOrderTemplate, openDivisionTemplate, championshipBridgeTemplate, championshipCircuitTemplate];
-const mcp = createYokaibaMcpHandler(templates);
 
 // JSON response builder provided by src/api/json-response.ts
 
@@ -287,6 +292,8 @@ interface ProviderFailures {
   mcpPreAuth: boolean;
   mcp: boolean;
   mcpGenerate: boolean;
+  mcpPuzzleAction: boolean;
+  outcomeTelemetry: boolean;
 }
 
 interface RequestContext {
@@ -340,16 +347,44 @@ function readinessResponse(env: Env, build: ReturnType<typeof buildInfo>, failur
     mcpPreAuthRateLimitProvider: env.MCP_PREAUTH_RATE_LIMITER && !failures.mcpPreAuth ? "configured" : "fallback",
     mcpRateLimitProvider: env.MCP_RATE_LIMITER && !failures.mcp ? "configured" : "fallback",
     mcpGenerateRateLimitProvider: env.MCP_GENERATE_RATE_LIMITER && !failures.mcpGenerate ? "configured" : "fallback",
+    mcpPuzzleActionRateLimitProvider: env.MCP_PUZZLE_ACTION_RATE_LIMITER && !failures.mcpPuzzleAction ? "configured" : "fallback",
+    outcomeTelemetryProvider: !env.PUZZLE_OUTCOMES ? "disabled" : failures.outcomeTelemetry ? "failing" : "configured",
+  });
+}
+
+const OUTCOME_METRIC_FIELDS = ["requestedDifficultyLevel", "assessedDifficultyLevel", "clueCount", "elapsedMs", "hintsUsed", "mistakes"] as const;
+
+function writePuzzleOutcome(dataset: AnalyticsEngineDataset, event: Record<string, unknown>): void {
+  let presentFields = 0;
+  const values = OUTCOME_METRIC_FIELDS.map((field, index) => {
+    const value = event[field];
+    if (typeof value === "number") {
+      presentFields |= 1 << index;
+      return value;
+    }
+    return 0;
+  });
+  values.push(presentFields);
+  dataset.writeDataPoint({
+    indexes: [String(event.templateId)],
+    blobs: [String(event.event), String(event.schemaVersion ?? 0), typeof event.smartMarkingEnabled === "boolean" ? String(event.smartMarkingEnabled) : "unknown"],
+    doubles: values,
   });
 }
 
 async function staticRoute(path: string, request: Request, env: Env, build: ReturnType<typeof buildInfo>, failures: ProviderFailures): Promise<Response | undefined> {
-  if (path === "/") return new Response(null, { status: 302, headers: { location: new URL("/docs", request.url).toString(), "cache-control": "no-store" } });
-  if (path === "/healthz") return json({ status: "ok", build });
-  if (path === "/readyz") return readinessResponse(env, build, failures);
-  if (path === "/docs" || path === "/docs/") return swaggerUiResponse();
-  if (path === "/openapi/v1.yaml") return staticAsset(request, env, "/openapi/v1.yaml", "application/yaml; charset=utf-8");
-  return undefined;
+  if (!["/", "/healthz", "/readyz", "/docs", "/docs/", "/openapi/v1.yaml"].includes(path)) return undefined;
+  if (request.method !== "GET" && request.method !== "HEAD") {
+    return json({ error: { code: "method_not_allowed", message: "Method not allowed" } }, 405, { allow: "GET, HEAD" });
+  }
+  let response: Response;
+  if (path === "/") response = new Response(null, { status: 302, headers: { location: new URL("/docs", request.url).toString(), "cache-control": "no-store" } });
+  else if (path === "/healthz") response = json({ status: "ok", build });
+  else if (path === "/readyz") response = await readinessResponse(env, build, failures);
+  else if (path === "/docs" || path === "/docs/") response = swaggerUiResponse();
+  else response = await staticAsset(request, env, "/openapi/v1.yaml", "application/yaml; charset=utf-8");
+  if (request.method === "HEAD") return new Response(null, { status: response.status, statusText: response.statusText, headers: response.headers });
+  return response;
 }
 
 function corsPreflight(request: Request, cors: Record<string, string> | undefined): Response {
@@ -367,12 +402,20 @@ interface RestRequestDependencies {
   readonly inFlight: Map<string, Promise<Response>>;
   readonly clock: () => number;
   readonly build: ReturnType<typeof buildInfo>;
+  readonly failures: ProviderFailures;
 }
 
 async function routeRestRequest(request: Request, path: string, env: Env, ctx: ExecutionContext, dependencies: RestRequestDependencies): Promise<Response> {
   const route = () => path === "/v1/puzzles/generate" && dependencies.options.generatePuzzleResponse
     ? dependencies.options.generatePuzzleResponse(request)
-    : createRestRouter(templates, { puzzleTokenSecret: env.PUZZLE_TOKEN_SECRET, ...dependencies.build })(request);
+    : createRestRouter(templates, {
+      puzzleTokenSecret: env.PUZZLE_TOKEN_SECRET,
+      ...dependencies.build,
+      ...(env.PUZZLE_OUTCOMES ? { recordOutcome: event => {
+        try { writePuzzleOutcome(env.PUZZLE_OUTCOMES!, event); }
+        catch (error) { dependencies.failures.outcomeTelemetry = true; throw error; }
+      } } : {}),
+    })(request);
   const cacheKey = request.method === "GET" && path === "/v1/puzzles/generate"
     ? await generatedPuzzleCacheKey(request, env.PUZZLE_TOKEN_SECRET)
     : undefined;
@@ -455,7 +498,8 @@ async function routeMcpRequest(request: Request, env: Env, dependencies: McpRequ
   );
   if (dependencies.setRateLimit("mcp", principalLimit)) return dependencies.finish(tooManyRequests());
 
-  if (await mcpToolName(request) === "generate_puzzle") {
+  const toolName = await mcpToolName(request);
+  if (toolName === "generate_puzzle") {
     const generationLimit = await resolveMcpRateLimit(
       request,
       env.MCP_GENERATE_RATE_LIMITER,
@@ -467,7 +511,22 @@ async function routeMcpRequest(request: Request, env: Env, dependencies: McpRequ
     );
     if (dependencies.setRateLimit("mcp-generate", generationLimit)) return dependencies.finish(tooManyRequests());
   }
-  return dependencies.finish(await mcp.fetch(request));
+  if (toolName === "verify_puzzle_answer" || toolName === "get_puzzle_hint") {
+    const actionLimit = await resolveMcpRateLimit(
+      request,
+      env.MCP_PUZZLE_ACTION_RATE_LIMITER,
+      env.MCP_PUZZLE_ACTION_RATE_LIMIT ?? "10",
+      "mcp-puzzle-action",
+      dependencies.rateLimited,
+      () => { dependencies.failures.mcpPuzzleAction = true; },
+      `${principal}:${toolName}`,
+    );
+    if (dependencies.setRateLimit("mcp-puzzle-action", actionLimit)) return dependencies.finish(tooManyRequests());
+  }
+  return dependencies.finish(await createYokaibaMcpHandler(templates, {
+    puzzleTokenSecret: env.PUZZLE_TOKEN_SECRET,
+    serviceVersion: buildInfo(env).serviceVersion,
+  }).fetch(request));
 }
 
 interface WorkerRuntimeDependencies {
@@ -526,6 +585,7 @@ async function dispatchWorkerRequest(
     inFlight: dependencies.inFlight,
     clock: dependencies.clock,
     build,
+    failures: dependencies.failures,
   }));
 }
 
@@ -554,7 +614,7 @@ export function createWorker(options: WorkerOptions = {}) {
   const rateLimited = options.rateLimiter ?? createRateLimiter(options.localRateLimitStore, clock);
   const generatedPuzzleCache = options.generatedPuzzleCache ?? new GeneratedPuzzleCache();
   const generatedPuzzleRequests = new Map<string, Promise<Response>>();
-  const failures: ProviderFailures = { rest: false, verify: false, mcpPreAuth: false, mcp: false, mcpGenerate: false };
+  const failures: ProviderFailures = { rest: false, verify: false, mcpPreAuth: false, mcp: false, mcpGenerate: false, mcpPuzzleAction: false, outcomeTelemetry: false };
   const dependencies: WorkerRuntimeDependencies = {
     options,
     rateLimited,
