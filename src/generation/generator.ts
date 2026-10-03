@@ -288,6 +288,20 @@ export function generateProgressivePuzzle(template: PuzzleTemplate, seed: string
   return generatePuzzleAtDifficulty(template, seed, puzzle.difficulty.level, solver);
 }
 
+/** Apply the same progressive/default and explicit-target policy for every transport. */
+export function generatePuzzleForRequest(
+  template: PuzzleTemplate,
+  seed: string,
+  difficultyLevel?: DifficultyLevel,
+  allowSeedFallback = false,
+  solver: PuzzleSolver = exhaustivePuzzleSolver,
+): GeneratedPuzzle {
+  if (difficultyLevel === undefined) return generateProgressivePuzzle(template, seed, solver);
+  return allowSeedFallback
+    ? generatePuzzleAtDifficultyWithFallback(template, seed, difficultyLevel, solver)
+    : generatePuzzleAtDifficulty(template, seed, difficultyLevel, solver);
+}
+
 function satisfiesRequestedDifficulty(puzzle: GeneratedPuzzle, difficultyLevel: DifficultyLevel, requiresHumanSolve: boolean): boolean {
   return puzzle.difficulty.level === difficultyLevel && (!requiresHumanSolve || puzzle.difficulty.evidence.humanSolve.solved);
 }
