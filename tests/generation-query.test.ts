@@ -42,9 +42,9 @@ test("generation parameters reject missing, blank, oversized, and out-of-range v
   }
 });
 
-test("GET query parsing converts supported values and ignores unrelated parameters", () => {
+test("GET query parsing converts supported values", () => {
   assert.deepEqual(parseGenerationQuery(new URL(
-    "https://example.test/v1/puzzles/generate?templateId=open-division-v2&seed=cup-final&difficultyLevel=7&allowSeedFallback=true&ignored=anything",
+    "https://example.test/v1/puzzles/generate?templateId=open-division-v2&seed=cup-final&difficultyLevel=7&allowSeedFallback=true",
   )), {
     templateId: "open-division-v2",
     seed: "cup-final",
@@ -54,6 +54,15 @@ test("GET query parsing converts supported values and ignores unrelated paramete
   assert.deepEqual(parseGenerationQuery(new URL(
     "https://example.test/v1/puzzles/generate?templateId=open-division-v2&seed=cup-final&allowSeedFallback=false",
   )), { templateId: "open-division-v2", seed: "cup-final" });
+});
+
+test("GET query parsing rejects unknown and duplicate parameters", () => {
+  for (const query of [
+    "templateId=template&seed=seed&tracking=ignored",
+    "templateId=template&seed=seed&seed=duplicate",
+  ]) {
+    assert.throws(() => parseGenerationQuery(new URL(`https://example.test/v1/puzzles/generate?${query}`)));
+  }
 });
 
 test("GET query parsing rejects malformed difficulty and fallback values", () => {

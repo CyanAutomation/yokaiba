@@ -111,6 +111,10 @@ function assertDocumentedOperation(specification: OpenApiObject, path: string, m
 function assertCoreOpenApiSchemas(schemas: OpenApiObject): void {
   for (const name of ["GeneratedPuzzle", "PuzzleVerificationRequest", "Difficulty", "Error", "DifficultyUnavailableError"]) assert.ok(schemas[name]);
   assert.ok(schemas.Clue.properties.phraseVariant);
+  assert.ok(schemas.GeneratedPuzzle.properties.generationStrategy);
+  assert.ok(schemas.Readiness.properties.mcpPuzzleActionRateLimitProvider);
+  assert.ok(schemas.Readiness.properties.outcomeTelemetryProvider);
+  assert.ok(schemas.PuzzleHintRequest.properties.hintIndex);
   assert.deepEqual(schemas.TemplateMetadata.properties.difficultyCalibration.properties.scoreThresholds, {
     type: "array",
     minItems: 1,
@@ -124,10 +128,30 @@ test("OpenAPI documents every public REST endpoint", async () => {
   const specification = parseOpenApiYaml(source);
   validateOpenApiReferences(specification);
   const endpoints = {
-    "/healthz": { get: { statuses: ["200"], schema: "Health", headers: ["X-Request-Id"] } },
-    "/readyz": { get: { statuses: ["200"], schema: "Readiness", headers: ["X-Request-Id"] } },
-    "/docs": { get: { statuses: ["200"], headers: ["X-Request-Id"] } },
-    "/openapi/v1.yaml": { get: { statuses: ["200"], headers: ["X-Request-Id"] } },
+    "/": {
+      get: { statuses: ["302", "405"], headers: ["Location", "Cache-Control", "X-Request-Id"], successStatus: "302" },
+      head: { statuses: ["302", "405"], headers: ["Location", "Cache-Control", "X-Request-Id"], successStatus: "302" },
+    },
+    "/healthz": {
+      get: { statuses: ["200", "405"], schema: "Health", headers: ["X-Request-Id"] },
+      head: { statuses: ["200", "405"], headers: ["X-Request-Id"] },
+    },
+    "/readyz": {
+      get: { statuses: ["200", "405"], schema: "Readiness", headers: ["X-Request-Id"] },
+      head: { statuses: ["200", "405"], headers: ["X-Request-Id"] },
+    },
+    "/docs": {
+      get: { statuses: ["200", "405"], headers: ["X-Request-Id"] },
+      head: { statuses: ["200", "405"], headers: ["X-Request-Id"] },
+    },
+    "/docs/": {
+      get: { statuses: ["200", "405"], headers: ["X-Request-Id"] },
+      head: { statuses: ["200", "405"], headers: ["X-Request-Id"] },
+    },
+    "/openapi/v1.yaml": {
+      get: { statuses: ["200", "405"], headers: ["X-Request-Id"] },
+      head: { statuses: ["200", "405"], headers: ["X-Request-Id"] },
+    },
     "/v1/scenarios": { get: { statuses: ["200", "304", "429"], schema: "ScenarioList", headers: ["Access-Control-Allow-Origin", "Cache-Control", "ETag", "X-Request-Id"] } },
     "/v1/capabilities": { get: { statuses: ["200", "304", "429"], schema: "Capabilities", headers: ["Access-Control-Allow-Origin", "Cache-Control", "ETag", "X-Request-Id"] } },
     "/v1/version": { get: { statuses: ["200", "304", "429"], schema: "Version", headers: ["Access-Control-Allow-Origin", "Cache-Control", "ETag", "X-Request-Id"] } },
@@ -137,7 +161,7 @@ test("OpenAPI documents every public REST endpoint", async () => {
     },
     "/v1/puzzles/verify": { post: { statuses: ["200", "400", "429", "503"], schema: "PuzzleVerificationResult", requestSchema: "PuzzleVerificationRequest", headers: ["Access-Control-Allow-Origin", "X-Request-Id"] } },
     "/v1/puzzles/hint": { post: { statuses: ["200", "400", "429", "503"], schema: "PuzzleHintResult", requestSchema: "PuzzleHintRequest", headers: ["Access-Control-Allow-Origin", "X-Request-Id"] } },
-    "/v1/events": { post: { statuses: ["202", "400", "429"], schema: "Accepted", requestSchema: "PuzzleOutcomeEvent", headers: ["Access-Control-Allow-Origin", "X-Request-Id"], successStatus: "202" } },
+    "/v1/events": { post: { statuses: ["202", "400", "429", "503"], schema: "Accepted", requestSchema: "PuzzleOutcomeEvent", headers: ["Access-Control-Allow-Origin", "X-Request-Id"], successStatus: "202" } },
   } as const;
 
   assert.deepEqual(Object.keys(specification.paths), Object.keys(endpoints));
@@ -182,6 +206,21 @@ test("REST supports cacheable deterministic GET generation", async () => {
   const body = await response.json() as Record<string, unknown>;
   assert.equal(body.seed, "api-seed");
   assert.equal("solution" in body, false);
+});
+
+test("REST generation rejects undeclared body fields and query parameters", async () => {
+  const route = createRestRouter([tournamentOrderTemplate]);
+  const body = await route(new Request("https://yokaiba.test/v1/puzzles/generate", {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ templateId: "tournament-order-v1", seed: "strict-seed", difficultyLevell: 2 }),
+  }));
+  assert.equal(body.status, 400);
+  assert.match((await body.json() as { error: { message: string } }).error.message, /unknown field.*difficultyLevell/i);
+
+  const query = await route(new Request("https://yokaiba.test/v1/puzzles/generate?templateId=tournament-order-v1&seed=strict-seed&difficultyLevell=2"));
+  assert.equal(query.status, 400);
+  assert.match((await query.json() as { error: { message: string } }).error.message, /unknown query parameter.*difficultyLevell/i);
 });
 
 test("REST scenario catalogue publishes valid boards for every template", async () => {
@@ -260,13 +299,17 @@ test("REST capabilities expose client-safe feature flags and catalogue metadata"
   assert.equal(response.headers.get("cache-control"), "public, max-age=300, s-maxage=300, must-revalidate");
   assert.deepEqual(await response.json(), {
     apiVersion: "v1",
-    features: { answerVerification: false, conditionalGet: true, difficultySelection: true, hints: false, outcomeTelemetry: true, seedFallback: true },
+    features: { answerVerification: false, conditionalGet: true, difficultySelection: true, hints: false, outcomeTelemetry: false, seedFallback: true },
     locales: ["en"],
     scenarios: [
       { id: "tournament-order-v1", difficultyLevels: [1, 2, 3, 4] },
       { id: "open-division-v2", difficultyLevels: [5, 6, 7, 8] },
     ],
   });
+
+  const enabled = createRestRouter([tournamentOrderTemplate], { recordOutcome: () => undefined });
+  const enabledCapabilities = await enabled(new Request("https://yokaiba.test/v1/capabilities"));
+  assert.equal((await enabledCapabilities.json() as { features: { outcomeTelemetry: boolean } }).features.outcomeTelemetry, true);
 });
 
 test("REST can deterministically fall back to a nearby seed for an unavailable selected level", async () => {
@@ -293,17 +336,47 @@ test("REST provides bounded clue, elimination, and placement hints from a signed
   assert.equal(placementBody.kind, "placement");
   assert.equal(placementBody.placement.subject, "Aki");
   assert.equal(placementBody.placement.category, "weight");
+
+  const nextPlacement = await route(new Request("https://yokaiba.test/v1/puzzles/hint", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ puzzleToken, kind: "placement", hintIndex: 1 }) }));
+  const nextPlacementBody = await nextPlacement.json() as { kind: string; placement: { subject: string; category: string; value: string } };
+  assert.equal(nextPlacementBody.kind, "placement");
+  assert.equal(nextPlacementBody.placement.subject, "Aki");
+  assert.equal(nextPlacementBody.placement.category, "tatami");
+
+  const unknownField = await route(new Request("https://yokaiba.test/v1/puzzles/hint", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ puzzleToken, kind: "clue", tracking: "ignored" }) }));
+  assert.equal(unknownField.status, 400);
 });
 
 test("REST accepts anonymized puzzle outcomes with their smart-marking cohort and rejects malformed telemetry", async () => {
-  const route = createRestRouter([tournamentOrderTemplate]);
+  const acceptedEvents: Record<string, unknown>[] = [];
+  const route = createRestRouter([tournamentOrderTemplate], { recordOutcome: event => { acceptedEvents.push(event); } });
   const accepted = await route(new Request("https://yokaiba.test/v1/events", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ event: "puzzle_completed", templateId: "tournament-order-v1", assessedDifficultyLevel: 2, elapsedMs: 120_000, clueCount: 8, hintsUsed: 1, smartMarkingEnabled: true }) }));
   assert.equal(accepted.status, 202);
   assert.deepEqual(await accepted.json(), { accepted: true });
+  assert.equal(acceptedEvents.length, 1);
+  assert.equal(acceptedEvents[0]?.schemaVersion, 0);
+  assert.equal(acceptedEvents[0]?.event, "puzzle_completed");
+  assert.equal("seed" in acceptedEvents[0]!, false);
   const rejected = await route(new Request("https://yokaiba.test/v1/events", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ event: "identity_captured", templateId: "tournament-order-v1" }) }));
   assert.equal(rejected.status, 400);
   const malformed = await route(new Request("https://yokaiba.test/v1/events", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ event: "puzzle_completed", templateId: "tournament-order-v1", smartMarkingEnabled: "true" }) }));
   assert.equal(malformed.status, 400);
+  const unsupportedVersion = await route(new Request("https://yokaiba.test/v1/events", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ schemaVersion: 2, event: "puzzle_started", templateId: "tournament-order-v1" }) }));
+  assert.equal(unsupportedVersion.status, 400);
+  const nullVersion = await route(new Request("https://yokaiba.test/v1/events", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ schemaVersion: null, event: "puzzle_started", templateId: "tournament-order-v1" }) }));
+  assert.equal(nullVersion.status, 400);
+  const incompleteVersionOne = await route(new Request("https://yokaiba.test/v1/events", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ schemaVersion: 1, event: "puzzle_completed", templateId: "tournament-order-v1" }) }));
+  assert.equal(incompleteVersionOne.status, 400);
+  const completeVersionOne = await route(new Request("https://yokaiba.test/v1/events", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ schemaVersion: 1, event: "puzzle_completed", templateId: "tournament-order-v1", elapsedMs: 1000, hintsUsed: 2, mistakes: 1 }) }));
+  assert.equal(completeVersionOne.status, 202);
+  assert.equal(acceptedEvents[1]?.schemaVersion, 1);
+});
+
+test("REST reports telemetry as unavailable unless an event sink accepts the outcome", async () => {
+  const route = createRestRouter([tournamentOrderTemplate]);
+  const response = await route(new Request("https://yokaiba.test/v1/events", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ event: "puzzle_started", templateId: "tournament-order-v1" }) }));
+  assert.equal(response.status, 503);
+  assert.deepEqual(await response.json(), { error: { code: "not_configured", message: "puzzle outcome storage is not configured" } });
 });
 
 test("REST verifies a complete submitted answer without exposing the solution", async () => {
@@ -319,6 +392,12 @@ test("REST verifies a complete submitted answer without exposing the solution", 
   }));
   assert.equal(correct.status, 200);
   assert.deepEqual(await correct.json(), { correct: true });
+
+  const unknownField = await route(new Request("https://yokaiba.test/v1/puzzles/verify", {
+    method: "POST", headers: { "content-type": "application/json" },
+    body: JSON.stringify({ puzzleToken: publicPuzzle.puzzleToken, answer: solution, tracking: "ignored" }),
+  }));
+  assert.equal(unknownField.status, 400);
 
   const categoryId = Object.keys(solution.assignments)[0]!;
 
@@ -367,11 +446,13 @@ test("REST rejects malformed verification assignments", async () => {
 
 test("REST answer verification rejects malformed objects and incomplete permutations", async () => {
   const { route, puzzleToken } = await verificationSetup();
+  const solution = generatePuzzle(tournamentOrderTemplate, "verify-invalid").solution;
   const invalidAnswers = [
     null,
     [],
     {},
     { assignments: null },
+    { assignments: solution.assignments, tracking: "ignored" },
     { assignments: { club: ["Wolves"], tatami: ["1", "2", "3", "4"], placing: ["1st", "2nd", "3rd", "4th"] } },
     { assignments: { club: ["Wolves", "Wolves", "Tigers", "Lions"], tatami: ["1", "2", "3", "4"], placing: ["1st", "2nd", "3rd", "4th"] } },
     { assignments: { club: ["Wolves", "Lions", "Tigers", 4], tatami: ["1", "2", "3", "4"], placing: ["1st", "2nd", "3rd", "4th"] } },
@@ -422,7 +503,7 @@ test("REST rejects a puzzle token with a tampered signature", async () => {
 
   assert.equal(tampered.status, 400);
   assert.deepEqual(await tampered.json(), {
-    error: { code: "bad_request", message: "puzzleToken is invalid" },
+    error: { code: "invalid_puzzle_token", message: "puzzleToken is invalid" },
   });
 });
 
