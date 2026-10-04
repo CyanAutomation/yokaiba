@@ -8,6 +8,7 @@ test("version and readiness expose deployed build and rate-limit configuration",
   const env = {
     BUILD_VERSION: "0.1.0-test", BUILD_SHA: "deadbeef",
     REST_RATE_LIMITER: { limit: async () => ({ success: true }) },
+    REST_GENERATE_RATE_LIMITER: { limit: async () => ({ success: true }) },
     VERIFY_RATE_LIMITER: { limit: async () => ({ success: true }) },
     MCP_PREAUTH_RATE_LIMITER: { limit: async () => ({ success: true }) },
     MCP_RATE_LIMITER: { limit: async () => ({ success: true }) },
@@ -22,7 +23,7 @@ test("version and readiness expose deployed build and rate-limit configuration",
   const ready = await isolatedWorker.fetch(new Request("https://yokaiba.test/readyz"), env, {} as ExecutionContext);
   assert.deepEqual(await ready.json(), {
     status: "ready", build: { serviceVersion: "0.1.0-test", buildSha: "deadbeef" },
-    rateLimitProvider: "configured", verifyRateLimitProvider: "configured",
+    rateLimitProvider: "configured", generateRateLimitProvider: "configured", verifyRateLimitProvider: "configured",
     mcpPreAuthRateLimitProvider: "configured", mcpRateLimitProvider: "configured", mcpGenerateRateLimitProvider: "configured",
     mcpPuzzleActionRateLimitProvider: "configured", outcomeTelemetryProvider: "configured",
   });
@@ -103,7 +104,7 @@ test("MCP provider rate limiting uses an authenticated principal and falls back 
   const ready = await isolatedWorker.fetch(new Request("https://yokaiba.test/readyz"), env, {} as ExecutionContext);
   assert.deepEqual(await ready.json(), {
     status: "ready", build: { serviceVersion: "0.1.0", buildSha: "local" },
-    rateLimitProvider: "fallback", verifyRateLimitProvider: "fallback",
+    rateLimitProvider: "fallback", generateRateLimitProvider: "fallback", verifyRateLimitProvider: "fallback",
     mcpPreAuthRateLimitProvider: "configured", mcpRateLimitProvider: "fallback", mcpGenerateRateLimitProvider: "fallback",
     mcpPuzzleActionRateLimitProvider: "fallback", outcomeTelemetryProvider: "disabled",
   });
@@ -205,7 +206,7 @@ test("worker falls back to local REST rate limiting when the provider fails", as
   const ready = await isolatedWorker.fetch(new Request("https://yokaiba.test/readyz"), env, {} as ExecutionContext);
   assert.deepEqual(await ready.json(), {
     status: "ready", build: { serviceVersion: "0.1.0", buildSha: "local" },
-    rateLimitProvider: "fallback", verifyRateLimitProvider: "fallback",
+    rateLimitProvider: "fallback", generateRateLimitProvider: "fallback", verifyRateLimitProvider: "fallback",
     mcpPreAuthRateLimitProvider: "fallback", mcpRateLimitProvider: "fallback", mcpGenerateRateLimitProvider: "fallback",
     mcpPuzzleActionRateLimitProvider: "fallback", outcomeTelemetryProvider: "disabled",
   });
@@ -225,8 +226,30 @@ test("worker allows supported CORS preflight headers", async () => {
   assert.equal(preflight.status, 204);
   assert.equal(preflight.headers.get("access-control-allow-origin"), "https://game.example");
   assert.equal(preflight.headers.get("access-control-allow-methods"), "GET, POST, OPTIONS");
-  assert.equal(preflight.headers.get("access-control-allow-headers"), "content-type");
+  assert.equal(preflight.headers.get("access-control-allow-headers"), "content-type, if-none-match");
   assert.equal(preflight.headers.get("vary"), "Origin");
+});
+
+test("worker permits conditional REST requests from an allowed browser origin", async () => {
+  const env = { REST_ALLOWED_ORIGINS: "https://game.example" };
+  const preflight = await worker.fetch(new Request("https://yokaiba.test/v1/scenarios", {
+    method: "OPTIONS",
+    headers: {
+      origin: "https://game.example",
+      "access-control-request-method": "GET",
+      "access-control-request-headers": "If-None-Match",
+    },
+  }), env, {} as ExecutionContext);
+
+  assert.equal(preflight.status, 204);
+  assert.equal(preflight.headers.get("access-control-allow-headers"), "content-type, if-none-match");
+
+  const response = await worker.fetch(new Request("https://yokaiba.test/v1/scenarios", {
+    headers: { origin: "https://game.example", "if-none-match": '"cached"', "cf-connecting-ip": "192.0.2.240" },
+  }), env, {} as ExecutionContext);
+  assert.match(response.headers.get("access-control-expose-headers") ?? "", /etag/i);
+  assert.match(response.headers.get("access-control-expose-headers") ?? "", /x-request-id/i);
+  assert.ok(response.headers.get("etag"));
 });
 
 test("worker rejects unsupported CORS preflight headers", async () => {
@@ -257,6 +280,7 @@ test("worker adds CORS and request-ID headers to REST responses", async () => {
 
   assert.equal(response.status, 200);
   assert.equal(response.headers.get("access-control-allow-origin"), "https://game.example");
+  assert.match(response.headers.get("access-control-expose-headers") ?? "", /etag/i);
   assert.ok(response.headers.get("x-request-id"));
   assert.equal(response.headers.get("ratelimit-limit"), "60");
   assert.equal(response.headers.get("ratelimit-policy"), "60;w=60");
@@ -651,6 +675,21 @@ test("worker uses the dedicated provider binding for answer verification", async
   assert.equal(response.headers.get("ratelimit-remaining"), null);
 });
 
+test("worker uses a separate provider and quota for REST puzzle generation", async () => {
+  const providerKeys: string[] = [];
+  const isolatedWorker = createWorker({ rateLimiter: () => { throw new Error("local fallback should not run"); } });
+  const response = await isolatedWorker.fetch(new Request("https://yokaiba.test/v1/puzzles/generate?templateId=tournament-order-v1&seed=rate-limit-seed", {
+    headers: { "cf-connecting-ip": "192.0.2.95" },
+  }), {
+    REST_RATE_LIMITER: { limit: async () => { throw new Error("general REST provider should not handle generation"); } },
+    REST_GENERATE_RATE_LIMITER: { limit: async ({ key }: { key: string }) => { providerKeys.push(key); return { success: true }; } },
+  }, {} as ExecutionContext);
+
+  assert.equal(response.status, 200);
+  assert.deepEqual(providerKeys, ["192.0.2.95:/v1/puzzles/generate"]);
+  assert.equal(response.headers.get("ratelimit-limit"), "10");
+});
+
 test("worker serves self-hosted Swagger UI with complete security controls", async () => {
   for (const path of ["/docs", "/docs/"]) {
     const docs = await worker.fetch(new Request(`https://yokaiba.test${path}`), {}, {} as ExecutionContext);
@@ -670,6 +709,7 @@ test("worker serves self-hosted Swagger UI with complete security controls", asy
     const docsDocument = await docs.text();
     assert.match(docsDocument, /href="\/swagger-ui\/swagger-ui\.css"/);
     assert.match(docsDocument, /src="\/swagger-ui\/swagger-ui-bundle\.js"/);
+    assert.match(docsDocument, /href="\/openapi\/chatgpt-actions-v1\.yaml"/);
     assert.doesNotMatch(docsDocument, /unpkg\.com/);
   }
 });
@@ -684,7 +724,7 @@ test("the self-hosted Swagger UI assets are included in the deployment bundle", 
   assert.match(wranglerConfiguration, /\[assets\]\s+directory\s*=\s*"\.\/public"/);
 });
 
-test("worker delegates OpenAPI requests to the canonical asset path", async () => {
+test("worker delegates OpenAPI requests to their canonical asset paths", async () => {
   const requestedUrls: string[] = [];
   const expectedBody = "mock OpenAPI asset body\n";
   const assets = {
@@ -694,14 +734,15 @@ test("worker delegates OpenAPI requests to the canonical asset path", async () =
     },
   };
 
-  const specification = await worker.fetch(
-    new Request("https://yokaiba.test/openapi/v1.yaml?cache-bust=test"),
-    { ASSETS: assets },
-    {} as ExecutionContext,
-  );
-
-  assert.deepEqual(requestedUrls, ["https://yokaiba.test/openapi/v1.yaml"]);
-  assert.equal(specification.status, 200);
-  assert.equal(specification.headers.get("content-type"), "application/yaml; charset=utf-8");
-  assert.equal(await specification.text(), expectedBody);
+  for (const path of ["/openapi/v1.yaml", "/openapi/chatgpt-actions-v1.yaml"]) {
+    const specification = await worker.fetch(
+      new Request(`https://yokaiba.test${path}?cache-bust=test`),
+      { ASSETS: assets },
+      {} as ExecutionContext,
+    );
+    assert.equal(specification.status, 200);
+    assert.equal(specification.headers.get("content-type"), "application/yaml; charset=utf-8");
+    assert.equal(await specification.text(), expectedBody);
+  }
+  assert.deepEqual(requestedUrls, ["https://yokaiba.test/openapi/v1.yaml", "https://yokaiba.test/openapi/chatgpt-actions-v1.yaml"]);
 });

@@ -1,5 +1,5 @@
 import { DifficultyUnavailableError, GENERATOR_VERSION, generatePuzzleForRequest, SOLVER_VERSION } from "../generation/generator.js";
-import { issuePuzzleToken } from "./puzzle-token.js";
+import { DEFAULT_PUZZLE_TOKEN_TTL_SECONDS, issuePuzzleToken } from "./puzzle-token.js";
 import { puzzleFromToken, puzzleHint, PuzzleActionError, verifyPuzzleAnswer, type HintKind } from "./puzzle-actions.js";
 import { json } from "./json-response.js";
 import type { GeneratedPuzzle, PuzzleTemplate } from "../domain/types.js";
@@ -20,6 +20,10 @@ export const VERSION_CACHE_CONTROL = "no-cache";
 export interface RestRouterOptions {
   /** Required to issue tamper-proof puzzle tokens for server-side verification. */
   puzzleTokenSecret?: string;
+  /** Previous HMAC keys may verify existing, unexpired v3 tokens during rotation. */
+  puzzleTokenPreviousSecrets?: readonly string[];
+  /** New token lifetime. Defaults to seven days and is capped at 30 days. */
+  puzzleTokenTtlSeconds?: number;
   serviceVersion?: string;
   buildSha?: string;
   /** Durable anonymous outcome sink. The endpoint returns 202 only after this accepts the event. */
@@ -71,20 +75,29 @@ async function readJsonBody(request: Request): Promise<unknown> {
   }
 }
 
-async function publicPuzzle(puzzle: GeneratedPuzzle, puzzleTokenSecret?: string) {
+async function publicPuzzle(puzzle: GeneratedPuzzle, options: RestRouterOptions) {
   const { solution: _solution, spec, ...rest } = puzzle;
-  return { ...rest, spec, ...(puzzleTokenSecret ? { puzzleToken: await issuePuzzleToken(puzzle, puzzleTokenSecret) } : {}) };
+  return {
+    ...rest,
+    spec,
+    ...(options.puzzleTokenSecret ? {
+      puzzleToken: await issuePuzzleToken(puzzle, options.puzzleTokenSecret, {
+        ttlSeconds: options.puzzleTokenTtlSeconds ?? DEFAULT_PUZZLE_TOKEN_TTL_SECONDS,
+      }),
+    } : {}),
+  };
 }
 
 async function generationRequest(request: Request) {
   const body = await readJsonBody(request);
   if (!body || typeof body !== "object" || Array.isArray(body)) throw new TypeError("request body must be an object");
-  return normalizeGenerationParameters(body as Record<string, unknown>);
+  const value = body as Record<string, unknown>;
+  return normalizeGenerationParameters({ ...value, ...(value.seed === undefined ? { seed: crypto.randomUUID() } : {}) });
 }
 
 function requestedHintKind(value: unknown): HintKind {
   const kind = value === undefined ? "clue" : value;
-  if (kind !== "clue" && kind !== "elimination" && kind !== "placement") throw new TypeError("kind must be clue, elimination, or placement");
+  if (kind !== "clue" && kind !== "elimination") throw new TypeError("kind must be clue or elimination");
   return kind;
 }
 
@@ -94,11 +107,11 @@ function requestedHintIndex(value: unknown): number {
   return value;
 }
 
-async function protectedPuzzle(request: Request, templates: Map<string, PuzzleTemplate>, secret: string) {
+async function protectedPuzzle(request: Request, templates: Map<string, PuzzleTemplate>, secrets: readonly string[]) {
   const body = await readJsonBody(request);
   if (!body || typeof body !== "object" || Array.isArray(body)) throw new TypeError("request body must be an object");
   const value = body as Record<string, unknown>;
-  return { value, puzzle: await puzzleFromToken(puzzleTokenValue(value), templates, secret) };
+  return { value, puzzle: await puzzleFromToken(puzzleTokenValue(value), templates, secrets) };
 }
 
 function puzzleTokenValue(value: Record<string, unknown>): string {
@@ -199,10 +212,10 @@ async function outcomeRoute(request: Request, templates: Map<string, PuzzleTempl
   }
 }
 
-async function hintRoute(request: Request, templates: Map<string, PuzzleTemplate>, secret?: string): Promise<Response> {
-  if (!secret) return json({ error: { code: "not_configured", message: "puzzle hints are not configured" } }, 503);
+async function hintRoute(request: Request, templates: Map<string, PuzzleTemplate>, secrets: readonly string[]): Promise<Response> {
+  if (secrets.length === 0) return json({ error: { code: "not_configured", message: "puzzle hints are not configured" } }, 503);
   try {
-    const { value, puzzle } = await protectedPuzzle(request, templates, secret);
+    const { value, puzzle } = await protectedPuzzle(request, templates, secrets);
     rejectUnknownFields(value, ["puzzleToken", "kind", "hintIndex"]);
     return json(puzzleHint(puzzle, requestedHintKind(value.kind), requestedHintIndex(value.hintIndex)));
   } catch (error) {
@@ -210,8 +223,8 @@ async function hintRoute(request: Request, templates: Map<string, PuzzleTemplate
   }
 }
 
-async function verificationRoute(request: Request, templates: Map<string, PuzzleTemplate>, secret?: string): Promise<Response> {
-  if (!secret) return json({ error: { code: "not_configured", message: "puzzle verification is not configured" } }, 503);
+async function verificationRoute(request: Request, templates: Map<string, PuzzleTemplate>, secrets: readonly string[]): Promise<Response> {
+  if (secrets.length === 0) return json({ error: { code: "not_configured", message: "puzzle verification is not configured" } }, 503);
   try {
     const body = await readJsonBody(request);
     if (!body || typeof body !== "object" || Array.isArray(body)) throw new TypeError("request body must be an object");
@@ -219,7 +232,7 @@ async function verificationRoute(request: Request, templates: Map<string, Puzzle
     rejectUnknownFields(value, ["puzzleToken", "answer"]);
     const puzzleToken = puzzleTokenValue(value);
     if (!("answer" in value)) throw new TypeError("answer is required");
-    const puzzle = await puzzleFromToken(puzzleToken, templates, secret);
+    const puzzle = await puzzleFromToken(puzzleToken, templates, secrets);
     return json({ correct: verifyPuzzleAnswer(puzzle, value.answer) });
   } catch (error) {
     return badRequest(error);
@@ -232,11 +245,19 @@ async function generationRoute(
   templates: Map<string, PuzzleTemplate>,
   options: RestRouterOptions,
 ): Promise<Response> {
+  let parameters: ReturnType<typeof parseGenerationQuery>;
   try {
-    const { templateId, seed, difficultyLevel, allowSeedFallback } = request.method === "POST" ? await generationRequest(request) : parseGenerationQuery(url);
-    const template = templates.get(templateId);
-    if (!template) return json({ error: { code: "not_found", message: "unknown templateId" } }, 404);
-    return json(await publicPuzzle(generatePuzzleForRequest(template, seed, difficultyLevel, allowSeedFallback), options.puzzleTokenSecret), 200,
+    parameters = request.method === "POST" ? await generationRequest(request) : parseGenerationQuery(url);
+  } catch (error) {
+    return badRequest(error);
+  }
+
+  const { templateId, seed, difficultyLevel, allowSeedFallback } = parameters;
+  const template = templates.get(templateId);
+  if (!template) return json({ error: { code: "not_found", message: "unknown templateId" } }, 404);
+
+  try {
+    return json(await publicPuzzle(generatePuzzleForRequest(template, seed, difficultyLevel, allowSeedFallback), options), 200,
       request.method === "GET" ? { "cache-control": GENERATED_PUZZLE_CACHE_CONTROL } : undefined);
   } catch (error) {
     if (error instanceof DifficultyUnavailableError) return json({
@@ -245,7 +266,7 @@ async function generationRoute(
       requestedDifficultyLevel: error.requestedDifficultyLevel,
       availableDifficultyLevels: error.availableDifficultyLevels,
     }, 422, request.method === "GET" ? { "cache-control": GENERATED_PUZZLE_CACHE_CONTROL } : undefined);
-    return badRequest(error);
+    return json({ error: { code: "generation_failed", message: "puzzle generation failed" } }, 500);
   }
 }
 
@@ -258,8 +279,8 @@ export function createRestRouter(templates: readonly PuzzleTemplate[], options: 
     ["GET /v1/capabilities", async () => json(publicCapabilities(templates, options.puzzleTokenSecret, Boolean(options.recordOutcome)), 200, { "cache-control": SCENARIOS_CACHE_CONTROL })],
     ["GET /v1/version", async () => json({ serviceVersion: options.serviceVersion ?? "0.1.0", buildSha: options.buildSha ?? "local", generatorVersion: GENERATOR_VERSION, solverVersion: SOLVER_VERSION }, 200, { "cache-control": VERSION_CACHE_CONTROL })],
     ["POST /v1/events", request => outcomeRoute(request, byId, options.recordOutcome)],
-    ["POST /v1/puzzles/hint", request => hintRoute(request, byId, options.puzzleTokenSecret)],
-    ["POST /v1/puzzles/verify", request => verificationRoute(request, byId, options.puzzleTokenSecret)],
+    ["POST /v1/puzzles/hint", request => hintRoute(request, byId, [options.puzzleTokenSecret, ...(options.puzzleTokenPreviousSecrets ?? [])].filter((secret): secret is string => Boolean(secret)))],
+    ["POST /v1/puzzles/verify", request => verificationRoute(request, byId, [options.puzzleTokenSecret, ...(options.puzzleTokenPreviousSecrets ?? [])].filter((secret): secret is string => Boolean(secret)))],
     ["GET /v1/puzzles/generate", (request, url) => generationRoute(request, url, byId, options)],
     ["POST /v1/puzzles/generate", (request, url) => generationRoute(request, url, byId, options)],
   ]);
@@ -272,6 +293,14 @@ export function createRestRouter(templates: readonly PuzzleTemplate[], options: 
       return json({ error: { code: "bad_request", message: "Invalid URL" } }, 400);
     }
     const handler = routes.get(`${request.method} ${url.pathname}`);
-    return handler ? handler(request, url) : json({ error: { code: "not_found", message: "route not found" } }, 404);
+    if (handler) return handler(request, url);
+    const allowedMethods = [...routes.keys()]
+      .filter(route => route.slice(route.indexOf(" ") + 1) === url.pathname)
+      .map(route => route.slice(0, route.indexOf(" ")))
+      .sort();
+    if (allowedMethods.length > 0) {
+      return json({ error: { code: "method_not_allowed", message: "Method not allowed" } }, 405, { allow: allowedMethods.join(", ") });
+    }
+    return json({ error: { code: "not_found", message: "route not found" } }, 404);
   };
 }

@@ -4,17 +4,13 @@ import { puzzleHint } from "../src/api/puzzle-actions.js";
 import { generatePuzzle } from "../src/generation/generator.js";
 import { tournamentOrderTemplate } from "../src/templates/tournament-order.js";
 
-test("placement hints reject puzzles without a non-base category", () => {
-  const puzzle = generatePuzzle(tournamentOrderTemplate, "empty-category-hint");
-  puzzle.spec = {
-    ...puzzle.spec,
-    categories: puzzle.spec.categories.filter(category => category.id === puzzle.spec.baseCategory),
-  };
-
-  assert.throws(
-    () => puzzleHint(puzzle, "placement"),
-    /No non-base categories available for placement hints/,
-  );
+test("clue and elimination hints never contain a solution placement", () => {
+  const puzzle = generatePuzzle(tournamentOrderTemplate, "spoiler-safe-hint");
+  for (const kind of ["clue", "elimination"] as const) {
+    const hint = puzzleHint(puzzle, kind);
+    assert.equal("placement" in hint, false);
+    assert.deepEqual(Object.keys(hint).sort(), ["clue", "kind"]);
+  }
 });
 
 test("clue and elimination hints reject puzzles without clues", () => {
