@@ -1,12 +1,11 @@
 import { DifficultyUnavailableError, generatePuzzleForRequest } from "../generation/generator.js";
 import type { GeneratedPuzzle, PuzzleSpec, PuzzleTemplate, Solution } from "../domain/types.js";
-import { verifyPuzzleToken } from "./puzzle-token.js";
+import { verifyPuzzleToken, type PuzzleTokenSecrets } from "./puzzle-token.js";
 
-export type HintKind = "clue" | "elimination" | "placement";
+export type HintKind = "clue" | "elimination";
 
 export type PuzzleHint =
-  | { kind: "clue" | "elimination"; clue: { id: string; text: string } }
-  | { kind: "placement"; placement: { subject: string; category: string; value: string } };
+  { kind: "clue" | "elimination"; clue: { id: string; text: string } };
 
 export class PuzzleActionError extends TypeError {
   readonly code: "invalid_puzzle_token" | "unsupported_puzzle_version";
@@ -25,8 +24,8 @@ function supportsTokenGeneratorVersion(tokenVersion: string, generatedVersion: s
   );
 }
 
-export async function puzzleFromToken(puzzleToken: string, templates: Map<string, PuzzleTemplate>, secret: string): Promise<GeneratedPuzzle> {
-  const token = await verifyPuzzleToken(puzzleToken, secret);
+export async function puzzleFromToken(puzzleToken: string, templates: Map<string, PuzzleTemplate>, secrets: PuzzleTokenSecrets): Promise<GeneratedPuzzle> {
+  const token = await verifyPuzzleToken(puzzleToken, secrets);
   if (!token) throw new PuzzleActionError("invalid_puzzle_token", "puzzleToken is invalid");
   const template = templates.get(token.templateId);
   if (!template) throw new PuzzleActionError("invalid_puzzle_token", "puzzleToken references an unknown template");
@@ -90,25 +89,7 @@ export function verifyPuzzleAnswer(puzzle: GeneratedPuzzle, answer: unknown): bo
   return sameSolution(puzzle.solution, validateAnswer(puzzle.spec, answer));
 }
 
-function placementHint(puzzle: GeneratedPuzzle, hintIndex: number): PuzzleHint {
-  const baseCategory = puzzle.spec.categories.find(candidate => candidate.id === puzzle.spec.baseCategory)!;
-  const categories = puzzle.spec.categories.filter(candidate => candidate.id !== puzzle.spec.baseCategory);
-  if (categories.length === 0) throw new Error("No non-base categories available for placement hints");
-  const totalCells = baseCategory.values.length * categories.length;
-  const cellIndex = hintIndex % totalCells;
-  const subjectIndex = Math.floor(cellIndex / categories.length);
-  const category = categories[cellIndex % categories.length]!;
-  return {
-    kind: "placement",
-    placement: {
-      subject: baseCategory.values[subjectIndex]!,
-      category: category.id,
-      value: puzzle.solution.assignments[category.id][subjectIndex]!,
-    },
-  };
-}
-
-function clueHint(puzzle: GeneratedPuzzle, kind: Exclude<HintKind, "placement">, hintIndex: number): PuzzleHint {
+function clueHint(puzzle: GeneratedPuzzle, kind: HintKind, hintIndex: number): PuzzleHint {
   const candidates = kind === "elimination"
     ? puzzle.clues.filter(candidate => candidate.constraint.kind === "notMatches")
     : puzzle.clues;
@@ -118,7 +99,7 @@ function clueHint(puzzle: GeneratedPuzzle, kind: Exclude<HintKind, "placement">,
   return { kind: kind === "elimination" && clue.constraint.kind === "notMatches" ? "elimination" : "clue", clue: { id: clue.id, text: clue.text } };
 }
 
-/** Return a deterministic hint at the caller's current hint index; indices wrap when a hint pool is exhausted. */
+/** Return one public clue at a deterministic index; no hint contains a solution placement. */
 export function puzzleHint(puzzle: GeneratedPuzzle, kind: HintKind = "clue", hintIndex = 0): PuzzleHint {
-  return kind === "placement" ? placementHint(puzzle, hintIndex) : clueHint(puzzle, kind, hintIndex);
+  return clueHint(puzzle, kind, hintIndex);
 }

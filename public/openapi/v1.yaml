@@ -3,7 +3,7 @@ info:
   title: Yokaiba API
   version: 0.1.0
   description: |
-    Deterministic, uniquely-solvable judo logic-grid puzzles. REST is public; MCP uses a separate API key. The Streamable HTTP MCP endpoint is `/mcp`; it offers `list_scenarios` and `generate_puzzle`, and signed puzzle actions when `PUZZLE_TOKEN_SECRET` is configured. MCP authentication and tool discovery use MCP protocol requests, not REST paths. Outcome telemetry is written to a configured Cloudflare Analytics Engine dataset; payloads are anonymous and unknown fields are discarded. See the repository README for MCP connection guidance.
+    Deterministic, uniquely-solvable judo logic-grid puzzles. REST is public; MCP uses a separate API key. The Streamable HTTP MCP endpoint is `/mcp`; it offers `list_scenarios` and `generate_puzzle`, plus `verify_puzzle_answer` and `get_puzzle_hint` when `PUZZLE_TOKEN_SECRET` is configured. MCP authentication and tool discovery use MCP protocol requests, not REST paths. The Action-focused REST contract is available at `/openapi/chatgpt-actions-v1.yaml`. Outcome telemetry is written to a configured Cloudflare Analytics Engine dataset; payloads are anonymous and unknown fields are discarded. See the repository README for MCP connection guidance.
     Cross-origin browser clients must be listed in the `REST_ALLOWED_ORIGINS` Worker secret; unlisted origins receive no CORS permission.
 servers:
   - url: /
@@ -13,6 +13,7 @@ servers:
 paths:
   /:
     get:
+      operationId: redirectToDocs
       summary: Redirect to the interactive API documentation
       responses:
         '302':
@@ -23,6 +24,7 @@ paths:
             X-Request-Id: { $ref: '#/components/headers/RequestId' }
         '405': { $ref: '#/components/responses/MethodNotAllowed' }
     head:
+      operationId: headRootRedirect
       summary: Return redirect headers without a response body
       responses:
         '302':
@@ -34,6 +36,7 @@ paths:
         '405': { $ref: '#/components/responses/MethodNotAllowed' }
   /healthz:
     get:
+      operationId: getHealth
       summary: Liveness check
       responses:
         '200':
@@ -45,6 +48,7 @@ paths:
               schema: { $ref: '#/components/schemas/Health' }
         '405': { $ref: '#/components/responses/MethodNotAllowed' }
     head:
+      operationId: headHealth
       summary: Return liveness headers without a response body
       responses:
         '200':
@@ -53,6 +57,7 @@ paths:
         '405': { $ref: '#/components/responses/MethodNotAllowed' }
   /readyz:
     get:
+      operationId: getReadiness
       summary: Readiness check, including rate-limit provider configuration
       description: The core Worker can remain ready while optional providers are disabled, falling back, or failing. Inspect each provider field for deployment state.
       responses:
@@ -65,6 +70,7 @@ paths:
               schema: { $ref: '#/components/schemas/Readiness' }
         '405': { $ref: '#/components/responses/MethodNotAllowed' }
     head:
+      operationId: headReadiness
       summary: Return readiness headers without a response body
       responses:
         '200':
@@ -73,6 +79,7 @@ paths:
         '405': { $ref: '#/components/responses/MethodNotAllowed' }
   /docs:
     get:
+      operationId: getDocs
       summary: Interactive Swagger UI
       responses:
         '200':
@@ -83,6 +90,7 @@ paths:
             text/html: { schema: { type: string } }
         '405': { $ref: '#/components/responses/MethodNotAllowed' }
     head:
+      operationId: headDocs
       summary: Return documentation headers without a response body
       responses:
         '200':
@@ -91,6 +99,7 @@ paths:
         '405': { $ref: '#/components/responses/MethodNotAllowed' }
   /docs/:
     get:
+      operationId: getDocsTrailingSlash
       summary: Interactive Swagger UI (trailing-slash alias)
       responses:
         '200':
@@ -99,6 +108,7 @@ paths:
           content: { text/html: { schema: { type: string } } }
         '405': { $ref: '#/components/responses/MethodNotAllowed' }
     head:
+      operationId: headDocsTrailingSlash
       summary: Return documentation headers without a response body
       responses:
         '200':
@@ -107,6 +117,7 @@ paths:
         '405': { $ref: '#/components/responses/MethodNotAllowed' }
   /openapi/v1.yaml:
     get:
+      operationId: getOpenApiContract
       summary: Download the OpenAPI contract
       responses:
         '200':
@@ -117,14 +128,34 @@ paths:
             application/yaml: { schema: { type: string } }
         '405': { $ref: '#/components/responses/MethodNotAllowed' }
     head:
+      operationId: headOpenApiContract
       summary: Return the contract headers without a response body
       responses:
         '200':
           description: OpenAPI 3.1 YAML document
           headers: { X-Request-Id: { $ref: '#/components/headers/RequestId' } }
         '405': { $ref: '#/components/responses/MethodNotAllowed' }
+  /openapi/chatgpt-actions-v1.yaml:
+    get:
+      operationId: getChatgptActionsContract
+      summary: Download the ChatGPT Actions OpenAPI contract
+      responses:
+        '200':
+          description: Action-focused OpenAPI 3.1 YAML document
+          headers: { X-Request-Id: { $ref: '#/components/headers/RequestId' } }
+          content: { application/yaml: { schema: { type: string } } }
+        '405': { $ref: '#/components/responses/MethodNotAllowed' }
+    head:
+      operationId: headChatgptActionsContract
+      summary: Return the Action contract headers without a response body
+      responses:
+        '200':
+          description: Action-focused OpenAPI 3.1 YAML document
+          headers: { X-Request-Id: { $ref: '#/components/headers/RequestId' } }
+        '405': { $ref: '#/components/responses/MethodNotAllowed' }
   /v1/scenarios:
     get:
+      operationId: listScenarios
       summary: List available puzzle scenarios
       responses:
         '200':
@@ -142,9 +173,11 @@ paths:
             application/json:
               schema: { $ref: '#/components/schemas/ScenarioList' }
         '304': { $ref: '#/components/responses/NotModified' }
+        '405': { $ref: '#/components/responses/MethodNotAllowed' }
         '429': { $ref: '#/components/responses/RateLimited' }
   /v1/capabilities:
     get:
+      operationId: getCapabilities
       summary: Discover public API features and scenario difficulty bands
       description: Cacheable client-startup metadata. `answerVerification` reports whether signed puzzle-token verification is enabled on this deployment.
       responses:
@@ -163,9 +196,11 @@ paths:
             application/json:
               schema: { $ref: '#/components/schemas/Capabilities' }
         '304': { $ref: '#/components/responses/NotModified' }
+        '405': { $ref: '#/components/responses/MethodNotAllowed' }
         '429': { $ref: '#/components/responses/RateLimited' }
   /v1/version:
     get:
+      operationId: getVersion
       summary: Return service and reproducibility versions
       responses:
         '200':
@@ -183,9 +218,11 @@ paths:
             application/json:
               schema: { $ref: '#/components/schemas/Version' }
         '304': { $ref: '#/components/responses/NotModified' }
+        '405': { $ref: '#/components/responses/MethodNotAllowed' }
         '429': { $ref: '#/components/responses/RateLimited' }
   /v1/puzzles/generate:
     get:
+      operationId: generatePuzzleCacheable
       summary: Generate a cacheable deterministic puzzle
       description: Unknown and duplicate query parameters are rejected. The same supported inputs reproduce the same puzzle for the deployed generator and solver versions.
       parameters:
@@ -212,9 +249,12 @@ paths:
         '304': { $ref: '#/components/responses/NotModified' }
         '400': { $ref: '#/components/responses/BadRequest' }
         '404': { $ref: '#/components/responses/NotFound' }
+        '405': { $ref: '#/components/responses/MethodNotAllowed' }
         '422': { $ref: '#/components/responses/DifficultyUnavailable' }
         '429': { $ref: '#/components/responses/RateLimited' }
+        '500': { $ref: '#/components/responses/InternalServerError' }
     post:
+      operationId: generatePuzzle
       summary: Generate a deterministic puzzle from a JSON request
       requestBody:
         required: true
@@ -236,10 +276,13 @@ paths:
               schema: { $ref: '#/components/schemas/GeneratedPuzzle' }
         '400': { $ref: '#/components/responses/BadRequest' }
         '404': { $ref: '#/components/responses/NotFound' }
+        '405': { $ref: '#/components/responses/MethodNotAllowed' }
         '422': { $ref: '#/components/responses/DifficultyUnavailable' }
         '429': { $ref: '#/components/responses/RateLimited' }
+        '500': { $ref: '#/components/responses/InternalServerError' }
   /v1/puzzles/verify:
     post:
+      operationId: verifyPuzzleAnswer
       summary: Verify a submitted puzzle answer
       description: |
         Checks a complete answer server-side using a signed token returned by puzzle generation.
@@ -263,10 +306,12 @@ paths:
             application/json:
               schema: { $ref: '#/components/schemas/PuzzleVerificationResult' }
         '400': { $ref: '#/components/responses/BadRequest' }
+        '405': { $ref: '#/components/responses/MethodNotAllowed' }
         '429': { $ref: '#/components/responses/RateLimited' }
         '503': { $ref: '#/components/responses/NotConfigured' }
   /v1/puzzles/hint:
     post:
+      operationId: getPuzzleHint
       summary: Return one bounded, token-authorized puzzle hint
       requestBody:
         required: true
@@ -283,10 +328,12 @@ paths:
             application/json:
               schema: { $ref: '#/components/schemas/PuzzleHintResult' }
         '400': { $ref: '#/components/responses/BadRequest' }
+        '405': { $ref: '#/components/responses/MethodNotAllowed' }
         '429': { $ref: '#/components/responses/RateLimited' }
         '503': { $ref: '#/components/responses/NotConfigured' }
   /v1/events:
     post:
+      operationId: recordPuzzleOutcome
       summary: Record an anonymous puzzle outcome for calibration
       requestBody:
         required: true
@@ -303,6 +350,7 @@ paths:
             application/json:
               schema: { $ref: '#/components/schemas/Accepted' }
         '400': { $ref: '#/components/responses/BadRequest' }
+        '405': { $ref: '#/components/responses/MethodNotAllowed' }
         '429': { $ref: '#/components/responses/RateLimited' }
         '503': { $ref: '#/components/responses/NotConfigured' }
 components:
@@ -403,6 +451,10 @@ components:
       description: The service is missing required server configuration.
       headers: { X-Request-Id: { $ref: '#/components/headers/RequestId' } }
       content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } }
+    InternalServerError:
+      description: Puzzle generation failed unexpectedly.
+      headers: { X-Request-Id: { $ref: '#/components/headers/RequestId' } }
+      content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } }
   schemas:
     Health:
       type: object
@@ -412,11 +464,12 @@ components:
         build: { $ref: '#/components/schemas/Build' }
     Readiness:
       type: object
-      required: [status, build, rateLimitProvider, verifyRateLimitProvider, mcpPreAuthRateLimitProvider, mcpRateLimitProvider, mcpGenerateRateLimitProvider, mcpPuzzleActionRateLimitProvider, outcomeTelemetryProvider]
+      required: [status, build, rateLimitProvider, generateRateLimitProvider, verifyRateLimitProvider, mcpPreAuthRateLimitProvider, mcpRateLimitProvider, mcpGenerateRateLimitProvider, mcpPuzzleActionRateLimitProvider, outcomeTelemetryProvider]
       properties:
         status: { type: string, const: ready }
         build: { $ref: '#/components/schemas/Build' }
         rateLimitProvider: { type: string, enum: [configured, fallback] }
+        generateRateLimitProvider: { type: string, enum: [configured, fallback] }
         verifyRateLimitProvider: { type: string, enum: [configured, fallback] }
         mcpPreAuthRateLimitProvider: { type: string, enum: [configured, fallback] }
         mcpRateLimitProvider: { type: string, enum: [configured, fallback] }
@@ -498,11 +551,11 @@ components:
       properties: { scenarios: { type: array, items: { $ref: '#/components/schemas/Scenario' } } }
     GenerationRequest:
       type: object
-      required: [templateId, seed]
+      required: [templateId]
       additionalProperties: false
       properties:
         templateId: { type: string, minLength: 1, maxLength: 128 }
-        seed: { type: string, minLength: 1, maxLength: 128 }
+        seed: { type: string, minLength: 1, maxLength: 128, description: Optional replay seed. Omission generates a server-side seed returned in requestedSeed and seed. }
         difficultyLevel: { type: integer, minimum: 1, maximum: 12 }
         allowSeedFallback: { type: boolean, default: false }
     Constraint:
@@ -551,7 +604,7 @@ components:
         solverVersion: { type: string }
         puzzleToken:
           type: string
-          description: HMAC-signed token required by the verification endpoint. Its base64url payload contains reproducibility metadata (including the seed), so it is not an encryption or anti-cheating mechanism; present when PUZZLE_TOKEN_SECRET is configured.
+          description: HMAC-signed token required by verification and hints. New tokens expire after the configured lifetime (seven days by default, maximum 30 days). Its base64url payload contains reproducibility metadata (including the seed), so it is not encryption; present when PUZZLE_TOKEN_SECRET is configured.
         spec: { $ref: '#/components/schemas/PuzzleSpec' }
         clues: { type: array, items: { $ref: '#/components/schemas/Clue' } }
         difficulty: { $ref: '#/components/schemas/Difficulty' }
@@ -600,15 +653,14 @@ components:
       additionalProperties: false
       properties:
         puzzleToken: { type: string, minLength: 1 }
-        kind: { type: string, enum: [clue, elimination, placement], default: clue }
+        kind: { type: string, enum: [clue, elimination], default: clue }
         hintIndex: { type: integer, minimum: 0, maximum: 100, default: 0, description: Deterministic index into the requested hint pool; indices wrap when the pool is exhausted. }
     PuzzleHintResult:
       type: object
-      required: [kind]
+      required: [kind, clue]
       properties:
-        kind: { type: string, enum: [clue, elimination, placement] }
+        kind: { type: string, enum: [clue, elimination] }
         clue: { type: object, properties: { id: { type: string }, text: { type: string } } }
-        placement: { type: object, properties: { subject: { type: string }, category: { type: string }, value: { type: string } } }
     PuzzleOutcomeEvent:
       type: object
       required: [event, templateId]
