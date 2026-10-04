@@ -30,26 +30,27 @@ test("Kaseki validation commands only call scripts defined by this package", () 
   }
 });
 
-test("Kaseki DRY dispatch runs only from the repository's default branch", () => {
-  const dry = readWorkflow("kaseki-dry.yaml");
-
-  assert.match(
-    dry,
-    /^  dry_sweep:\n[\s\S]*?^    if: github\.event_name == 'schedule' \|\| github\.ref == format\('refs\/heads\/\{0\}', github\.event\.repository\.default_branch\)$/m,
-  );
-  assert.match(dry, /^      REF: \$\{\{ github\.ref_name \}\}$/m);
-});
-
-test("Kaseki scheduled runs use the default branch without relying on an event payload", () => {
+test("Kaseki workflows only run from main and submit the immutable event commit", () => {
   const dry = readWorkflow("kaseki-dry.yaml");
   const docs = readWorkflow("kaseki-docs.yaml");
-  const scheduleAwareGuard = /^    if: github\.event_name == 'schedule' \|\| github\.ref == format\('refs\/heads\/\{0\}', github\.event\.repository\.default_branch\)$/gm;
 
-  assert.equal([...dry.matchAll(scheduleAwareGuard)].length, 1);
-  assert.equal([...docs.matchAll(scheduleAwareGuard)].length, 4);
+  assert.match(dry, /^    if: github\.ref == 'refs\/heads\/main'$/m);
+  assert.match(docs, /^    if: github\.ref == 'refs\/heads\/main'$/m);
+  assert.doesNotMatch(dry, /github\.event_name == 'schedule'/);
+  assert.doesNotMatch(docs, /github\.event_name == 'schedule'/);
+  assert.match(dry, /^      REF: \$\{\{ github\.sha \}\}$/m);
+  assert.match(docs, /^  REF: \$\{\{ github\.sha \}\}$/m);
+});
+
+test("Kaseki sweeps share a deterministic policy and keep run names readable", () => {
+  const dry = readWorkflow("kaseki-dry.yaml");
+  const docs = readWorkflow("kaseki-docs.yaml");
+  const mainOnlyGuard = /^    if: github\.ref == 'refs\/heads\/main'$/gm;
+
+  assert.equal([...dry.matchAll(mainOnlyGuard)].length, 1);
+  assert.equal([...docs.matchAll(mainOnlyGuard)].length, 1);
   assert.match(dry, /^run-name: >-\n  DRY sweep · .*@\$\{\{ github\.ref_name \}\}$/m);
   assert.match(docs, /^run-name: >-\n  Docs sweep · .*@\$\{\{ github\.ref_name \}\}$/m);
-  assert.match(docs, /^  REF: \$\{\{ github\.ref_name \}\}$/m);
 });
 
 test("Kaseki DRY pins its controller and limits the token to authenticated steps", () => {
@@ -87,10 +88,52 @@ test("Kaseki DRY controller validation accepts the approved host and rejects att
   assert.notEqual(checkControllerUrl("https://kaseki-tunnel.scheimann.xyz.attacker.example").status, 0);
 });
 
-test("Kaseki DRY explicitly requests draft pull-request publication", () => {
+test("Kaseki sweeps request normal pull-request publication and cap diffs", () => {
+  const dry = readWorkflow("kaseki-dry.yaml");
+  const docs = readWorkflow("kaseki-docs.yaml");
+
+  assert.match(dry, /^\s+publishMode: "pr",?$/m);
+  assert.match(docs, /^\s+publishMode: "pr",?$/m);
+  assert.match(dry, /^\s+maxDiffBytes: 102400,?$/m);
+  assert.match(docs, /^\s+maxDiffBytes: 102400,?$/m);
+  assert.doesNotMatch(`${dry}\n${docs}`, /draft_pr/);
+});
+
+test("Kaseki submissions reuse an idempotency key when a workflow run is rerun", () => {
+  for (const name of ["kaseki-docs.yaml", "kaseki-dry.yaml"]) {
+    const workflow = readWorkflow(name);
+
+    assert.match(workflow, /uuidgen --sha1 --namespace @dns --name "\$GITHUB_REPOSITORY:\$GITHUB_WORKFLOW:\$GITHUB_RUN_ID"/);
+    assert.match(workflow, /--arg idempotencyKey "\$idempotency_key"/);
+    assert.doesNotMatch(workflow, /\/proc\/sys\/kernel\/random\/uuid|uuidgen \| tr/);
+  }
+});
+
+test("Kaseki Docs waits for a terminal run status within a wall-clock deadline", () => {
+  const docs = readWorkflow("kaseki-docs.yaml");
+
+  assert.match(docs, /^      - name: Wait for Kaseki completion$/m);
+  assert.match(docs, /poll_deadline=\$\(\(SECONDS \+ 11100\)\)/);
+  assert.match(docs, /^\s+completed\)/m);
+  assert.match(docs, /^\s+failed\)/m);
+  assert.match(docs, /No terminal status after 185 minutes/);
+});
+
+test("Kaseki DRY polling uses a wall-clock deadline instead of a poll count", () => {
   const dry = readWorkflow("kaseki-dry.yaml");
 
-  assert.match(dry, /^\s+publishMode: "draft_pr",?$/m);
+  assert.match(dry, /poll_deadline=\$\(\(SECONDS \+ 11100\)\)/);
+  assert.doesNotMatch(dry, /remaining_polls|seq 1 185/);
+});
+
+test("Cloudflare deployment disables checkout credential persistence and quotes shell inputs", () => {
+  const deploy = readWorkflow("deploy-cloudflare.yml");
+
+  assert.match(deploy, /uses: actions\/checkout@[^\n]+\n\s+with:\n\s+persist-credentials: false/);
+  assert.match(deploy, /BUILD_VERSION: \$\{\{ steps\.build\.outputs\.version \}\}/);
+  assert.match(deploy, /BUILD_SHA: \$\{\{ github\.sha \}\}/);
+  assert.match(deploy, /--var "BUILD_VERSION:\$BUILD_VERSION" --var "BUILD_SHA:\$BUILD_SHA"/);
+  assert.doesNotMatch(deploy, /--var BUILD_VERSION:\$\{\{/);
 });
 
 test("Kaseki Docs keeps its token inside the gateway-authentication step", () => {
@@ -98,7 +141,7 @@ test("Kaseki Docs keeps its token inside the gateway-authentication step", () =>
   const tokenEnvironments = [...docs.matchAll(/^\s+KASEKI_API_TOKEN:\s*\$\{\{\s*secrets\.KASEKI_API_TOKEN\s*\}\}/gm)];
 
   assert.doesNotMatch(docs, /^ {6}KASEKI_API_TOKEN:/m, "the Kaseki token must not be job-wide");
-  assert.equal(tokenEnvironments.length, 2, "the gateway and submit steps each need the token");
+  assert.equal(tokenEnvironments.length, 3, "the gateway, submit, and poll steps each need the token");
   assert.ok(tokenEnvironments.every((match) => match[0].startsWith("          ")));
 });
 
@@ -106,4 +149,10 @@ test("validation checkout does not persist its read-only GitHub token", () => {
   const validate = readWorkflow("validate.yml");
 
   assert.match(validate, /uses: actions\/checkout@[^\n]+\n\s+with:\n\s+persist-credentials: false/);
+});
+
+test("GitHub workflows use a stable Ubuntu runner release", () => {
+  for (const name of ["validate.yml", "deploy-cloudflare.yml", "kaseki-docs.yaml", "kaseki-dry.yaml"]) {
+    assert.match(readWorkflow(name), /^\s+runs-on: ubuntu-24\.04$/m, `${name} should not float with ubuntu-latest`);
+  }
 });
