@@ -18,11 +18,13 @@ jobs:
     # Production releases must always use the protected default branch.
     if: github.ref == 'refs/heads/main'
     environment: production
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 15
 
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
 
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
@@ -50,8 +52,14 @@ jobs:
 
       - name: Deploy Worker
         id: deploy
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          WRANGLER_OUTPUT_FILE_PATH: ${{ runner.temp }}/wrangler-deploy-output.json
+          BUILD_VERSION: ${{ steps.build.outputs.version }}
+          BUILD_SHA: ${{ github.sha }}
         run: |
-          npx wrangler deploy --var BUILD_VERSION:${{ steps.build.outputs.version }} --var BUILD_SHA:${{ github.sha }}
+          npx wrangler deploy --var "BUILD_VERSION:$BUILD_VERSION" --var "BUILD_SHA:$BUILD_SHA"
           node <<'EOF'
           const fs = require("node:fs");
           const records = fs.readFileSync(process.env.WRANGLER_OUTPUT_FILE_PATH, "utf8").trim().split("\n").map(JSON.parse);
@@ -72,11 +80,6 @@ jobs:
           }
           fs.appendFileSync(process.env.GITHUB_OUTPUT, `deployment_url=${directUrls[0]}\n`);
           EOF
-        env:
-          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
-          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
-          WRANGLER_OUTPUT_FILE_PATH: ${{ runner.temp }}/wrangler-deploy-output.json
-
       - name: Probe direct Worker deployment
         run: node scripts/health-deployment.mjs
         env:
