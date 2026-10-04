@@ -113,8 +113,11 @@ function assertCoreOpenApiSchemas(schemas: OpenApiObject): void {
   assert.ok(schemas.Clue.properties.phraseVariant);
   assert.ok(schemas.GeneratedPuzzle.properties.generationStrategy);
   assert.ok(schemas.Readiness.properties.mcpPuzzleActionRateLimitProvider);
+  assert.ok(schemas.Readiness.properties.generateRateLimitProvider);
   assert.ok(schemas.Readiness.properties.outcomeTelemetryProvider);
   assert.ok(schemas.PuzzleHintRequest.properties.hintIndex);
+  assert.ok(schemas.PuzzleHintResult.required.includes("clue"));
+  assert.equal(schemas.PuzzleHintResult.properties.placement, undefined, "REST hint output must never include a solution placement");
   assert.deepEqual(schemas.TemplateMetadata.properties.difficultyCalibration.properties.scoreThresholds, {
     type: "array",
     minItems: 1,
@@ -152,16 +155,20 @@ test("OpenAPI documents every public REST endpoint", async () => {
       get: { statuses: ["200", "405"], headers: ["X-Request-Id"] },
       head: { statuses: ["200", "405"], headers: ["X-Request-Id"] },
     },
-    "/v1/scenarios": { get: { statuses: ["200", "304", "429"], schema: "ScenarioList", headers: ["Access-Control-Allow-Origin", "Cache-Control", "ETag", "X-Request-Id"] } },
-    "/v1/capabilities": { get: { statuses: ["200", "304", "429"], schema: "Capabilities", headers: ["Access-Control-Allow-Origin", "Cache-Control", "ETag", "X-Request-Id"] } },
-    "/v1/version": { get: { statuses: ["200", "304", "429"], schema: "Version", headers: ["Access-Control-Allow-Origin", "Cache-Control", "ETag", "X-Request-Id"] } },
-    "/v1/puzzles/generate": {
-      get: { statuses: ["200", "304", "400", "404", "422", "429"], schema: "GeneratedPuzzle", headers: ["Access-Control-Allow-Origin", "Cache-Control", "ETag", "X-Request-Id"] },
-      post: { statuses: ["200", "400", "404", "422", "429"], schema: "GeneratedPuzzle", requestSchema: "GenerationRequest", headers: ["Access-Control-Allow-Origin", "X-Request-Id"] },
+    "/openapi/chatgpt-actions-v1.yaml": {
+      get: { statuses: ["200", "405"], headers: ["X-Request-Id"] },
+      head: { statuses: ["200", "405"], headers: ["X-Request-Id"] },
     },
-    "/v1/puzzles/verify": { post: { statuses: ["200", "400", "429", "503"], schema: "PuzzleVerificationResult", requestSchema: "PuzzleVerificationRequest", headers: ["Access-Control-Allow-Origin", "X-Request-Id"] } },
-    "/v1/puzzles/hint": { post: { statuses: ["200", "400", "429", "503"], schema: "PuzzleHintResult", requestSchema: "PuzzleHintRequest", headers: ["Access-Control-Allow-Origin", "X-Request-Id"] } },
-    "/v1/events": { post: { statuses: ["202", "400", "429", "503"], schema: "Accepted", requestSchema: "PuzzleOutcomeEvent", headers: ["Access-Control-Allow-Origin", "X-Request-Id"], successStatus: "202" } },
+    "/v1/scenarios": { get: { statuses: ["200", "304", "405", "429"], schema: "ScenarioList", headers: ["Access-Control-Allow-Origin", "Cache-Control", "ETag", "X-Request-Id"] } },
+    "/v1/capabilities": { get: { statuses: ["200", "304", "405", "429"], schema: "Capabilities", headers: ["Access-Control-Allow-Origin", "Cache-Control", "ETag", "X-Request-Id"] } },
+    "/v1/version": { get: { statuses: ["200", "304", "405", "429"], schema: "Version", headers: ["Access-Control-Allow-Origin", "Cache-Control", "ETag", "X-Request-Id"] } },
+    "/v1/puzzles/generate": {
+      get: { statuses: ["200", "304", "400", "404", "405", "422", "429", "500"], schema: "GeneratedPuzzle", headers: ["Access-Control-Allow-Origin", "Cache-Control", "ETag", "X-Request-Id"] },
+      post: { statuses: ["200", "400", "404", "405", "422", "429", "500"], schema: "GeneratedPuzzle", requestSchema: "GenerationRequest", headers: ["Access-Control-Allow-Origin", "X-Request-Id"] },
+    },
+    "/v1/puzzles/verify": { post: { statuses: ["200", "400", "405", "429", "503"], schema: "PuzzleVerificationResult", requestSchema: "PuzzleVerificationRequest", headers: ["Access-Control-Allow-Origin", "X-Request-Id"] } },
+    "/v1/puzzles/hint": { post: { statuses: ["200", "400", "405", "429", "503"], schema: "PuzzleHintResult", requestSchema: "PuzzleHintRequest", headers: ["Access-Control-Allow-Origin", "X-Request-Id"] } },
+    "/v1/events": { post: { statuses: ["202", "400", "405", "429", "503"], schema: "Accepted", requestSchema: "PuzzleOutcomeEvent", headers: ["Access-Control-Allow-Origin", "X-Request-Id"], successStatus: "202" } },
   } as const;
 
   assert.deepEqual(Object.keys(specification.paths), Object.keys(endpoints));
@@ -174,6 +181,28 @@ test("OpenAPI documents every public REST endpoint", async () => {
     }
   }
   assertCoreOpenApiSchemas(specification.components.schemas);
+
+  const operationIds = (Object.values(specification.paths) as OpenApiObject[]).flatMap((pathItem: OpenApiObject) =>
+    Object.values(pathItem).map((operation: OpenApiObject) => operation.operationId));
+  assert.ok(operationIds.every(operationId => typeof operationId === "string" && operationId.length > 0), "every REST operation should have an operationId");
+  assert.equal(new Set(operationIds).size, operationIds.length, "REST operationIds should be unique");
+});
+
+test("the ChatGPT Actions contract is a small, self-contained OpenAPI surface", async () => {
+  const source = await readFile(new URL("../public/openapi/chatgpt-actions-v1.yaml", import.meta.url), "utf8");
+  const specification = parseOpenApiYaml(source);
+  validateOpenApiReferences(specification);
+  assert.deepEqual(Object.keys(specification.paths), ["/v1/scenarios", "/v1/puzzles/generate", "/v1/puzzles/verify", "/v1/puzzles/hint"]);
+  const generationRequest = resolveLocalRef(specification, specification.paths["/v1/puzzles/generate"].post.requestBody.content["application/json"].schema);
+  const hintRequest = resolveLocalRef(specification, specification.paths["/v1/puzzles/hint"].post.requestBody.content["application/json"].schema);
+  assert.equal(generationRequest.required.includes("seed"), false);
+  assert.equal(hintRequest.properties.kind.enum.includes("placement"), false);
+  assert.equal(specification.paths["/v1/events"], undefined, "telemetry ingestion should not be exposed as an assistant action");
+
+  const operationIds = (Object.values(specification.paths) as OpenApiObject[]).flatMap(pathItem =>
+    Object.values(pathItem).map((operation: OpenApiObject) => operation.operationId));
+  assert.ok(operationIds.every(operationId => typeof operationId === "string" && operationId.length > 0));
+  assert.equal(new Set(operationIds).size, operationIds.length, "Action operationIds should be unique");
 });
 
 test("REST generation redacts the hidden solution and includes reproducibility metadata", async () => {
@@ -195,6 +224,42 @@ test("REST generation redacts the hidden solution and includes reproducibility m
   assert.equal(difficulty.modelVersion, "yokaiba-difficulty-v4");
   assert.equal(typeof difficulty.evidence.score, "number");
   assert.ok(Array.isArray(body.clues));
+});
+
+test("REST POST generation creates a replayable seed when the caller omits it", async () => {
+  const route = createRestRouter([tournamentOrderTemplate]);
+  const response = await route(new Request("https://yokaiba.test/v1/puzzles/generate", {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ templateId: "tournament-order-v1" }),
+  }));
+
+  assert.equal(response.status, 200);
+  const puzzle = await response.json() as { requestedSeed: string; seed: string; id: string };
+  assert.ok(puzzle.requestedSeed.length > 0);
+  assert.equal(puzzle.seed, puzzle.requestedSeed);
+  assert.ok(puzzle.id.endsWith(`:${puzzle.seed}`));
+});
+
+test("REST masks unexpected generation failures behind a stable server error", async () => {
+  const brokenTemplate = Object.defineProperty({ ...tournamentOrderTemplate }, "metadata", {
+    get() { throw new Error("internal detail"); },
+  }) as PuzzleTemplate;
+  const route = createRestRouter([brokenTemplate]);
+  const response = await route(new Request("https://yokaiba.test/v1/puzzles/generate?templateId=tournament-order-v1&seed=error-seed"));
+
+  assert.equal(response.status, 500);
+  assert.deepEqual(await response.json(), { error: { code: "generation_failed", message: "puzzle generation failed" } });
+});
+
+test("REST returns 405 with Allow for a known path and 404 for an unknown path", async () => {
+  const route = createRestRouter([tournamentOrderTemplate]);
+  const wrongMethod = await route(new Request("https://yokaiba.test/v1/scenarios", { method: "POST" }));
+  assert.equal(wrongMethod.status, 405);
+  assert.equal(wrongMethod.headers.get("allow"), "GET");
+
+  const missing = await route(new Request("https://yokaiba.test/v1/missing", { method: "POST" }));
+  assert.equal(missing.status, 404);
 });
 
 test("REST supports cacheable deterministic GET generation", async () => {
@@ -323,28 +388,36 @@ test("REST can deterministically fall back to a nearby seed for an unavailable s
   if (body.seedFallbackAttempt) assert.notEqual(body.seed, body.requestedSeed);
 });
 
-test("REST provides bounded clue, elimination, and placement hints from a signed puzzle", async () => {
+test("REST provides spoiler-safe clue and elimination hints from a signed puzzle", async () => {
   const route = createRestRouter([tournamentOrderTemplate], { puzzleTokenSecret: "test-token-secret" });
   const generated = await route(new Request("https://yokaiba.test/v1/puzzles/generate?templateId=tournament-order-v1&seed=hint-seed"));
-  const { puzzleToken } = await generated.json() as { puzzleToken: string };
+  const { puzzleToken, clues } = await generated.json() as { puzzleToken: string; clues: Array<{ id: string }> };
   const clue = await route(new Request("https://yokaiba.test/v1/puzzles/hint", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ puzzleToken, kind: "clue" }) }));
   assert.equal(clue.status, 200);
-  assert.equal((await clue.json() as { kind: string }).kind, "clue");
-  const placement = await route(new Request("https://yokaiba.test/v1/puzzles/hint", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ puzzleToken, kind: "placement" }) }));
-  assert.equal(placement.status, 200);
-  const placementBody = await placement.json() as { kind: string; placement: { subject: string; category: string; value: string } };
-  assert.equal(placementBody.kind, "placement");
-  assert.equal(placementBody.placement.subject, "Aki");
-  assert.equal(placementBody.placement.category, "weight");
+  const clueBody = await clue.json() as { kind: string; clue: { id: string } };
+  assert.equal(clueBody.kind, "clue");
+  assert.equal(clueBody.clue.id, clues[0]!.id);
 
-  const nextPlacement = await route(new Request("https://yokaiba.test/v1/puzzles/hint", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ puzzleToken, kind: "placement", hintIndex: 1 }) }));
-  const nextPlacementBody = await nextPlacement.json() as { kind: string; placement: { subject: string; category: string; value: string } };
-  assert.equal(nextPlacementBody.kind, "placement");
-  assert.equal(nextPlacementBody.placement.subject, "Aki");
-  assert.equal(nextPlacementBody.placement.category, "tatami");
+  const nextClue = await route(new Request("https://yokaiba.test/v1/puzzles/hint", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ puzzleToken, kind: "clue", hintIndex: 1 }) }));
+  const nextClueBody = await nextClue.json() as { kind: string; clue: { id: string } };
+  assert.equal(nextClueBody.clue.id, clues[1]!.id);
 
   const unknownField = await route(new Request("https://yokaiba.test/v1/puzzles/hint", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ puzzleToken, kind: "clue", tracking: "ignored" }) }));
   assert.equal(unknownField.status, 400);
+});
+
+test("REST rejects placement hints so callers cannot enumerate the hidden solution", async () => {
+  const route = createRestRouter([tournamentOrderTemplate], { puzzleTokenSecret: "test-token-secret" });
+  const generated = await route(new Request("https://yokaiba.test/v1/puzzles/generate?templateId=tournament-order-v1&seed=no-placement-hint"));
+  const { puzzleToken } = await generated.json() as { puzzleToken: string };
+  const response = await route(new Request("https://yokaiba.test/v1/puzzles/hint", {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ puzzleToken, kind: "placement" }),
+  }));
+
+  assert.equal(response.status, 400);
+  assert.deepEqual(await response.json(), { error: { code: "bad_request", message: "kind must be clue or elimination" } });
 });
 
 test("REST accepts anonymized puzzle outcomes with their smart-marking cohort and rejects malformed telemetry", async () => {
@@ -424,6 +497,29 @@ test("REST accepts a v2 token when verifying this prose-only generator upgrade",
   assert.deepEqual(await response.json(), { correct: true });
 });
 
+test("REST verifies tokens signed by a previous key and rejects expired tokens", async () => {
+  const puzzle = generatePuzzle(tournamentOrderTemplate, "token-rotation-session");
+  const now = Math.floor(Date.now() / 1_000);
+  const previousKeyToken = await issuePuzzleToken(puzzle, "previous-signing-key", { now, ttlSeconds: 60 });
+  const expiredToken = await issuePuzzleToken(puzzle, "active-signing-key", { now: now - 120, ttlSeconds: 60 });
+  const route = createRestRouter([tournamentOrderTemplate], {
+    puzzleTokenSecret: "active-signing-key",
+    puzzleTokenPreviousSecrets: ["previous-signing-key"],
+  });
+  const verify = (puzzleToken: string) => route(new Request("https://yokaiba.test/v1/puzzles/verify", {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ puzzleToken, answer: puzzle.solution }),
+  }));
+
+  const accepted = await verify(previousKeyToken);
+  assert.equal(accepted.status, 200);
+  assert.deepEqual(await accepted.json(), { correct: true });
+  const expired = await verify(expiredToken);
+  assert.equal(expired.status, 400);
+  assert.equal((await expired.json() as { error: { code: string } }).error.code, "invalid_puzzle_token");
+});
+
 async function verificationSetup() {
   const route = createRestRouter([tournamentOrderTemplate], { puzzleTokenSecret: "test-token-secret" });
   const generated = await route(new Request("https://yokaiba.test/v1/puzzles/generate?templateId=tournament-order-v1&seed=verify-invalid"));
@@ -480,7 +576,7 @@ test("REST hint endpoint rejects unsupported hint kinds and missing tokens", asy
   }));
   assert.equal(unsupportedKind.status, 400);
   assert.deepEqual(await unsupportedKind.json(), {
-    error: { code: "bad_request", message: "kind must be clue, elimination, or placement" },
+    error: { code: "bad_request", message: "kind must be clue or elimination" },
   });
 
   const missingToken = await route(new Request("https://yokaiba.test/v1/puzzles/hint", {

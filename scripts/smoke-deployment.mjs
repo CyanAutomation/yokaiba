@@ -13,7 +13,11 @@ await waitForExpectedDeployment({ baseUrl, expectedBuildVersion, expectedBuildSh
 
 const ready = await get("/readyz");
 const readyBody = await ready.json();
-if (readyBody.status !== "ready" || readyBody.rateLimitProvider !== "configured") throw new Error("readiness did not confirm the production rate-limit binding");
+if (readyBody.status !== "ready"
+  || readyBody.rateLimitProvider !== "configured"
+  || readyBody.generateRateLimitProvider !== "configured") {
+  throw new Error("readiness did not confirm the production REST and generation rate-limit bindings");
+}
 
 const version = await get("/v1/version");
 const versionBody = await version.json();

@@ -13,6 +13,8 @@ run_worker_first = ["/docs", "/docs/", "/openapi/*"]
 #   npx wrangler secret put MCP_ALLOWED_HOSTNAMES
 #   npx wrangler secret put REST_ALLOWED_ORIGINS
 #   npx wrangler secret put PUZZLE_TOKEN_SECRET
+#   npx wrangler secret put PUZZLE_TOKEN_PREVIOUS_SECRETS # optional JSON array during key rotation
+#   npx wrangler secret put PUZZLE_TOKEN_TTL_SECONDS # optional, default 604800 seconds
 # API_KEY matches the Budokon Worker convention. It is required for /mcp only.
 # MCP_API_KEYS may replace API_KEY with a JSON object mapping client labels to
 # distinct API keys, for example {"game":"...","partner":"..."}.
@@ -21,6 +23,9 @@ run_worker_first = ["/docs", "/docs/", "/openapi/*"]
 # REST_ALLOWED_ORIGINS is a comma-separated list of exact browser origins that
 # may call the public REST API. It is intentionally unset by default.
 # PUZZLE_TOKEN_SECRET signs browser puzzle tokens used by /v1/puzzles/verify.
+# PUZZLE_TOKEN_PREVIOUS_SECRETS is an optional JSON array of previous keys accepted during rotation grace.
+# PUZZLE_TOKEN_TTL_SECONDS controls newly issued token lifetime (default seven days, maximum 30 days).
+# REST_GENERATE_RATE_LIMIT is the local fallback for REST generation (default 10/minute).
 # VERIFY_RATE_LIMIT is the local fallback for verification attempts per minute (default 10).
 # MCP_PUZZLE_ACTION_RATE_LIMIT is the local fallback for MCP hints and verification (default 10).
 
@@ -30,6 +35,15 @@ namespace_id = "870282"
 
   [ratelimits.simple]
   limit = 60
+  period = 60
+
+[[ratelimits]]
+name = "REST_GENERATE_RATE_LIMITER"
+# Keep expensive generation traffic in a separate namespace and quota.
+namespace_id = "870288"
+
+  [ratelimits.simple]
+  limit = 10
   period = 60
 
 [[ratelimits]]
