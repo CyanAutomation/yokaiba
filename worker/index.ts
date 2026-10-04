@@ -7,6 +7,7 @@ import { championshipCircuitTemplate } from "../src/templates/championship-circu
 import { championshipBridgeTemplate } from "../src/templates/championship-bridge.js";
 import { hostHeaderValidationResponse } from "@modelcontextprotocol/server";
 import { json } from "../src/api/json-response.js";
+import { DEFAULT_PUZZLE_TOKEN_TTL_SECONDS, MAX_PUZZLE_TOKEN_TTL_SECONDS } from "../src/api/puzzle-token.js";
 
 interface Env {
   /** Matches Budokon's API-key secret name and protects the MCP endpoint. */
@@ -27,17 +28,25 @@ interface Env {
   REST_ALLOWED_ORIGINS?: string;
   /** HMAC secret used to issue and validate browser puzzle tokens. */
   PUZZLE_TOKEN_SECRET?: string;
+  /** Optional JSON array of prior HMAC secrets retained for token rotation grace. */
+  PUZZLE_TOKEN_PREVIOUS_SECRETS?: string;
+  /** Token lifetime in seconds; defaults to seven days and is capped at 30 days. */
+  PUZZLE_TOKEN_TTL_SECONDS?: string;
   /** Deployment-time package version and immutable revision, injected by CI. */
   BUILD_VERSION?: string;
   BUILD_SHA?: string;
   /** Optional best-effort, per-isolate REST requests-per-minute override. Defaults to 60. */
   REST_RATE_LIMIT?: string;
+  /** Optional best-effort REST puzzle-generation requests per minute; defaults to 10. */
+  REST_GENERATE_RATE_LIMIT?: string;
   /** Optional best-effort verification attempts per minute; defaults to 10. */
   VERIFY_RATE_LIMIT?: string;
   /** Optional best-effort puzzle-hint requests per minute; defaults to 10. */
   HINT_RATE_LIMIT?: string;
   /** Optional Cloudflare Rate Limiting binding for production-wide general REST enforcement. */
   REST_RATE_LIMITER?: { limit(options: { key: string }): Promise<{ success: boolean }> };
+  /** Optional Cloudflare Rate Limiting binding for REST puzzle generation. */
+  REST_GENERATE_RATE_LIMITER?: { limit(options: { key: string }): Promise<{ success: boolean }> };
   /** Optional Cloudflare Rate Limiting binding for production-wide answer-verification enforcement. */
   VERIFY_RATE_LIMITER?: { limit(options: { key: string }): Promise<{ success: boolean }> };
   /** Optional Cloudflare binding that throttles unauthenticated MCP traffic before authentication. */
@@ -63,7 +72,7 @@ const encoder = new TextEncoder();
 const swaggerUiDocument = `<!doctype html>
 <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Yokaiba API reference</title><link rel="stylesheet" href="/swagger-ui/swagger-ui.css"></head>
-<body><main id="swagger-ui" aria-label="Yokaiba API reference"></main>
+<body><header><h1>Yokaiba API</h1><nav aria-label="API integration options"><a href="/openapi/v1.yaml">REST OpenAPI</a> · <a href="/openapi/chatgpt-actions-v1.yaml">ChatGPT Actions OpenAPI</a> · <a href="https://github.com/CyanAutomation/yokaiba#mcp-and-deployment">MCP setup and tool guide</a> · MCP endpoint: <code>/mcp</code></nav></header><main id="swagger-ui" aria-label="Yokaiba REST API reference"></main>
 <script src="/swagger-ui/swagger-ui-bundle.js"></script>
 <script>window.ui = SwaggerUIBundle({url:"/openapi/v1.yaml",dom_id:"#swagger-ui",deepLinking:true,presets:[SwaggerUIBundle.presets.apis],layout:"BaseLayout"});</script>
 </body></html>`;
@@ -185,7 +194,8 @@ function corsHeaders(origin: string | null, allowedOrigins: string[]) {
   return {
     "access-control-allow-origin": origin,
     "access-control-allow-methods": "GET, POST, OPTIONS",
-    "access-control-allow-headers": "content-type",
+    "access-control-allow-headers": "content-type, if-none-match",
+    "access-control-expose-headers": "etag, x-request-id, ratelimit-limit, ratelimit-policy, ratelimit-remaining, ratelimit-reset, retry-after",
     "access-control-max-age": "86400",
     "vary": "Origin",
   };
@@ -266,17 +276,27 @@ async function restRateLimitDecision(
   request: Request,
   env: Env,
   onRestProviderFailure: () => void,
+  onRestGenerateProviderFailure: () => void,
   onVerifyProviderFailure: () => void,
 ): Promise<RateLimitDecision> {
-  const protectedPuzzleOperation = ["/v1/puzzles/verify", "/v1/puzzles/hint"].includes(new URL(request.url).pathname);
+  const path = new URL(request.url).pathname;
+  const protectedPuzzleOperation = ["/v1/puzzles/verify", "/v1/puzzles/hint"].includes(path);
+  const puzzleGeneration = path === "/v1/puzzles/generate";
+  const provider = protectedPuzzleOperation
+    ? env.VERIFY_RATE_LIMITER
+    : puzzleGeneration ? env.REST_GENERATE_RATE_LIMITER : env.REST_RATE_LIMITER;
+  const onProviderFailure = protectedPuzzleOperation
+    ? onVerifyProviderFailure
+    : puzzleGeneration ? onRestGenerateProviderFailure : onRestProviderFailure;
   const providerDecision = await providerRateLimitDecision(
-    protectedPuzzleOperation ? env.VERIFY_RATE_LIMITER : env.REST_RATE_LIMITER,
+    provider,
     request,
-    protectedPuzzleOperation ? onVerifyProviderFailure : onRestProviderFailure,
+    onProviderFailure,
   );
   if (providerDecision) return providerDecision;
   // Retain the local fallback if the relevant provider binding is unavailable.
-  if (protectedPuzzleOperation) return asRateLimitDecision(rateLimited(request, new URL(request.url).pathname === "/v1/puzzles/hint" ? env.HINT_RATE_LIMIT ?? "10" : env.VERIFY_RATE_LIMIT ?? "10", "protected-puzzle"));
+  if (protectedPuzzleOperation) return asRateLimitDecision(rateLimited(request, path === "/v1/puzzles/hint" ? env.HINT_RATE_LIMIT ?? "10" : env.VERIFY_RATE_LIMIT ?? "10", "protected-puzzle"));
+  if (puzzleGeneration) return asRateLimitDecision(rateLimited(request, env.REST_GENERATE_RATE_LIMIT ?? "10", "rest-generate"));
   return asRateLimitDecision(rateLimited(request, env.REST_RATE_LIMIT ?? "60", "rest"));
 }
 
@@ -288,6 +308,7 @@ function allowedOrigin(request: Request, hostnames: string[]) {
 
 interface ProviderFailures {
   rest: boolean;
+  restGenerate: boolean;
   verify: boolean;
   mcpPreAuth: boolean;
   mcp: boolean;
@@ -311,6 +332,7 @@ function buildInfo(env: Env) {
 }
 
 function configuredRestLimit(path: string, env: Env): string {
+  if (path === "/v1/puzzles/generate") return env.REST_GENERATE_RATE_LIMIT ?? "10";
   if (path === "/v1/puzzles/verify") return env.VERIFY_RATE_LIMIT ?? "10";
   if (path === "/v1/puzzles/hint") return env.HINT_RATE_LIMIT ?? "10";
   return env.REST_RATE_LIMIT ?? "60";
@@ -343,6 +365,7 @@ function readinessResponse(env: Env, build: ReturnType<typeof buildInfo>, failur
   return json({
     status: "ready", build,
     rateLimitProvider: env.REST_RATE_LIMITER && !failures.rest ? "configured" : "fallback",
+    generateRateLimitProvider: env.REST_GENERATE_RATE_LIMITER && !failures.restGenerate ? "configured" : "fallback",
     verifyRateLimitProvider: env.VERIFY_RATE_LIMITER && !failures.verify ? "configured" : "fallback",
     mcpPreAuthRateLimitProvider: env.MCP_PREAUTH_RATE_LIMITER && !failures.mcpPreAuth ? "configured" : "fallback",
     mcpRateLimitProvider: env.MCP_RATE_LIMITER && !failures.mcp ? "configured" : "fallback",
@@ -350,6 +373,23 @@ function readinessResponse(env: Env, build: ReturnType<typeof buildInfo>, failur
     mcpPuzzleActionRateLimitProvider: env.MCP_PUZZLE_ACTION_RATE_LIMITER && !failures.mcpPuzzleAction ? "configured" : "fallback",
     outcomeTelemetryProvider: !env.PUZZLE_OUTCOMES ? "disabled" : failures.outcomeTelemetry ? "failing" : "configured",
   });
+}
+
+function previousPuzzleTokenSecrets(env: Env): string[] {
+  if (!env.PUZZLE_TOKEN_PREVIOUS_SECRETS) return [];
+  try {
+    const value: unknown = JSON.parse(env.PUZZLE_TOKEN_PREVIOUS_SECRETS);
+    return Array.isArray(value) ? value.filter((secret): secret is string => typeof secret === "string" && secret.length > 0) : [];
+  } catch {
+    return [];
+  }
+}
+
+function puzzleTokenTtlSeconds(env: Env): number {
+  const configured = Number(env.PUZZLE_TOKEN_TTL_SECONDS);
+  return Number.isSafeInteger(configured) && configured >= 1 && configured <= MAX_PUZZLE_TOKEN_TTL_SECONDS
+    ? configured
+    : DEFAULT_PUZZLE_TOKEN_TTL_SECONDS;
 }
 
 const OUTCOME_METRIC_FIELDS = ["requestedDifficultyLevel", "assessedDifficultyLevel", "clueCount", "elapsedMs", "hintsUsed", "mistakes"] as const;
@@ -373,7 +413,7 @@ function writePuzzleOutcome(dataset: AnalyticsEngineDataset, event: Record<strin
 }
 
 async function staticRoute(path: string, request: Request, env: Env, build: ReturnType<typeof buildInfo>, failures: ProviderFailures): Promise<Response | undefined> {
-  if (!["/", "/healthz", "/readyz", "/docs", "/docs/", "/openapi/v1.yaml"].includes(path)) return undefined;
+  if (!["/", "/healthz", "/readyz", "/docs", "/docs/", "/openapi/v1.yaml", "/openapi/chatgpt-actions-v1.yaml"].includes(path)) return undefined;
   if (request.method !== "GET" && request.method !== "HEAD") {
     return json({ error: { code: "method_not_allowed", message: "Method not allowed" } }, 405, { allow: "GET, HEAD" });
   }
@@ -382,7 +422,7 @@ async function staticRoute(path: string, request: Request, env: Env, build: Retu
   else if (path === "/healthz") response = json({ status: "ok", build });
   else if (path === "/readyz") response = await readinessResponse(env, build, failures);
   else if (path === "/docs" || path === "/docs/") response = swaggerUiResponse();
-  else response = await staticAsset(request, env, "/openapi/v1.yaml", "application/yaml; charset=utf-8");
+  else response = await staticAsset(request, env, path, "application/yaml; charset=utf-8");
   if (request.method === "HEAD") return new Response(null, { status: response.status, statusText: response.statusText, headers: response.headers });
   return response;
 }
@@ -390,7 +430,8 @@ async function staticRoute(path: string, request: Request, env: Env, build: Retu
 function corsPreflight(request: Request, cors: Record<string, string> | undefined): Response {
   const requestedMethod = request.headers.get("access-control-request-method");
   const requestedHeaders = request.headers.get("access-control-request-headers")?.split(",").map(value => value.trim().toLowerCase()).filter(Boolean) ?? [];
-  if (!cors || !["GET", "POST"].includes(requestedMethod?.toUpperCase() ?? "") || requestedHeaders.some(header => header !== "content-type")) {
+  const allowedHeaders = new Set(["content-type", "if-none-match"]);
+  if (!cors || !["GET", "POST"].includes(requestedMethod?.toUpperCase() ?? "") || requestedHeaders.some(header => !allowedHeaders.has(header))) {
     return json({ error: { code: "forbidden", message: "Origin is not allowed" } }, 403);
   }
   return new Response(null, { status: 204 });
@@ -410,6 +451,8 @@ async function routeRestRequest(request: Request, path: string, env: Env, ctx: E
     ? dependencies.options.generatePuzzleResponse(request)
     : createRestRouter(templates, {
       puzzleTokenSecret: env.PUZZLE_TOKEN_SECRET,
+      puzzleTokenPreviousSecrets: env.PUZZLE_TOKEN_SECRET ? previousPuzzleTokenSecrets(env) : [],
+      puzzleTokenTtlSeconds: puzzleTokenTtlSeconds(env),
       ...dependencies.build,
       ...(env.PUZZLE_OUTCOMES ? { recordOutcome: event => {
         try { writePuzzleOutcome(env.PUZZLE_OUTCOMES!, event); }
@@ -525,6 +568,8 @@ async function routeMcpRequest(request: Request, env: Env, dependencies: McpRequ
   }
   return dependencies.finish(await createYokaibaMcpHandler(templates, {
     puzzleTokenSecret: env.PUZZLE_TOKEN_SECRET,
+    puzzleTokenPreviousSecrets: env.PUZZLE_TOKEN_SECRET ? previousPuzzleTokenSecrets(env) : [],
+    puzzleTokenTtlSeconds: puzzleTokenTtlSeconds(env),
     serviceVersion: buildInfo(env).serviceVersion,
   }).fetch(request));
 }
@@ -562,8 +607,11 @@ async function dispatchWorkerRequest(
   if (context.restRequest) {
     context.rateLimitDecision = await restRateLimitDecision(dependencies.rateLimited, request, env,
       () => { dependencies.failures.rest = true; },
+      () => { dependencies.failures.restGenerate = true; },
       () => { dependencies.failures.verify = true; });
-    context.rateLimitScope = path === "/v1/puzzles/verify" || path === "/v1/puzzles/hint" ? "protected-puzzle" : "rest";
+    context.rateLimitScope = path === "/v1/puzzles/verify" || path === "/v1/puzzles/hint"
+      ? "protected-puzzle"
+      : path === "/v1/puzzles/generate" ? "rest-generate" : "rest";
     if (context.rateLimitDecision.limited) return finish(tooManyRequests());
   }
 
@@ -614,7 +662,7 @@ export function createWorker(options: WorkerOptions = {}) {
   const rateLimited = options.rateLimiter ?? createRateLimiter(options.localRateLimitStore, clock);
   const generatedPuzzleCache = options.generatedPuzzleCache ?? new GeneratedPuzzleCache();
   const generatedPuzzleRequests = new Map<string, Promise<Response>>();
-  const failures: ProviderFailures = { rest: false, verify: false, mcpPreAuth: false, mcp: false, mcpGenerate: false, mcpPuzzleAction: false, outcomeTelemetry: false };
+  const failures: ProviderFailures = { rest: false, restGenerate: false, verify: false, mcpPreAuth: false, mcp: false, mcpGenerate: false, mcpPuzzleAction: false, outcomeTelemetry: false };
   const dependencies: WorkerRuntimeDependencies = {
     options,
     rateLimited,

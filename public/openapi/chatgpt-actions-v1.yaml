@@ -1,0 +1,255 @@
+openapi: 3.1.0
+info:
+  title: Yokaiba ChatGPT Actions API
+  version: 1.0.0
+  description: |
+    A compact, public REST surface for ChatGPT Actions. It covers scenario discovery,
+    puzzle generation, complete-answer verification, and spoiler-safe clue hints.
+    Puzzle actions require PUZZLE_TOKEN_SECRET on the Yokaiba deployment. Tokens are
+    signed, contain a readable seed, and expire after the configured lifetime.
+servers:
+  - url: https://yokaiba.scheimann.workers.dev
+    description: Yokaiba production API
+security: []
+paths:
+  /v1/scenarios:
+    get:
+      operationId: listPuzzleScenarios
+      summary: List puzzle scenarios
+      responses:
+        '200':
+          description: Available scenarios and board categories
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ScenarioList' }
+        '405': { $ref: '#/components/responses/MethodNotAllowed' }
+        '429': { $ref: '#/components/responses/RateLimited' }
+  /v1/puzzles/generate:
+    post:
+      operationId: generatePuzzle
+      summary: Generate a judo logic-grid puzzle
+      description: Omit seed for a server-generated replay seed. The solution is never included.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/GenerationRequest' }
+      responses:
+        '200':
+          description: Puzzle clues and board, without the solution
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/GeneratedPuzzle' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '422': { $ref: '#/components/responses/DifficultyUnavailable' }
+        '405': { $ref: '#/components/responses/MethodNotAllowed' }
+        '429': { $ref: '#/components/responses/RateLimited' }
+        '500': { $ref: '#/components/responses/InternalServerError' }
+  /v1/puzzles/verify:
+    post:
+      operationId: verifyPuzzleAnswer
+      summary: Check a completed puzzle answer
+      description: Returns only whether the complete answer is correct.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/PuzzleVerificationRequest' }
+      responses:
+        '200':
+          description: Answer result
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/PuzzleVerificationResult' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '405': { $ref: '#/components/responses/MethodNotAllowed' }
+        '429': { $ref: '#/components/responses/RateLimited' }
+        '503': { $ref: '#/components/responses/NotConfigured' }
+  /v1/puzzles/hint:
+    post:
+      operationId: getPuzzleHint
+      summary: Return a clue hint
+      description: Returns a clue or elimination clue; hints never disclose a solution placement.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/PuzzleHintRequest' }
+      responses:
+        '200':
+          description: One public clue selected as a hint
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/PuzzleHintResult' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '405': { $ref: '#/components/responses/MethodNotAllowed' }
+        '429': { $ref: '#/components/responses/RateLimited' }
+        '503': { $ref: '#/components/responses/NotConfigured' }
+components:
+  responses:
+    MethodNotAllowed:
+      description: The route does not support this method
+      headers:
+        Allow: { schema: { type: string } }
+    BadRequest:
+      description: Invalid request input
+      content:
+        application/json: { schema: { $ref: '#/components/schemas/Error' } }
+    NotFound:
+      description: Unknown scenario
+      content:
+        application/json: { schema: { $ref: '#/components/schemas/Error' } }
+    RateLimited:
+      description: Too many requests
+      headers:
+        Retry-After: { schema: { type: integer, minimum: 1 } }
+      content:
+        application/json: { schema: { $ref: '#/components/schemas/Error' } }
+    NotConfigured:
+      description: Puzzle-token actions are not enabled on this deployment
+      content:
+        application/json: { schema: { $ref: '#/components/schemas/Error' } }
+    InternalServerError:
+      description: Puzzle generation failed unexpectedly
+      content:
+        application/json: { schema: { $ref: '#/components/schemas/Error' } }
+    DifficultyUnavailable:
+      description: No puzzle for the requested seed and difficulty was found
+      content:
+        application/json: { schema: { $ref: '#/components/schemas/DifficultyUnavailableError' } }
+  schemas:
+    Error:
+      type: object
+      required: [error]
+      properties:
+        error:
+          type: object
+          required: [code, message]
+          properties:
+            code: { type: string }
+            message: { type: string }
+    DifficultyUnavailableError:
+      type: object
+      required: [error, templateId, requestedDifficultyLevel, availableDifficultyLevels]
+      properties:
+        error:
+          type: object
+          required: [code, message]
+          properties:
+            code: { type: string, const: difficulty_unavailable }
+            message: { type: string }
+        templateId: { type: string }
+        requestedDifficultyLevel: { type: integer, minimum: 1, maximum: 12 }
+        availableDifficultyLevels: { type: array, items: { type: integer, minimum: 1, maximum: 12 } }
+    Category:
+      type: object
+      required: [id, label, values]
+      properties:
+        id: { type: string }
+        label: { type: string }
+        values: { type: array, items: { type: string } }
+        ordered: { type: boolean }
+    Scenario:
+      type: object
+      required: [id, title, baseCategory, categories]
+      properties:
+        id: { type: string }
+        title: { type: string }
+        baseCategory: { type: string }
+        categories: { type: array, items: { $ref: '#/components/schemas/Category' } }
+        metadata: { type: object, additionalProperties: true }
+    ScenarioList:
+      type: object
+      required: [scenarios]
+      properties:
+        scenarios: { type: array, items: { $ref: '#/components/schemas/Scenario' } }
+    GenerationRequest:
+      type: object
+      required: [templateId]
+      additionalProperties: false
+      properties:
+        templateId: { type: string, minLength: 1, maxLength: 128 }
+        seed: { type: string, minLength: 1, maxLength: 128, description: Optional replay seed. Omission generates one on the server. }
+        difficultyLevel: { type: integer, minimum: 1, maximum: 12 }
+        allowSeedFallback: { type: boolean, default: false }
+    Clue:
+      type: object
+      required: [id, constraint, text]
+      properties:
+        id: { type: string }
+        constraint: { type: object, required: [kind], properties: { kind: { type: string } }, additionalProperties: true }
+        text: { type: string }
+        phraseVariant: { type: string }
+        languageVersion: { type: string }
+    PuzzleSpec:
+      type: object
+      required: [id, title, baseCategory, categories]
+      properties:
+        id: { type: string }
+        title: { type: string }
+        baseCategory: { type: string }
+        categories: { type: array, items: { $ref: '#/components/schemas/Category' } }
+    Difficulty:
+      type: object
+      required: [level, label, modelVersion, evidence]
+      properties:
+        level: { type: integer, minimum: 1, maximum: 12 }
+        label: { type: string }
+        modelVersion: { type: string }
+        evidence: { type: object, additionalProperties: true }
+    GeneratedPuzzle:
+      type: object
+      required: [id, requestedSeed, seed, templateId, generatorVersion, solverVersion, spec, clues, difficulty]
+      properties:
+        id: { type: string }
+        requestedSeed: { type: string }
+        seed: { type: string }
+        requestedDifficultyLevel: { type: integer, minimum: 1, maximum: 12 }
+        seedFallbackAttempt: { type: integer, minimum: 1 }
+        generationStrategy: { type: integer, minimum: 0 }
+        templateId: { type: string }
+        generatorVersion: { type: string }
+        solverVersion: { type: string }
+        puzzleToken: { type: string, description: Present only when PUZZLE_TOKEN_SECRET is configured. }
+        spec: { $ref: '#/components/schemas/PuzzleSpec' }
+        clues: { type: array, items: { $ref: '#/components/schemas/Clue' } }
+        difficulty: { $ref: '#/components/schemas/Difficulty' }
+      not: { required: [solution] }
+    SolutionAnswer:
+      type: object
+      required: [assignments]
+      additionalProperties: false
+      properties:
+        assignments:
+          type: object
+          description: Each non-base category maps base-row order to a complete permutation of its values.
+          additionalProperties: { type: array, items: { type: string } }
+    PuzzleVerificationRequest:
+      type: object
+      required: [puzzleToken, answer]
+      additionalProperties: false
+      properties:
+        puzzleToken: { type: string, minLength: 1 }
+        answer: { $ref: '#/components/schemas/SolutionAnswer' }
+    PuzzleVerificationResult:
+      type: object
+      required: [correct]
+      properties: { correct: { type: boolean } }
+    PuzzleHintRequest:
+      type: object
+      required: [puzzleToken]
+      additionalProperties: false
+      properties:
+        puzzleToken: { type: string, minLength: 1 }
+        kind: { type: string, enum: [clue, elimination], default: clue }
+        hintIndex: { type: integer, minimum: 0, maximum: 100, default: 0 }
+    PuzzleHintResult:
+      type: object
+      required: [kind, clue]
+      properties:
+        kind: { type: string, enum: [clue, elimination] }
+        clue:
+          type: object
+          required: [id, text]
+          properties: { id: { type: string }, text: { type: string } }

@@ -3,11 +3,13 @@ import { z } from "zod";
 import { scenarioSummary } from "../catalogue.js";
 import type { GeneratedPuzzle, PuzzleTemplate } from "../domain/types.js";
 import { DifficultyUnavailableError, generatePuzzleForRequest } from "../generation/generator.js";
-import { issuePuzzleToken } from "../api/puzzle-token.js";
+import { DEFAULT_PUZZLE_TOKEN_TTL_SECONDS, issuePuzzleToken } from "../api/puzzle-token.js";
 import { puzzleFromToken, puzzleHint, PuzzleActionError, verifyPuzzleAnswer } from "../api/puzzle-actions.js";
 
 export interface YokaibaMcpOptions {
   puzzleTokenSecret?: string;
+  puzzleTokenPreviousSecrets?: readonly string[];
+  puzzleTokenTtlSeconds?: number;
   serviceVersion?: string;
 }
 
@@ -72,7 +74,6 @@ const GeneratePuzzleOutputSchema = z.union([PuzzleOutputSchema, ErrorOutputSchem
 const VerifyAnswerOutputSchema = z.union([z.object({ correct: z.boolean() }), ErrorOutputSchema]);
 const HintOutputSchema = z.union([
   z.object({ kind: z.enum(["clue", "elimination"]), clue: z.object({ id: z.string(), text: z.string() }) }),
-  z.object({ kind: z.literal("placement"), placement: z.object({ subject: z.string(), category: z.string(), value: z.string() }) }),
   ErrorOutputSchema,
 ]);
 
@@ -120,7 +121,9 @@ export function createYokaibaMcpHandler(templates: readonly PuzzleTemplate[], op
       const requestedSeed = seed ?? crypto.randomUUID();
       try {
         const puzzle = generatePuzzleForRequest(template, requestedSeed, difficultyLevel as GeneratedPuzzle["requestedDifficultyLevel"], allowSeedFallback ?? false);
-        const puzzleToken = options.puzzleTokenSecret ? await issuePuzzleToken(puzzle, options.puzzleTokenSecret) : undefined;
+        const puzzleToken = options.puzzleTokenSecret ? await issuePuzzleToken(puzzle, options.puzzleTokenSecret, {
+          ttlSeconds: options.puzzleTokenTtlSeconds ?? DEFAULT_PUZZLE_TOKEN_TTL_SECONDS,
+        }) : undefined;
         return textResult(puzzleOutput(puzzle, puzzleToken));
       } catch (error) {
         if (error instanceof DifficultyUnavailableError) {
@@ -144,7 +147,7 @@ export function createYokaibaMcpHandler(templates: readonly PuzzleTemplate[], op
         outputSchema: VerifyAnswerOutputSchema,
       }, async ({ puzzleToken, answer }) => {
         try {
-          const puzzle = await puzzleFromToken(puzzleToken, byId, options.puzzleTokenSecret!);
+          const puzzle = await puzzleFromToken(puzzleToken, byId, [options.puzzleTokenSecret!, ...(options.puzzleTokenPreviousSecrets ?? [])]);
           return textResult({ correct: verifyPuzzleAnswer(puzzle, answer) });
         } catch (error) {
           const failure = actionError(error);
@@ -153,16 +156,16 @@ export function createYokaibaMcpHandler(templates: readonly PuzzleTemplate[], op
       });
 
       server.registerTool("get_puzzle_hint", {
-        description: "Return one bounded puzzle hint. Increase hintIndex to advance deterministically through clues or placements; indices wrap when a hint pool is exhausted.",
+        description: "Return one public clue as a spoiler-safe reminder. Choose clue or elimination; no hint returns a solution placement.",
         inputSchema: {
           puzzleToken: z.string().min(1).max(16_384),
-          kind: z.enum(["clue", "elimination", "placement"]).optional(),
+          kind: z.enum(["clue", "elimination"]).optional(),
           hintIndex: z.number().int().min(0).max(100).optional(),
         },
         outputSchema: HintOutputSchema,
       }, async ({ puzzleToken, kind, hintIndex }) => {
         try {
-          const puzzle = await puzzleFromToken(puzzleToken, byId, options.puzzleTokenSecret!);
+          const puzzle = await puzzleFromToken(puzzleToken, byId, [options.puzzleTokenSecret!, ...(options.puzzleTokenPreviousSecrets ?? [])]);
           return textResult(puzzleHint(puzzle, kind, hintIndex));
         } catch (error) {
           const failure = actionError(error);
