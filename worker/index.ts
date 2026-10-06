@@ -148,6 +148,7 @@ export interface WorkerOptions {
   clock?: () => number;
   rateLimiter?: RateLimiter;
   generatedPuzzleCache?: GeneratedPuzzleCache;
+  cacheKeyBuilder?: typeof generatedPuzzleCacheKey;
   generatePuzzleResponse?: (request: Request) => Response | Promise<Response>;
 }
 const RATE_WINDOW_MS = 60_000;
@@ -460,7 +461,7 @@ async function routeRestRequest(request: Request, path: string, env: Env, ctx: E
       } } : {}),
     })(request);
   const cacheKey = request.method === "GET" && path === "/v1/puzzles/generate"
-    ? await generatedPuzzleCacheKey(request, env.PUZZLE_TOKEN_SECRET)
+    ? await (dependencies.options.cacheKeyBuilder ?? generatedPuzzleCacheKey)(request, env.PUZZLE_TOKEN_SECRET)
     : undefined;
   let response: Response;
   if (!cacheKey) {

@@ -407,12 +407,19 @@ test("difficulty corpus audit rejects levels outside the 1–12 scale", () => {
   }
 });
 
-test("difficulty corpus audit emits a report for a real template", () => {
+test("single-seed difficulty audit summarizes its generated puzzle", () => {
   const report = auditDifficultyCorpus(tournamentOrderTemplate, { seedPrefix: "audit-integration", sampleSize: 1 });
 
   assert.equal(report.templateId, tournamentOrderTemplate.id);
   assert.equal(report.sampleSize, 1);
-  assert.equal(report.levelCounts.reduce((total, count) => total + count, 0), 1);
+  assert.equal(report.generated, 1);
+  assert.equal(report.unavailable, 0);
+  assert.notEqual(report.modelVersion, "unavailable");
+  assert.equal(report.levelCounts.reduce((total, count) => total + count, 0), report.generated);
+  assert.equal(report.humanTrace.complete + report.humanTrace.incomplete, report.generated);
+  assert.ok(report.clues.minimum > 0);
+  assert.equal(report.clues.minimum, report.clues.maximum);
+  assert.equal(report.clues.average, report.clues.minimum);
 });
 
 test("targeted corpus audits prove every requested course level rather than sampling untargeted puzzles", () => {

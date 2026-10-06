@@ -91,46 +91,68 @@ function responseFromGeneratedPuzzleSnapshot(entry: GeneratedPuzzleCacheEntry): 
 const MAX_PUZZLE_TOKEN_NAMESPACE_DIGESTS = 10;
 const puzzleTokenNamespaceDigests = new Map<string | undefined, Promise<string>>();
 
-function puzzleTokenNamespace(puzzleTokenSecret: string | undefined): Promise<string> {
-  let digest = puzzleTokenNamespaceDigests.get(puzzleTokenSecret);
+export interface GeneratedPuzzleCacheKeyDependencies {
+  /** An isolated cache and digest are useful for deterministic cache-key tests. */
+  digestCache?: Map<string | undefined, Promise<string>>;
+  digest?: (algorithm: AlgorithmIdentifier, data: BufferSource) => Promise<ArrayBuffer>;
+  reportDigestFailure?: (error: unknown) => void;
+}
+
+function reportPuzzleTokenDigestFailure(error: unknown): void {
+  console.error(JSON.stringify({
+    event: "puzzle_token_namespace_digest_failure",
+    error: error instanceof Error ? error.message : String(error),
+  }));
+}
+
+function puzzleTokenNamespace(
+  puzzleTokenSecret: string | undefined,
+  dependencies: GeneratedPuzzleCacheKeyDependencies,
+): Promise<string> {
+  const digestCache = dependencies.digestCache ?? puzzleTokenNamespaceDigests;
+  let digest = digestCache.get(puzzleTokenSecret);
   if (digest) {
     // Refresh insertion order so secrets that are still active remain cached.
-    puzzleTokenNamespaceDigests.delete(puzzleTokenSecret);
-    puzzleTokenNamespaceDigests.set(puzzleTokenSecret, digest);
+    digestCache.delete(puzzleTokenSecret);
+    digestCache.set(puzzleTokenSecret, digest);
   } else {
     // Include the signing mode in the digest input so an explicitly configured
     // empty secret cannot share cache entries with unsigned puzzles.
     const namespaceInput = puzzleTokenSecret === undefined
       ? "unsigned"
       : `signed\0${puzzleTokenSecret}`;
-    digest = crypto.subtle.digest("SHA-256", new TextEncoder().encode(namespaceInput))
+    const digestInput = new TextEncoder().encode(namespaceInput);
+    const calculateDigest = dependencies.digest ?? ((algorithm, data) => crypto.subtle.digest(algorithm, data));
+    const reportFailure = dependencies.reportDigestFailure ?? reportPuzzleTokenDigestFailure;
+    digest = calculateDigest("SHA-256", digestInput)
       .then(value => [...new Uint8Array(value)].map(byte => byte.toString(16).padStart(2, "0")).join(""))
       .catch(error => {
         // Do not retain rejected promises: a transient Web Crypto failure should
         // not permanently disable caching for this signing configuration.
-        if (puzzleTokenNamespaceDigests.get(puzzleTokenSecret) === digest) {
-          puzzleTokenNamespaceDigests.delete(puzzleTokenSecret);
+        if (digestCache.get(puzzleTokenSecret) === digest) {
+          digestCache.delete(puzzleTokenSecret);
         }
-        console.error(JSON.stringify({
-          event: "puzzle_token_namespace_digest_failure",
-          error: error instanceof Error ? error.message : String(error),
-        }));
+        reportFailure(error);
         throw error;
       });
-    while (puzzleTokenNamespaceDigests.size >= MAX_PUZZLE_TOKEN_NAMESPACE_DIGESTS) {
-      puzzleTokenNamespaceDigests.delete(puzzleTokenNamespaceDigests.keys().next().value as string | undefined);
+    while (digestCache.size >= MAX_PUZZLE_TOKEN_NAMESPACE_DIGESTS) {
+      digestCache.delete(digestCache.keys().next().value as string | undefined);
     }
-    puzzleTokenNamespaceDigests.set(puzzleTokenSecret, digest);
+    digestCache.set(puzzleTokenSecret, digest);
   }
   return digest;
 }
 
-export async function generatedPuzzleCacheKey(request: Request, puzzleTokenSecret: string | undefined): Promise<string | undefined> {
+export async function generatedPuzzleCacheKey(
+  request: Request,
+  puzzleTokenSecret: string | undefined,
+  dependencies: GeneratedPuzzleCacheKeyDependencies = {},
+): Promise<string | undefined> {
   try {
     const { templateId, seed, difficultyLevel, allowSeedFallback } = parseGenerationQuery(new URL(request.url));
     // A positional tuple gives the identity a fixed ordering and makes explicit
     // that an absent fallback has the same semantics as `false`.
-    return JSON.stringify([templateId, seed, difficultyLevel ?? null, allowSeedFallback ?? false, await puzzleTokenNamespace(puzzleTokenSecret)]);
+    return JSON.stringify([templateId, seed, difficultyLevel ?? null, allowSeedFallback ?? false, await puzzleTokenNamespace(puzzleTokenSecret, dependencies)]);
   } catch {
     // Invalid generation requests are routed normally so the router can return
     // its canonical 400 response; they are not eligible for memoization.
