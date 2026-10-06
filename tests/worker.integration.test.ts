@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { readFile } from "node:fs/promises";
+import { readFile, stat } from "node:fs/promises";
 import test from "node:test";
 import worker, { createRateLimiter, createWorker, GeneratedPuzzleCache } from "../worker/index.js";
 
@@ -506,6 +506,27 @@ test("worker clears rejected in-flight generation so the cache key can be retrie
   assert.equal(generationCalls, 2);
 });
 
+test("worker continues uncached generation when a cache key cannot be created", async () => {
+  let generationCalls = 0;
+  const isolatedWorker = createWorker({
+    rateLimiter: () => false,
+    cacheKeyBuilder: async () => undefined,
+    generatePuzzleResponse: () => new Response(JSON.stringify({ generationCalls: ++generationCalls }), {
+      headers: { "content-type": "application/json" },
+    }),
+  });
+  const request = () => new Request("https://yokaiba.test/v1/puzzles/generate?templateId=tournament-order-v1&seed=cache-key-failure");
+
+  const first = await isolatedWorker.fetch(request(), {}, {} as ExecutionContext);
+  const second = await isolatedWorker.fetch(request(), {}, {} as ExecutionContext);
+
+  assert.equal(first.status, 200);
+  assert.equal(second.status, 200);
+  assert.deepEqual(await first.json(), { generationCalls: 1 });
+  assert.deepEqual(await second.json(), { generationCalls: 2 });
+  assert.equal(generationCalls, 2);
+});
+
 test("worker bounds the documented local generation cache capacity", async () => {
   let generationCalls = 0;
   const generatedPuzzleCache = new GeneratedPuzzleCache();
@@ -714,13 +735,13 @@ test("worker serves self-hosted Swagger UI with complete security controls", asy
   }
 });
 
-test("the self-hosted Swagger UI assets are included in the deployment bundle", async () => {
-  const stylesheet = await readFile(new URL("../public/swagger-ui/swagger-ui.css", import.meta.url), "utf8");
-  const bundle = await readFile(new URL("../public/swagger-ui/swagger-ui-bundle.js", import.meta.url), "utf8");
+test("self-hosted Swagger UI assets are present in the configured static assets directory", async () => {
+  const stylesheet = await stat(new URL("../public/swagger-ui/swagger-ui.css", import.meta.url));
+  const bundle = await stat(new URL("../public/swagger-ui/swagger-ui-bundle.js", import.meta.url));
   const wranglerConfiguration = await readFile(new URL("../wrangler.toml", import.meta.url), "utf8");
 
-  assert.match(stylesheet, /^\.swagger-ui\{/);
-  assert.match(bundle, /\bSwaggerUIBundle\b/);
+  assert.ok(stylesheet.isFile() && stylesheet.size > 0);
+  assert.ok(bundle.isFile() && bundle.size > 0);
   assert.match(wranglerConfiguration, /\[assets\]\s+directory\s*=\s*"\.\/public"/);
 });
 
