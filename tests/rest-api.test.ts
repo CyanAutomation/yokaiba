@@ -1,5 +1,4 @@
 import assert from "node:assert/strict";
-import { createRequire } from "node:module";
 import { readFile } from "node:fs/promises";
 import test from "node:test";
 import type { PuzzleTemplate } from "../src/domain/types.js";
@@ -9,35 +8,12 @@ import { tournamentOrderTemplate } from "../src/templates/tournament-order.js";
 import { createRestRouter } from "../src/api/router.js";
 import { generatePuzzle } from "../src/generation/generator.js";
 import { issuePuzzleToken } from "../src/api/puzzle-token.js";
+import { parseYamlDocument } from "./helpers/yaml.js";
 
 type OpenApiObject = Record<string, any>;
 
 function parseOpenApiYaml(source: string): OpenApiObject {
-  // Swagger UI is the project's OpenAPI implementation and bundles the same
-  // YAML parser it uses when loading the public contract in the browser.
-  const require = createRequire(import.meta.url);
-  const originalSelf = Object.getOwnPropertyDescriptor(globalThis, "self");
-  let SwaggerUI: OpenApiObject;
-  try {
-    Object.defineProperty(globalThis, "self", { value: globalThis, configurable: true });
-    SwaggerUI = require("swagger-ui-dist/swagger-ui-bundle.js");
-  } finally {
-    if (originalSelf) Object.defineProperty(globalThis, "self", originalSelf);
-    else Reflect.deleteProperty(globalThis, "self");
-  }
-  const actions = SwaggerUI.plugins.Spec({ getSystem: () => ({}) }).statePlugins.spec.actions;
-  let parsed: OpenApiObject | undefined;
-  let parseError: unknown;
-  actions.parseToJson(source)({
-    specActions: { updateJsonSpec: (value: OpenApiObject) => { parsed = value; } },
-    specSelectors: { specStr: () => source },
-    errActions: {
-      clear: () => undefined,
-      newSpecErr: (error: unknown) => { parseError = error; },
-    },
-  });
-  assert.ifError(parseError);
-  assert.ok(parsed, "Swagger UI must parse the OpenAPI YAML into an object");
+  const parsed = parseYamlDocument(source);
   assert.equal(parsed.openapi, "3.1.0", "the parsed document must be OpenAPI 3.1");
   assert.ok(parsed.info?.title && parsed.info?.version, "OpenAPI info is required");
   assert.ok(parsed.paths && parsed.components?.schemas, "OpenAPI paths and component schemas are required");
