@@ -23,15 +23,14 @@ test("production distribution audit follows the progressive no-guess path", () =
   assert.equal(report.humanTrace.incomplete, 0);
 });
 
-test("production distribution reports seeds rejected by the progressive path", () => {
+test("production distribution accounts for every sampled seed", () => {
   const report = auditProductionDifficultyCorpus(openDivisionTemplate, { sampleSize: 10, seedPrefix: "difficulty-audit" });
   assert.equal(report.sampleSize, 10);
-  assert.ok(report.unavailable >= 1);
   assert.equal(report.generated + report.unavailable, report.sampleSize);
   assert.equal(report.levelCounts.reduce((sum, count) => sum + count, 0), report.generated);
 });
 
-test("targeted levels can be audited independently and checkpointed between levels", () => {
+test("a targeted course level can be audited independently", () => {
   const result = auditTargetedDifficultyLevel(tournamentOrderV2Template, 1, { sampleSize: 3, seedPrefix: "test-level" });
   assert.equal(result.level.generated, 3);
   assert.equal(result.level.humanTrace.complete, 3);

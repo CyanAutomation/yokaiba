@@ -19,16 +19,16 @@ test("deployment configuration validates required metadata and returns a canonic
     expectedBuildSha: "abc123",
   });
   assert.throws(() => readDeploymentConfig({}), /DEPLOYMENT_URL must contain/);
+  assert.throws(
+    () => readDeploymentConfig({}, "freshly deployed Worker origin"),
+    /DEPLOYMENT_URL must contain the freshly deployed Worker origin/,
+  );
   assert.throws(() => readDeploymentConfig({ DEPLOYMENT_URL: "https://yokaiba.example" }), /EXPECTED_BUILD_SHA must contain/);
   assert.throws(() => readDeploymentConfig({
     DEPLOYMENT_URL: "https://yokaiba.example/path",
     EXPECTED_BUILD_VERSION: "1.2.3",
     EXPECTED_BUILD_SHA: "abc123",
   }), /without a path, query, or fragment/);
-});
-
-test("deployment configuration preserves the health workflow's origin wording", () => {
-  assert.throws(() => readDeploymentConfig({}, "freshly deployed Worker origin"), /freshly deployed Worker origin/);
 });
 
 function health(version: string, sha: string, requestId: string) {

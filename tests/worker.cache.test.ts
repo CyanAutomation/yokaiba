@@ -198,70 +198,50 @@ test("generated puzzle cache keys namespace secrets without exposing them", asyn
 
 test("generated puzzle cache key digest memoization evicts least-recently-used secrets", async () => {
   const request = new Request("https://example.com/v1/puzzles/generate?templateId=template&seed=seed");
-  const subtle = crypto.subtle;
-  const originalDigest = subtle.digest.bind(subtle);
+  const digestCache = new Map<string | undefined, Promise<string>>();
   let digestCalls = 0;
-  Object.defineProperty(subtle, "digest", {
-    configurable: true,
-    value: (...args: Parameters<SubtleCrypto["digest"]>) => {
-      digestCalls += 1;
-      return originalDigest(...args);
-    },
-  });
+  const digest = async () => {
+    digestCalls += 1;
+    return new Uint8Array(32).buffer;
+  };
+  const key = (secret: string) => generatedPuzzleCacheKey(request, secret, { digestCache, digest });
+  const secrets = Array.from({ length: 11 }, (_, index) => `lru-test-secret-${index}`);
 
-  try {
-    const secrets = Array.from({ length: 11 }, (_, index) => `lru-test-secret-${index}`);
+  // Fill the cache, then refresh the oldest secret before adding one more.
+  // The refreshed entry must survive while the now-oldest secret is evicted.
+  for (const secret of secrets.slice(0, 10)) await key(secret);
+  assert.equal(digestCalls, 10);
 
-    // Fill the cache, then refresh the oldest secret before adding one more.
-    // The refreshed entry must survive while the now-oldest secret is evicted.
-    for (const secret of secrets.slice(0, 10)) await generatedPuzzleCacheKey(request, secret);
-    assert.equal(digestCalls, 10);
+  await key(secrets[0]!);
+  assert.equal(digestCalls, 10);
 
-    await generatedPuzzleCacheKey(request, secrets[0]);
-    assert.equal(digestCalls, 10);
+  await key(secrets[10]!);
+  assert.equal(digestCalls, 11);
 
-    await generatedPuzzleCacheKey(request, secrets[10]);
-    assert.equal(digestCalls, 11);
+  await key(secrets[0]!);
+  assert.equal(digestCalls, 11);
 
-    await generatedPuzzleCacheKey(request, secrets[0]);
-    assert.equal(digestCalls, 11);
-
-    await generatedPuzzleCacheKey(request, secrets[1]);
-    assert.equal(digestCalls, 12);
-  } finally {
-    Reflect.deleteProperty(subtle, "digest");
-  }
+  await key(secrets[1]!);
+  assert.equal(digestCalls, 12);
 });
 
-test("generated puzzle cache key logs crypto failures and retries them", async () => {
+test("generated puzzle cache key retries digest failures instead of memoizing them", async () => {
   const request = new Request("https://example.com/v1/puzzles/generate?templateId=template&seed=seed");
-  const subtle = crypto.subtle;
   const failure = new Error("test digest failure");
   let digestCalls = 0;
-  const errors: string[] = [];
-  const originalConsoleError = console.error;
-  Object.defineProperty(subtle, "digest", {
-    configurable: true,
-    value: async () => {
+  const reportedFailures: unknown[] = [];
+  const digestCache = new Map<string | undefined, Promise<string>>();
+  const key = () => generatedPuzzleCacheKey(request, "failing-crypto-test-secret", {
+    digestCache,
+    digest: async () => {
       digestCalls += 1;
       throw failure;
     },
+    reportDigestFailure: error => reportedFailures.push(error),
   });
-  console.error = (message?: unknown) => errors.push(String(message));
 
-  try {
-    assert.equal(await generatedPuzzleCacheKey(request, "failing-crypto-test-secret"), undefined);
-    assert.equal(await generatedPuzzleCacheKey(request, "failing-crypto-test-secret"), undefined);
-    assert.equal(digestCalls, 2);
-    assert.equal(errors.length, 2);
-    for (const message of errors) {
-      assert.deepEqual(JSON.parse(message), {
-        event: "puzzle_token_namespace_digest_failure",
-        error: failure.message,
-      });
-    }
-  } finally {
-    console.error = originalConsoleError;
-    Reflect.deleteProperty(subtle, "digest");
-  }
+  assert.equal(await key(), undefined);
+  assert.equal(await key(), undefined);
+  assert.equal(digestCalls, 2);
+  assert.deepEqual(reportedFailures, [failure, failure]);
 });
