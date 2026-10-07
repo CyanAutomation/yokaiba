@@ -8,6 +8,9 @@ export function readDeploymentConfig(env, baseUrlDescription = "canonical deploy
   if (!expectedBuildVersion) throw new Error("EXPECTED_BUILD_VERSION must contain the package version being deployed");
 
   const baseUrl = new URL(rawBaseUrl);
+  if (baseUrl.protocol !== "https:") {
+    throw new Error("DEPLOYMENT_URL must use an HTTPS origin");
+  }
   if (baseUrl.pathname !== "/" || baseUrl.search || baseUrl.hash) {
     throw new Error("DEPLOYMENT_URL must be an origin without a path, query, or fragment");
   }
