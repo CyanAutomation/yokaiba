@@ -112,6 +112,18 @@ test("Kaseki workflows only run from main and submit the immutable event commit"
   assert.equal(docs.env.REF, "${{ github.sha }}");
 });
 
+test("Kaseki sweeps share one concurrency group and remain main-only", () => {
+  const dry = readWorkflow("kaseki-dry.yaml");
+  const docs = readWorkflow("kaseki-docs.yaml");
+
+  assert.equal(dry.concurrency.group, "kaseki-sweeps-${{ github.repository }}");
+  assert.equal(docs.concurrency.group, dry.concurrency.group);
+  assert.equal(dry.concurrency["cancel-in-progress"], false);
+  assert.equal(docs.concurrency["cancel-in-progress"], false);
+  assert.equal(getJob(dry, "dry_sweep").if, "github.ref == 'refs/heads/main'");
+  assert.equal(getJob(docs, "docs_sweep").if, "github.ref == 'refs/heads/main'");
+});
+
 // Controller allowlist contract: README.md#github-workflow-policy.
 test("Kaseki sweep validation accepts the approved controller and rejects lookalike URLs", () => {
   for (const [name, jobName, stepName] of [
@@ -181,13 +193,18 @@ test("Kaseki sweeps stop on terminal results and respect the polling deadline", 
   }
 });
 
-test("Cloudflare deployment disables checkout credential persistence and quotes shell inputs", () => {
+test("Cloudflare deployment uses shared validation and quotes shell inputs", () => {
   const deploy = readWorkflow("deploy-cloudflare.yml");
   const deployJob = getJob(deploy, "deploy");
+  const validation = getJob(deploy, "validate");
   const checkout = deployJob.steps.find((step: Workflow) => String(step.uses).startsWith("actions/checkout@")) as Workflow | undefined;
   const deployStep = deployJob.steps.find((step: Workflow) => step.name === "Deploy Worker") as Workflow | undefined;
 
+  assert.equal(validation.uses, "./.github/workflows/validate-reusable.yml");
+  assert.equal(deployJob.needs, "validate");
   assert.equal(checkout?.with?.["persist-credentials"], false);
+  assert.equal(deployJob.steps.some((step: Workflow) => step.run === "npm ci"), true);
+  assert.equal(deployJob.steps.some((step: Workflow) => step.run === "npm test" || step.run === "npm run typecheck"), false);
   assert.ok(deployStep);
   assert.equal(deployStep.env.BUILD_VERSION, "${{ steps.build.outputs.version }}");
   assert.equal(deployStep.env.BUILD_SHA, "${{ github.sha }}");
@@ -203,17 +220,44 @@ test("Kaseki workflows scope the token to gateway, submit, and poll steps", () =
 });
 
 test("validation checkout does not persist its read-only GitHub token", () => {
-  const validate = readWorkflow("validate.yml");
+  const validate = readWorkflow("validate-reusable.yml");
   const checkout = getJob(validate, "validate").steps.find((step: Workflow) => String(step.uses).startsWith("actions/checkout@")) as Workflow | undefined;
 
   assert.equal(checkout?.with?.["persist-credentials"], false);
 });
 
+test("pull requests and main deployments share one validation workflow", () => {
+  const validate = readWorkflow("validate.yml");
+  const shared = readWorkflow("validate-reusable.yml");
+  const deploy = readWorkflow("deploy-cloudflare.yml");
+  const validationCall = getJob(validate, "validate");
+  const deploymentValidation = getJob(deploy, "validate");
+
+  assert.ok(validate.on.pull_request);
+  assert.equal(validate.on.push, undefined);
+  assert.equal(validationCall.uses, "./.github/workflows/validate-reusable.yml");
+  assert.ok(Object.hasOwn(shared.on, "workflow_call"));
+  assert.equal(deploymentValidation.uses, validationCall.uses);
+  assert.equal(getJob(deploy, "deploy").needs, "validate");
+  assert.equal(getJob(deploy, "deploy").steps.some((step: Workflow) => step.run === "npm test" || step.run === "npm run typecheck"), false);
+});
+
+test("Dependabot updates GitHub Actions and npm dependencies weekly", () => {
+  const dependabot = parseYamlDocument(readFileSync(new URL("../.github/dependabot.yml", import.meta.url), "utf8"));
+  const ecosystems = (dependabot.updates as Workflow[]).map(update => update["package-ecosystem"]);
+
+  assert.deepEqual(ecosystems, ["github-actions", "npm"]);
+  for (const update of dependabot.updates as Workflow[]) {
+    assert.equal(update.schedule.interval, "weekly");
+  }
+});
+
 // Runner policy: README.md#github-workflow-policy.
 test("GitHub workflow jobs use a versioned Ubuntu runner instead of a floating label", () => {
-  for (const name of ["validate.yml", "deploy-cloudflare.yml", "kaseki-docs.yaml", "kaseki-dry.yaml"]) {
+  for (const name of ["validate.yml", "validate-reusable.yml", "deploy-cloudflare.yml", "kaseki-docs.yaml", "kaseki-dry.yaml"]) {
     const workflow = readWorkflow(name);
     for (const [jobName, job] of Object.entries(workflow.jobs as Record<string, Workflow>)) {
+      if (job.uses) continue;
       assert.match(job["runs-on"], /^ubuntu-\d+\.\d+$/, `${name} job ${jobName} should pin an Ubuntu release`);
     }
   }
