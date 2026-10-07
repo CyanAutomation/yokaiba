@@ -11,9 +11,9 @@ run-name: >-
 permissions:
   contents: read
 
-# Protect the complete external Kaseki run from overlapping sweeps.
+# Serialize both Kaseki sweeps that use this repository's controller.
 concurrency:
-  group: kaseki-dry-sweep-${{ github.repository }}
+  group: kaseki-sweeps-${{ github.repository }}
   cancel-in-progress: false
 
 jobs:

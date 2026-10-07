@@ -25,6 +25,11 @@ test("deployment configuration validates required metadata and returns a canonic
   );
   assert.throws(() => readDeploymentConfig({ DEPLOYMENT_URL: "https://yokaiba.example" }), /EXPECTED_BUILD_SHA must contain/);
   assert.throws(() => readDeploymentConfig({
+    DEPLOYMENT_URL: "http://yokaiba.example",
+    EXPECTED_BUILD_VERSION: "1.2.3",
+    EXPECTED_BUILD_SHA: "abc123",
+  }), /HTTPS origin/);
+  assert.throws(() => readDeploymentConfig({
     DEPLOYMENT_URL: "https://yokaiba.example/path",
     EXPECTED_BUILD_VERSION: "1.2.3",
     EXPECTED_BUILD_SHA: "abc123",

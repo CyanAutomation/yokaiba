@@ -12,7 +12,7 @@ permissions:
   contents: read
 
 concurrency:
-  group: kaseki-docs-${{ github.repository }}
+  group: kaseki-sweeps-${{ github.repository }}
   cancel-in-progress: false
 
 env:

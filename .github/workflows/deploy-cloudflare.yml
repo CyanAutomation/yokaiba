@@ -13,10 +13,15 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
+  validate:
+    if: github.ref == 'refs/heads/main'
+    uses: ./.github/workflows/validate-reusable.yml
+
   deploy:
     # A manually dispatched workflow may be started from any ref in the UI.
     # Production releases must always use the protected default branch.
     if: github.ref == 'refs/heads/main'
+    needs: validate
     environment: production
     runs-on: ubuntu-24.04
     timeout-minutes: 15
@@ -32,8 +37,6 @@ jobs:
           cache: npm
 
       - run: npm ci
-      - run: npm run typecheck
-      - run: npm test
 
       - name: Read package version
         id: build
