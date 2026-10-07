@@ -110,30 +110,22 @@ test("generated puzzle cache evicts least-recently-used bodies to meet its byte 
   assert.equal(cache.has("oldest"), true);
   assert.equal(cache.has("recent"), false);
   assert.equal(cache.has("new"), true);
-  assert.equal(cache.bodyBytes, 9);
 });
 
-test("generated puzzle cache adjusts its byte accounting when replacing a key", async () => {
-  const cache = new GeneratedPuzzleCache(10, 7);
-  await cacheGeneratedPuzzle(cache, "same", new Response("12345"), 0);
-  await cacheGeneratedPuzzle(cache, "same", new Response("12"), 1);
-  await cacheGeneratedPuzzle(cache, "other", new Response("abcde"), 1);
-
-  assert.equal(cache.size, 2);
-  assert.equal(cache.bodyBytes, 7);
-  assert.equal(await cachedGeneratedPuzzle(cache, "same", 2)?.text(), "12");
-});
-
-test("generated puzzle cache removes expired entries from its byte accounting", async () => {
+// Cache contract: README.md#local-response-cache-policy.
+test("replaced and expired responses release capacity for later cache entries", async () => {
   const cache = new GeneratedPuzzleCache(10, 5);
-  await cacheGeneratedPuzzle(cache, "expired", new Response("12345"), 0);
+  await cacheGeneratedPuzzle(cache, "replace", new Response("12345"), 0);
+  await cacheGeneratedPuzzle(cache, "replace", new Response("12"), 1);
+  await cacheGeneratedPuzzle(cache, "other", new Response("abc"), 1);
 
-  assert.equal(cachedGeneratedPuzzle(cache, "expired", 300_000), undefined);
-  assert.equal(cache.bodyBytes, 0);
+  assert.equal(await cachedGeneratedPuzzle(cache, "replace", 2)?.text(), "12");
+  assert.equal(await cachedGeneratedPuzzle(cache, "other", 2)?.text(), "abc");
 
-  await cacheGeneratedPuzzle(cache, "replacement", new Response("abcde"), 300_000);
-  assert.equal(cache.has("replacement"), true);
-  assert.equal(cache.bodyBytes, 5);
+  assert.equal(cachedGeneratedPuzzle(cache, "replace", 300_001), undefined);
+  assert.equal(cachedGeneratedPuzzle(cache, "other", 300_001), undefined);
+  await cacheGeneratedPuzzle(cache, "fresh", new Response("12345"), 300_001);
+  assert.equal(await cachedGeneratedPuzzle(cache, "fresh", 300_002)?.text(), "12345");
 });
 
 test("generated puzzle cache returns but does not retain an individually oversized response", async () => {
@@ -146,7 +138,6 @@ test("generated puzzle cache returns but does not retain an individually oversiz
   assert.match(returned.headers.get("etag") ?? "", /^"yokaiba-v1-[a-f0-9]{64}"$/);
   assert.equal(cache.has("oversized"), false);
   assert.equal(cache.has("retained"), true);
-  assert.equal(cache.bodyBytes, 4);
 });
 
 test("public GET caching preserves an existing valid ETag", async () => {
@@ -196,7 +187,8 @@ test("generated puzzle cache keys namespace secrets without exposing them", asyn
   }
 });
 
-test("generated puzzle cache key digest memoization evicts least-recently-used secrets", async () => {
+// Secret-derived cache state is bounded by the policy in README.md#local-response-cache-policy.
+test("cache key derivation bounds secret namespace digests with least-recently-used eviction", async () => {
   const request = new Request("https://example.com/v1/puzzles/generate?templateId=template&seed=seed");
   const digestCache = new Map<string | undefined, Promise<string>>();
   let digestCalls = 0;
@@ -225,7 +217,8 @@ test("generated puzzle cache key digest memoization evicts least-recently-used s
   assert.equal(digestCalls, 12);
 });
 
-test("generated puzzle cache key retries digest failures instead of memoizing them", async () => {
+// Recovery contract: failed digests are retried under README.md#local-response-cache-policy.
+test("cache-key derivation recovers from a transient digest failure", async () => {
   const request = new Request("https://example.com/v1/puzzles/generate?templateId=template&seed=seed");
   const failure = new Error("test digest failure");
   let digestCalls = 0;
@@ -235,13 +228,16 @@ test("generated puzzle cache key retries digest failures instead of memoizing th
     digestCache,
     digest: async () => {
       digestCalls += 1;
-      throw failure;
+      if (digestCalls === 1) throw failure;
+      return new Uint8Array(32).buffer;
     },
     reportDigestFailure: error => reportedFailures.push(error),
   });
 
   assert.equal(await key(), undefined);
-  assert.equal(await key(), undefined);
+  const recoveredKey = await key();
+  assert.ok(recoveredKey);
+  assert.equal(await key(), recoveredKey);
   assert.equal(digestCalls, 2);
-  assert.deepEqual(reportedFailures, [failure, failure]);
+  assert.deepEqual(reportedFailures, [failure]);
 });

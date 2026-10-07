@@ -530,7 +530,8 @@ test("solver honours limits while retaining deterministic exhaustive results", (
   assert.deepEqual(solve(solverFixtureSpec, [], 0), []);
 });
 
-test("solver telemetry reports searched nodes, evaluated constraints, and elapsed time", () => {
+// Profiling contract: README.md#solver-implementations documents deterministic injected timing.
+test("solver profiling telemetry measures work and honors the injected clock", () => {
   const clue: Clue = {
     id: "aki-cat",
     constraint: { kind: "matches", subject: "Aki", category: "pet", value: "Cat" },
