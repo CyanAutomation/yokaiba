@@ -99,6 +99,12 @@ test("Kaseki DRY controller validation accepts the approved host and rejects att
   assert.notEqual(checkControllerUrl("https://kaseki-tunnel.scheimann.xyz.attacker.example").status, 0);
 });
 
+test("Kaseki Docs pins its controller to the approved HTTPS host", () => {
+  const docs = readWorkflow("kaseki-docs.yaml");
+  const configurationScript = getRunStep(docs, "docs_sweep", "Validate Kaseki controller URL");
+  assert.match(configurationScript, /\[\[ "\$KASEKI_BASE_URL" == "https:\/\/kaseki-tunnel\.scheimann\.xyz" \]\]/);
+});
+
 test("Kaseki sweeps request normal pull-request publication and cap diffs", () => {
   const dry = readWorkflow("kaseki-dry.yaml");
   const docs = readWorkflow("kaseki-docs.yaml");
