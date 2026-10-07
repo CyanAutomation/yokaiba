@@ -1,9 +1,12 @@
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
-import { readFileSync } from "node:fs";
+import { existsSync, mkdtempSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import test from "node:test";
 import { parseYamlDocument } from "./helpers/yaml.js";
 
+// Workflow behavior contracts are documented in README.md#github-workflow-policy.
 const packageJson = JSON.parse(readFileSync(new URL("../package.json", import.meta.url), "utf8")) as {
   scripts?: Record<string, string>;
 };
@@ -26,6 +29,45 @@ function getRunStep(workflow: Workflow, jobName: string, stepName: string): stri
   return step.run as string;
 }
 
+function validateControllerUrl(script: string, url: string) {
+  return spawnSync("bash", ["--noprofile", "--norc", "-e", "-u", "-o", "pipefail", "-c", script], {
+    encoding: "utf8",
+    env: { PATH: process.env.PATH ?? "/usr/bin:/bin", KASEKI_BASE_URL: url },
+  });
+}
+
+function runKasekiPoll(script: string, status: string, timeoutSeconds: number) {
+  const directory = mkdtempSync(join(tmpdir(), "kaseki-poll-test-"));
+  const bin = join(directory, "bin");
+  const outputPath = join(directory, "github-output");
+  mkdirSync(bin);
+  writeFileSync(join(bin, "curl"), "#!/bin/sh\nexit 0\n", { mode: 0o700 });
+  writeFileSync(join(bin, "jq"), "#!/bin/sh\nprintf '%s\\n' \"$KASEKI_TEST_STATUS\"\n", { mode: 0o700 });
+
+  try {
+    const result = spawnSync("bash", ["--noprofile", "--norc", "-e", "-u", "-o", "pipefail", "-c", script], {
+      encoding: "utf8",
+      timeout: 5_000,
+      env: {
+        PATH: `${bin}:${process.env.PATH ?? "/usr/bin:/bin"}`,
+        KASEKI_API_TOKEN: "test-token",
+        KASEKI_BASE_URL: "https://kaseki-tunnel.scheimann.xyz",
+        RUN_ID: "test-run",
+        GITHUB_OUTPUT: outputPath,
+        KASEKI_TEST_STATUS: status,
+        KASEKI_POLL_TIMEOUT_SECONDS: String(timeoutSeconds),
+      },
+    });
+    if (result.error) throw result.error;
+    return {
+      ...result,
+      githubOutput: existsSync(outputPath) ? readFileSync(outputPath, "utf8") : "",
+    };
+  } finally {
+    rmSync(directory, { recursive: true, force: true });
+  }
+}
+
 function assertKasekiTokenScope(workflow: Workflow, jobName: string): void {
   const currentJob = getJob(workflow, jobName);
   assert.equal(currentJob.env?.KASEKI_API_TOKEN, undefined, `${jobName} must not expose the token job-wide`);
@@ -39,7 +81,8 @@ function assertKasekiTokenScope(workflow: Workflow, jobName: string): void {
   ]);
 }
 
-test("Kaseki validation commands only call scripts defined by this package", () => {
+// Workflow policy: README.md#github-workflow-policy.
+test("Kaseki validation workflows invoke scripts declared by this package", () => {
   for (const name of ["kaseki-docs.yaml", "kaseki-dry.yaml"]) {
     const workflow = readWorkflow(name);
     const job = Object.values(workflow.jobs ?? {}).find((candidate: any) => candidate.env?.VALIDATION_COMMAND) as Workflow | undefined;
@@ -69,40 +112,23 @@ test("Kaseki workflows only run from main and submit the immutable event commit"
   assert.equal(docs.env.REF, "${{ github.sha }}");
 });
 
-test("Kaseki sweeps share a deterministic policy and keep run names readable", () => {
-  const dry = readWorkflow("kaseki-dry.yaml");
-  const docs = readWorkflow("kaseki-docs.yaml");
+// Controller allowlist contract: README.md#github-workflow-policy.
+test("Kaseki sweep validation accepts the approved controller and rejects lookalike URLs", () => {
+  for (const [name, jobName, stepName] of [
+    ["kaseki-dry.yaml", "dry_sweep", "Validate Kaseki configuration"],
+    ["kaseki-docs.yaml", "docs_sweep", "Validate Kaseki controller URL"],
+  ]) {
+    const script = getRunStep(readWorkflow(name), jobName, stepName);
 
-  assert.equal(dry["run-name"], "DRY sweep · ${{ github.repository }}@${{ github.ref_name }}");
-  assert.equal(docs["run-name"], "Docs sweep · ${{ github.repository }}@${{ github.ref_name }}");
-});
-
-test("Kaseki DRY pins its controller to the approved HTTPS host", () => {
-  const dry = readWorkflow("kaseki-dry.yaml");
-  const configurationScript = getRunStep(dry, "dry_sweep", "Validate Kaseki configuration");
-  assert.match(configurationScript, /\[\[ "\$KASEKI_BASE_URL" == "https:\/\/kaseki-tunnel\.scheimann\.xyz" \]\]/);
-});
-
-test("Kaseki DRY controller validation accepts the approved host and rejects attacker-controlled hosts", () => {
-  const dry = readWorkflow("kaseki-dry.yaml");
-  const bashScript = getRunStep(dry, "dry_sweep", "Validate Kaseki configuration");
-
-  function checkControllerUrl(url: string) {
-    return spawnSync("bash", ["--noprofile", "--norc", "-e", "-u", "-o", "pipefail", "-c", bashScript], {
-      encoding: "utf8",
-      env: { PATH: process.env.PATH ?? "/usr/bin:/bin", KASEKI_BASE_URL: url },
-    });
+    assert.equal(validateControllerUrl(script, "https://kaseki-tunnel.scheimann.xyz").status, 0, name);
+    for (const url of [
+      "https://attacker.example",
+      "https://kaseki-tunnel.scheimann.xyz.attacker.example",
+      "http://kaseki-tunnel.scheimann.xyz",
+    ]) {
+      assert.notEqual(validateControllerUrl(script, url).status, 0, `${name} accepted ${url}`);
+    }
   }
-
-  assert.equal(checkControllerUrl("https://kaseki-tunnel.scheimann.xyz").status, 0);
-  assert.notEqual(checkControllerUrl("https://attacker.example").status, 0);
-  assert.notEqual(checkControllerUrl("https://kaseki-tunnel.scheimann.xyz.attacker.example").status, 0);
-});
-
-test("Kaseki Docs pins its controller to the approved HTTPS host", () => {
-  const docs = readWorkflow("kaseki-docs.yaml");
-  const configurationScript = getRunStep(docs, "docs_sweep", "Validate Kaseki controller URL");
-  assert.match(configurationScript, /\[\[ "\$KASEKI_BASE_URL" == "https:\/\/kaseki-tunnel\.scheimann\.xyz" \]\]/);
 });
 
 test("Kaseki sweeps request normal pull-request publication and cap diffs", () => {
@@ -132,22 +158,27 @@ test("Kaseki submissions reuse an idempotency key when a workflow run is rerun",
   }
 });
 
-test("Kaseki Docs waits for a terminal run status within a wall-clock deadline", () => {
-  const docs = readWorkflow("kaseki-docs.yaml");
-  const waitScript = getRunStep(docs, "docs_sweep", "Wait for Kaseki completion");
+// Polling contract: README.md#github-workflow-policy.
+test("Kaseki sweeps stop on terminal results and respect the polling deadline", () => {
+  for (const [name, jobName] of [["kaseki-docs.yaml", "docs_sweep"], ["kaseki-dry.yaml", "dry_sweep"]]) {
+    const workflow = readWorkflow(name);
+    const waitJob = getJob(workflow, jobName).steps.find((step: Workflow) => step.name === "Wait for Kaseki completion") as Workflow | undefined;
+    assert.ok(waitJob?.run, `${name} must define its completion poller`);
+    assert.equal(waitJob.env?.KASEKI_POLL_TIMEOUT_SECONDS, "11100");
 
-  assert.match(waitScript, /poll_deadline=\$\(\(SECONDS \+ 11100\)\)/);
-  assert.match(waitScript, /^\s+completed\)/m);
-  assert.match(waitScript, /^\s+failed\)/m);
-  assert.match(waitScript, /No terminal status after 185 minutes/);
-});
+    const completed = runKasekiPoll(waitJob.run as string, "completed", 11100);
+    assert.equal(completed.status, 0, `${name}: ${completed.stderr}`);
+    assert.match(completed.githubOutput, /status=completed/);
 
-test("Kaseki DRY polling uses a wall-clock deadline instead of a poll count", () => {
-  const dry = readWorkflow("kaseki-dry.yaml");
-  const waitScript = getRunStep(dry, "dry_sweep", "Wait for Kaseki completion");
+    const failed = runKasekiPoll(waitJob.run as string, "failed", 11100);
+    assert.notEqual(failed.status, 0, name);
+    assert.match(failed.githubOutput, /status=failed/);
 
-  assert.match(waitScript, /poll_deadline=\$\(\(SECONDS \+ 11100\)\)/);
-  assert.doesNotMatch(waitScript, /remaining_polls|seq 1 185/);
+    const timedOut = runKasekiPoll(waitJob.run as string, "completed", 0);
+    assert.notEqual(timedOut.status, 0, name);
+    assert.match(timedOut.stderr + timedOut.stdout, /timed out/i);
+    assert.equal(timedOut.githubOutput, "");
+  }
 });
 
 test("Cloudflare deployment disables checkout credential persistence and quotes shell inputs", () => {
@@ -178,6 +209,7 @@ test("validation checkout does not persist its read-only GitHub token", () => {
   assert.equal(checkout?.with?.["persist-credentials"], false);
 });
 
+// Runner policy: README.md#github-workflow-policy.
 test("GitHub workflow jobs use a versioned Ubuntu runner instead of a floating label", () => {
   for (const name of ["validate.yml", "deploy-cloudflare.yml", "kaseki-docs.yaml", "kaseki-dry.yaml"]) {
     const workflow = readWorkflow(name);

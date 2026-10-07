@@ -222,17 +222,19 @@ jobs:
         env:
           RUN_ID: ${{ steps.submit.outputs.run_id }}
           KASEKI_API_TOKEN: ${{ secrets.KASEKI_API_TOKEN }}
+          KASEKI_POLL_TIMEOUT_SECONDS: "11100"
         run: |
           set -euo pipefail
 
           : "${KASEKI_API_TOKEN:?Configure KASEKI_API_TOKEN as an environment secret}"
+          : "${KASEKI_POLL_TIMEOUT_SECONDS:?Configure a Kaseki polling deadline}"
 
           response_file="$(mktemp)"
           trap 'rm -f "$response_file"' EXIT
 
           # Kaseki allows a three-hour run. Poll for up to 185 minutes to
           # observe a terminal result, leaving margin under the job timeout.
-          poll_deadline=$((SECONDS + 11100))
+          poll_deadline=$((SECONDS + KASEKI_POLL_TIMEOUT_SECONDS))
           while (( SECONDS < poll_deadline )); do
             curl --fail-with-body --silent --show-error \
               --retry 3 --retry-all-errors \
@@ -274,7 +276,8 @@ jobs:
 
           done
 
-          echo "::error title=Kaseki run timed out::No terminal status after 185 minutes"
+          timeout_minutes=$((KASEKI_POLL_TIMEOUT_SECONDS / 60))
+          echo "::error title=Kaseki run timed out::No terminal status after ${timeout_minutes} minutes"
           exit 1
 
       - name: Publish run details
