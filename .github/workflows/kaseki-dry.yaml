@@ -34,7 +34,7 @@ jobs:
       KASEKI_BASE_URL: ${{ vars.KASEKI_BASE_URL }}
 
       REPO_URL: ${{ github.server_url }}/${{ github.repository }}
-      REF: ${{ github.sha }}
+      REF: main
 
       TASK_DESCRIPTION: >-
         Perform a conservative DRY-principle review of this repository.
