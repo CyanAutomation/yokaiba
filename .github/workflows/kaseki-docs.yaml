@@ -17,7 +17,7 @@ concurrency:
 
 env:
   REPO_URL: ${{ github.server_url }}/${{ github.repository }}
-  REF: ${{ github.sha }}
+  REF: main
   TASK_DESCRIPTION: Keep README.md and docs/ accurate against the current implementation.
   ALLOWLIST: README.md,docs/**/*.md
   VALIDATION_COMMAND: npm run typecheck && npm test && npm run build
