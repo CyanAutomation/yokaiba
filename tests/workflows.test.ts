@@ -102,14 +102,23 @@ test("Kaseki validation workflows invoke scripts declared by this package", () =
   }
 });
 
-test("Kaseki workflows only run from main and submit the immutable event commit", () => {
+test("Kaseki workflows only run from main and submit the main branch ref", () => {
   const dry = readWorkflow("kaseki-dry.yaml");
   const docs = readWorkflow("kaseki-docs.yaml");
 
   assert.equal(getJob(dry, "dry_sweep").if, "github.ref == 'refs/heads/main'");
   assert.equal(getJob(docs, "docs_sweep").if, "github.ref == 'refs/heads/main'");
-  assert.equal(getJob(dry, "dry_sweep").env.REF, "${{ github.sha }}");
-  assert.equal(docs.env.REF, "${{ github.sha }}");
+  assert.equal(getJob(dry, "dry_sweep").env.REF, "main");
+  assert.equal(docs.env.REF, "main");
+
+  const submissions = [
+    getRunStep(dry, "dry_sweep", "Submit DRY sweep"),
+    getRunStep(docs, "docs_sweep", "Submit documentation sweep"),
+  ];
+  for (const submission of submissions) {
+    assert.match(submission, /--arg ref "\$REF"/);
+    assert.match(submission, /ref: \$ref/);
+  }
 });
 
 test("Kaseki sweeps share one concurrency group and remain main-only", () => {
@@ -143,7 +152,7 @@ test("Kaseki sweep validation accepts the approved controller and rejects lookal
   }
 });
 
-test("Kaseki sweeps request normal pull-request publication and cap diffs", () => {
+test("Kaseki sweeps request standard pull requests, never drafts, and cap diffs", () => {
   const dry = readWorkflow("kaseki-dry.yaml");
   const docs = readWorkflow("kaseki-docs.yaml");
   const drySubmission = getRunStep(dry, "dry_sweep", "Submit DRY sweep");
@@ -152,7 +161,7 @@ test("Kaseki sweeps request normal pull-request publication and cap diffs", () =
   for (const submission of [drySubmission, docsSubmission]) {
     assert.match(submission, /publishMode:\s*"pr"/);
     assert.match(submission, /maxDiffBytes:\s*102400/);
-    assert.doesNotMatch(submission, /draft_pr/);
+    assert.doesNotMatch(submission, /\bdraft(?:_pr)?\b/i);
   }
 });
 
