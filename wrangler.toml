@@ -65,10 +65,6 @@ namespace_id = "870287"
   limit = 10
   period = 60
 
-[[analytics_engine_datasets]]
-binding = "PUZZLE_OUTCOMES"
-dataset = "yokaiba_puzzle_outcomes"
-
 [[ratelimits]]
 name = "MCP_PREAUTH_RATE_LIMITER"
 # A short per-IP window protects authentication from invalid-key floods.
