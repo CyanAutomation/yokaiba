@@ -7,6 +7,7 @@
     "build": "tsc -p tsconfig.json",
     "typecheck": "tsc -p tsconfig.json --noEmit && tsc -p tsconfig.scripts.json --noEmit",
     "test": "node --import tsx --test tests/*.test.ts",
+    "test:mutation:audit": "stryker run stryker.audit.config.json",
     "dev": "wrangler dev",
     "audit:difficulty": "tsx scripts/audit-difficulty.mts",
     "audit:difficulty:targeted": "tsx scripts/audit-targeted-difficulty.mts",
@@ -20,6 +21,7 @@
   },
   "devDependencies": {
     "@cloudflare/workers-types": "^5.20261006.1",
+    "@stryker-mutator/core": "^10.0.0",
     "@types/node": "^24.0.0",
     "fallow": "^3.31.0",
     "swagger-ui-dist": "^5.17.14",
