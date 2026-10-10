@@ -210,24 +210,27 @@ function weaklyMatchesEtag(ifNoneMatch: string | null, etag: string): boolean {
 // `contentEtag` and `cachePublicGet` were moved to ./cache.ts and are imported above.
 
 /** Emits privacy-preserving calibration telemetry: never log a caller seed or answer. */
+async function emitDifficultyGeneration(response: Response): Promise<void> {
+  const body: unknown = await response.json();
+  if (!body || typeof body !== "object" || Array.isArray(body)) return;
+  const record = body as Record<string, unknown>;
+  const difficulty = record.difficulty;
+  const error = record.error;
+  const outcome = response.status === 200 ? "generated" : "unavailable";
+  console.log(JSON.stringify({
+    event: "difficulty_generation",
+    outcome,
+    templateId: typeof record.templateId === "string" ? record.templateId : undefined,
+    requestedDifficultyLevel: typeof record.requestedDifficultyLevel === "number" ? record.requestedDifficultyLevel : undefined,
+    assessedDifficultyLevel: difficulty && typeof difficulty === "object" && typeof (difficulty as Record<string, unknown>).level === "number" ? (difficulty as Record<string, unknown>).level : undefined,
+    modelVersion: difficulty && typeof difficulty === "object" && typeof (difficulty as Record<string, unknown>).modelVersion === "string" ? (difficulty as Record<string, unknown>).modelVersion : undefined,
+    errorCode: error && typeof error === "object" && typeof (error as Record<string, unknown>).code === "string" ? (error as Record<string, unknown>).code : undefined,
+  }));
+}
+
 function observeDifficultyGeneration(response: Response, ctx: ExecutionContext): void {
   if (response.status !== 200 && response.status !== 422) return;
-  const task = response.clone().json().then(body => {
-    if (!body || typeof body !== "object" || Array.isArray(body)) return;
-    const record = body as Record<string, unknown>;
-    const difficulty = record.difficulty;
-    const error = record.error;
-    const outcome = response.status === 200 ? "generated" : "unavailable";
-    console.log(JSON.stringify({
-      event: "difficulty_generation",
-      outcome,
-      templateId: typeof record.templateId === "string" ? record.templateId : undefined,
-      requestedDifficultyLevel: typeof record.requestedDifficultyLevel === "number" ? record.requestedDifficultyLevel : undefined,
-      assessedDifficultyLevel: difficulty && typeof difficulty === "object" && typeof (difficulty as Record<string, unknown>).level === "number" ? (difficulty as Record<string, unknown>).level : undefined,
-      modelVersion: difficulty && typeof difficulty === "object" && typeof (difficulty as Record<string, unknown>).modelVersion === "string" ? (difficulty as Record<string, unknown>).modelVersion : undefined,
-      errorCode: error && typeof error === "object" && typeof (error as Record<string, unknown>).code === "string" ? (error as Record<string, unknown>).code : undefined,
-    }));
-  }).catch(() => undefined);
+  const task = emitDifficultyGeneration(response.clone()).catch(() => undefined);
   if (typeof ctx.waitUntil === "function") ctx.waitUntil(task); else void task;
 }
 
@@ -362,17 +365,26 @@ function tooManyRequests(): Response {
   });
 }
 
+function rateLimitProviderState(provider: unknown, failed: boolean): "configured" | "fallback" {
+  return provider && !failed ? "configured" : "fallback";
+}
+
+function outcomeTelemetryProviderState(provider: unknown, failed: boolean): "disabled" | "failing" | "configured" {
+  if (!provider) return "disabled";
+  return failed ? "failing" : "configured";
+}
+
 function readinessResponse(env: Env, build: ReturnType<typeof buildInfo>, failures: ProviderFailures): Response {
   return json({
     status: "ready", build,
-    rateLimitProvider: env.REST_RATE_LIMITER && !failures.rest ? "configured" : "fallback",
-    generateRateLimitProvider: env.REST_GENERATE_RATE_LIMITER && !failures.restGenerate ? "configured" : "fallback",
-    verifyRateLimitProvider: env.VERIFY_RATE_LIMITER && !failures.verify ? "configured" : "fallback",
-    mcpPreAuthRateLimitProvider: env.MCP_PREAUTH_RATE_LIMITER && !failures.mcpPreAuth ? "configured" : "fallback",
-    mcpRateLimitProvider: env.MCP_RATE_LIMITER && !failures.mcp ? "configured" : "fallback",
-    mcpGenerateRateLimitProvider: env.MCP_GENERATE_RATE_LIMITER && !failures.mcpGenerate ? "configured" : "fallback",
-    mcpPuzzleActionRateLimitProvider: env.MCP_PUZZLE_ACTION_RATE_LIMITER && !failures.mcpPuzzleAction ? "configured" : "fallback",
-    outcomeTelemetryProvider: !env.PUZZLE_OUTCOMES ? "disabled" : failures.outcomeTelemetry ? "failing" : "configured",
+    rateLimitProvider: rateLimitProviderState(env.REST_RATE_LIMITER, failures.rest),
+    generateRateLimitProvider: rateLimitProviderState(env.REST_GENERATE_RATE_LIMITER, failures.restGenerate),
+    verifyRateLimitProvider: rateLimitProviderState(env.VERIFY_RATE_LIMITER, failures.verify),
+    mcpPreAuthRateLimitProvider: rateLimitProviderState(env.MCP_PREAUTH_RATE_LIMITER, failures.mcpPreAuth),
+    mcpRateLimitProvider: rateLimitProviderState(env.MCP_RATE_LIMITER, failures.mcp),
+    mcpGenerateRateLimitProvider: rateLimitProviderState(env.MCP_GENERATE_RATE_LIMITER, failures.mcpGenerate),
+    mcpPuzzleActionRateLimitProvider: rateLimitProviderState(env.MCP_PUZZLE_ACTION_RATE_LIMITER, failures.mcpPuzzleAction),
+    outcomeTelemetryProvider: outcomeTelemetryProviderState(env.PUZZLE_OUTCOMES, failures.outcomeTelemetry),
   });
 }
 
@@ -447,25 +459,35 @@ interface RestRequestDependencies {
   readonly failures: ProviderFailures;
 }
 
+async function generateRestResponse(
+  request: Request,
+  path: string,
+  env: Env,
+  dependencies: RestRequestDependencies,
+): Promise<Response> {
+  if (path === "/v1/puzzles/generate" && dependencies.options.generatePuzzleResponse) {
+    return dependencies.options.generatePuzzleResponse(request);
+  }
+  const router = createRestRouter(templates, {
+    puzzleTokenSecret: env.PUZZLE_TOKEN_SECRET,
+    puzzleTokenPreviousSecrets: env.PUZZLE_TOKEN_SECRET ? previousPuzzleTokenSecrets(env) : [],
+    puzzleTokenTtlSeconds: puzzleTokenTtlSeconds(env),
+    ...dependencies.build,
+    ...(env.PUZZLE_OUTCOMES ? { recordOutcome: event => {
+      try { writePuzzleOutcome(env.PUZZLE_OUTCOMES!, event); }
+      catch (error) { dependencies.failures.outcomeTelemetry = true; throw error; }
+    } } : {}),
+  });
+  return router(request);
+}
+
 async function routeRestRequest(request: Request, path: string, env: Env, ctx: ExecutionContext, dependencies: RestRequestDependencies): Promise<Response> {
-  const route = () => path === "/v1/puzzles/generate" && dependencies.options.generatePuzzleResponse
-    ? dependencies.options.generatePuzzleResponse(request)
-    : createRestRouter(templates, {
-      puzzleTokenSecret: env.PUZZLE_TOKEN_SECRET,
-      puzzleTokenPreviousSecrets: env.PUZZLE_TOKEN_SECRET ? previousPuzzleTokenSecrets(env) : [],
-      puzzleTokenTtlSeconds: puzzleTokenTtlSeconds(env),
-      ...dependencies.build,
-      ...(env.PUZZLE_OUTCOMES ? { recordOutcome: event => {
-        try { writePuzzleOutcome(env.PUZZLE_OUTCOMES!, event); }
-        catch (error) { dependencies.failures.outcomeTelemetry = true; throw error; }
-      } } : {}),
-    })(request);
   const cacheKey = request.method === "GET" && path === "/v1/puzzles/generate"
     ? await (dependencies.options.cacheKeyBuilder ?? generatedPuzzleCacheKey)(request, env.PUZZLE_TOKEN_SECRET)
     : undefined;
   let response: Response;
   if (!cacheKey) {
-    response = await route();
+    response = await generateRestResponse(request, path, env, dependencies);
   } else {
     const cached = cachedGeneratedPuzzle(dependencies.cache, cacheKey, dependencies.clock());
     if (cached) {
@@ -473,7 +495,12 @@ async function routeRestRequest(request: Request, path: string, env: Env, ctx: E
     } else {
       let generation = dependencies.inFlight.get(cacheKey);
       if (!generation) {
-        generation = (async () => cacheGeneratedPuzzle(dependencies.cache, cacheKey, await route(), dependencies.clock()))();
+        generation = (async () => cacheGeneratedPuzzle(
+          dependencies.cache,
+          cacheKey,
+          await generateRestResponse(request, path, env, dependencies),
+          dependencies.clock(),
+        ))();
         dependencies.inFlight.set(cacheKey, generation);
       }
       try {
