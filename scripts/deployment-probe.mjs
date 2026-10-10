@@ -1,5 +1,43 @@
 const RETRYABLE_ROLLOUT_STATUSES = new Set([404, 408, 425, 429, 500, 502, 503, 504]);
 
+async function inspectHealthResponse(response, origin, expectedBuildVersion, expectedBuildSha) {
+  const last = {
+    serviceVersion: undefined,
+    buildSha: undefined,
+    responseStatus: response.status,
+    requestId: response.headers.get("x-request-id") ?? "missing",
+  };
+  if (!response.ok) {
+    if (!RETRYABLE_ROLLOUT_STATUSES.has(response.status)) {
+      throw new Error(`/healthz returned non-retryable status ${response.status} (origin: ${origin}; x-request-id: ${last.requestId})`);
+    }
+    return { matches: false, last };
+  }
+
+  let body;
+  try {
+    body = await response.json();
+  } catch (error) {
+    throw new Error(`/healthz returned malformed JSON (origin: ${origin}; status: ${response.status}; x-request-id: ${last.requestId})`, { cause: error });
+  }
+  if (body?.status !== "ok") {
+    throw new Error(`/healthz returned invalid status ${JSON.stringify(body?.status)} (origin: ${origin}; response status: ${response.status}; x-request-id: ${last.requestId})`);
+  }
+  last.serviceVersion = body.build?.serviceVersion;
+  last.buildSha = body.build?.buildSha;
+  return {
+    matches: last.serviceVersion === expectedBuildVersion && last.buildSha === expectedBuildSha,
+    last,
+  };
+}
+
+function timeoutError(origin, expectedBuildVersion, expectedBuildSha, last) {
+  return new Error(
+    `deployment health probe timed out (origin: ${origin}; expected: ${JSON.stringify({ serviceVersion: expectedBuildVersion, buildSha: expectedBuildSha })}; ` +
+      `last received: ${JSON.stringify({ serviceVersion: last.serviceVersion, buildSha: last.buildSha })}; response status: ${last.responseStatus}; x-request-id: ${last.requestId})`,
+  );
+}
+
 /**
  * Wait for the health endpoint to identify the build that was just deployed.
  * Dependencies are injectable so the bounded polling behavior can be tested
@@ -29,39 +67,12 @@ export async function waitForExpectedDeployment({
     } catch (error) {
       throw new Error(`/healthz fetch failed (origin: ${origin}; attempt: ${attempt})`, { cause: error });
     }
-    last = {
-      serviceVersion: undefined,
-      buildSha: undefined,
-      responseStatus: response.status,
-      requestId: response.headers.get("x-request-id") ?? "missing",
-    };
-
-    if (!response.ok) {
-      if (!RETRYABLE_ROLLOUT_STATUSES.has(response.status)) {
-        throw new Error(`/healthz returned non-retryable status ${response.status} (origin: ${origin}; x-request-id: ${last.requestId})`);
-      }
-    } else {
-      let body;
-      try {
-        body = await response.json();
-      } catch (error) {
-        throw new Error(`/healthz returned malformed JSON (origin: ${origin}; status: ${response.status}; x-request-id: ${last.requestId})`, { cause: error });
-      }
-      if (body?.status !== "ok") {
-        throw new Error(`/healthz returned invalid status ${JSON.stringify(body?.status)} (origin: ${origin}; response status: ${response.status}; x-request-id: ${last.requestId})`);
-      }
-      last.serviceVersion = body.build?.serviceVersion;
-      last.buildSha = body.build?.buildSha;
-      if (last.serviceVersion === expectedBuildVersion && last.buildSha === expectedBuildSha) return response;
-    }
+    const inspected = await inspectHealthResponse(response, origin, expectedBuildVersion, expectedBuildSha);
+    last = inspected.last;
+    if (inspected.matches) return response;
 
     const remainingMs = deadline - now();
-    if (remainingMs <= 0) {
-      throw new Error(
-        `deployment health probe timed out (origin: ${origin}; expected: ${JSON.stringify({ serviceVersion: expectedBuildVersion, buildSha: expectedBuildSha })}; ` +
-          `last received: ${JSON.stringify({ serviceVersion: last.serviceVersion, buildSha: last.buildSha })}; response status: ${last.responseStatus}; x-request-id: ${last.requestId})`,
-      );
-    }
+    if (remainingMs <= 0) throw timeoutError(origin, expectedBuildVersion, expectedBuildSha, last);
     await sleep(Math.min(intervalMs, remainingMs));
   }
 }

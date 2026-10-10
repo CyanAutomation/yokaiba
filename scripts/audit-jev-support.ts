@@ -1,10 +1,70 @@
-import { mkdir, readFile, rename, rm, writeFile } from "node:fs/promises";
+import { mkdir, readFile, rename, rm, unlink, writeFile } from "node:fs/promises";
 import { dirname } from "node:path";
 import { randomUUID } from "node:crypto";
 import { auditTargetedDifficultyLevel } from "../src/generation/audit.js";
 import type { ClueConstraint, Difficulty, DifficultyAuditProgressCallback, DifficultyCorpusAudit, PuzzleTemplate, TargetedDifficultyCorpusAudit } from "../src/index.js";
+export { parseAuditArguments } from "./audit-jev-arguments.js";
+export { buildAuditMarkdown } from "./audit-jev-markdown.js";
 
 export const SEMANTIC_ASSESSMENT_SCHEMA_VERSION = "yokaiba-jev-semantic-v1";
+
+type ConstraintDescriptions = {
+  [K in ClueConstraint["kind"]]: (constraint: Extract<ClueConstraint, { kind: K }>) => string;
+};
+
+const constraintDescriptions: ConstraintDescriptions = {
+  matches: constraint => `${constraint.subject} is associated with ${constraint.value} in ${constraint.category}.`,
+  notMatches: constraint => `${constraint.subject} is not associated with ${constraint.value} in ${constraint.category}.`,
+  sameRow: constraint => `${constraint.left.value} in ${constraint.left.category} belongs to the same competitor as ${constraint.right.value} in ${constraint.right.category}.`,
+  before: constraint => `${constraint.left.value} in ${constraint.left.category} is earlier than ${constraint.right.value} in ${constraint.right.category}.`,
+  adjacent: constraint => `${constraint.left.value} in ${constraint.left.category} is immediately next to ${constraint.right.value} in ${constraint.right.category}.`,
+  distance: constraint => `The positions of ${constraint.left.value} in ${constraint.left.category} and ${constraint.right.value} in ${constraint.right.category} differ by exactly ${constraint.distance}.`,
+};
+
+export function describeConstraint(constraint: ClueConstraint): string {
+  return constraintDescriptions[constraint.kind](constraint as never);
+}
+
+export interface AuditProgress {
+  phase: "difficulty" | "targeted";
+  templateId: string;
+  requestedDifficultyLevel?: number;
+  completed: number;
+  total: number;
+}
+
+function isAuditProgressMilestone(progress: AuditProgress, interval: number): boolean {
+  return progress.completed === 1 || progress.completed === progress.total || progress.completed % interval === 0;
+}
+
+export function auditProgressMessage(progress: AuditProgress): string | undefined {
+  const interval = Math.max(1, Math.ceil(progress.total / 10));
+  if (!isAuditProgressMilestone(progress, interval)) return undefined;
+  const scope = progress.requestedDifficultyLevel === undefined ? progress.templateId : `${progress.templateId} level ${progress.requestedDifficultyLevel}`;
+  return `${progress.phase} audit ${scope}: ${progress.completed}/${progress.total}`;
+}
+
+function withFallback<T>(value: T | undefined, fallback: T): T {
+  return value === undefined ? fallback : value;
+}
+
+export function accumulateResponseUsage(
+  checkpoint: Pick<AuditCheckpoint, "resolvedModel" | "totalCost" | "totalInputTokens" | "totalOutputTokens">,
+  response: JevDecisionResponse,
+): void {
+  checkpoint.resolvedModel = withFallback(response.model, checkpoint.resolvedModel);
+  checkpoint.totalCost += withFallback(response.usage.cost, 0);
+  checkpoint.totalInputTokens += withFallback(response.usage.inputTokens, 0);
+  checkpoint.totalOutputTokens += withFallback(response.usage.outputTokens, 0);
+}
+
+export async function removeCompletedAuditCheckpoint(path: string): Promise<void> {
+  try {
+    await unlink(path);
+  } catch (error) {
+    if (!error || typeof error !== "object" || !("code" in error) || error.code !== "ENOENT") throw error;
+  }
+}
 
 /** Provisional review leads; these do not gate generation or deterministic QA. */
 export const JEV_REVIEW_THRESHOLDS = {
@@ -23,7 +83,6 @@ export interface JevUsage {
   inputTokens: number;
   outputTokens: number;
 }
-
 export interface JevDecisionPayload {
   model: string;
   state: Record<string, unknown>;
@@ -189,51 +248,6 @@ export interface JevAuditReport {
   };
 }
 
-function positiveIntegerArgument(args: readonly string[], name: string, fallback: number): number {
-  const index = args.indexOf(name);
-  if (index === -1) return fallback;
-  const raw = args[index + 1];
-  const value = raw === undefined ? Number.NaN : Number(raw);
-  if (!Number.isInteger(value) || value < 1) throw new Error(`${name} must be a positive integer`);
-  return value;
-}
-
-function stringArgument(args: readonly string[], name: string): string | undefined {
-  const index = args.indexOf(name);
-  if (index === -1) return undefined;
-  const value = args[index + 1];
-  if (!value || value.startsWith("--")) throw new Error(`${name} requires a value`);
-  return value;
-}
-
-export function parseAuditArguments(args: readonly string[]): AuditArguments {
-  const knownFlags = new Set(["--samples", "--difficulty-samples", "--clue-samples", "--batch-size", "--out", "--resume", "--puzzle-review", "--puzzle-review-from"]);
-  for (let index = 0; index < args.length; index += 1) {
-    const arg = args[index]!;
-    if (!arg.startsWith("--")) throw new Error(`unexpected argument: ${arg}`);
-    if (!knownFlags.has(arg)) throw new Error(`unknown argument: ${arg}`);
-    if (arg === "--resume" || arg === "--puzzle-review") continue;
-    if (args[index + 1] === undefined || args[index + 1]!.startsWith("--")) throw new Error(`${arg} requires a value`);
-    index += 1;
-  }
-
-  const sharedSamples = positiveIntegerArgument(args, "--samples", 100);
-  const outputBase = stringArgument(args, "--out");
-  const puzzleReviewFrom = stringArgument(args, "--puzzle-review-from");
-  const resume = args.includes("--resume");
-  if (resume && !outputBase) throw new Error("--resume requires --out so the checkpoint path stays stable");
-  if (resume && puzzleReviewFrom) throw new Error("--resume and --puzzle-review-from cannot be combined");
-  return {
-    difficultySamples: positiveIntegerArgument(args, "--difficulty-samples", sharedSamples),
-    clueSamples: positiveIntegerArgument(args, "--clue-samples", sharedSamples),
-    batchSize: positiveIntegerArgument(args, "--batch-size", 20),
-    outputBase,
-    puzzleReviewFrom,
-    resume,
-    puzzleReview: args.includes("--puzzle-review") || puzzleReviewFrom !== undefined,
-  };
-}
-
 function finiteInRange(value: unknown, minimum: number, maximum: number): value is number {
   return typeof value === "number" && Number.isFinite(value) && value >= minimum && value <= maximum;
 }
@@ -362,42 +376,45 @@ export function markPuzzleUnavailable(puzzle: AuditedPuzzle): AuditedPuzzle {
   return { ...puzzle, evaluationStatus: "unavailable", missingAnswers: ["provider unavailable"] };
 }
 
+function meanClueMetric(clues: readonly AuditedClue[], select: (clue: AuditedClue) => number | undefined): number | undefined {
+  const values = clues.map(select).filter((value): value is number => value !== undefined);
+  return values.length === 0 ? undefined : values.reduce((total, value) => total + value, 0) / values.length;
+}
+
+export function aggregateSemanticPuzzleEvidence(puzzle: AuditedPuzzle, clues: readonly AuditedClue[]): SemanticPuzzleEvidence {
+  const puzzleClues = clues.filter(clue => clue.templateId === puzzle.templateId && clue.seed === puzzle.seed);
+  const readability = meanClueMetric(puzzleClues, clue => clue.readability);
+  const ambiguity = meanClueMetric(puzzleClues, clue => clue.ambiguous);
+  const linguisticComplexity = meanClueMetric(puzzleClues, clue => clue.linguisticComplexity);
+  const relationshipExplicitness = meanClueMetric(puzzleClues, clue => clue.relationshipExplicitness);
+  const semanticAssessment = {
+    ...(readability === undefined ? {} : { readability }),
+    ...(ambiguity === undefined ? {} : { ambiguity }),
+    ...(linguisticComplexity === undefined ? {} : { linguisticComplexity }),
+    ...(relationshipExplicitness === undefined ? {} : { relationshipExplicitness }),
+    evaluatedClues: puzzleClues.filter(clue => clue.evaluationStatus === "complete").length,
+    totalClues: puzzleClues.length,
+  };
+  const hasPuzzleReview = puzzle.wordingRepetition !== undefined || puzzle.terminologyInconsistency !== undefined || puzzle.phrasingVariety !== undefined || puzzle.linguisticDifficultyComparedToLogical !== undefined;
+  return {
+    templateId: puzzle.templateId,
+    seed: puzzle.seed,
+    logicalDifficultyLevel: puzzle.logicalDifficultyLevel,
+    difficultyModelVersion: puzzle.difficultyModelVersion,
+    semanticAssessment,
+    ...(hasPuzzleReview ? {
+      puzzleReview: {
+        ...(puzzle.wordingRepetition === undefined ? {} : { wordingRepetition: puzzle.wordingRepetition }),
+        ...(puzzle.terminologyInconsistency === undefined ? {} : { terminologyInconsistency: puzzle.terminologyInconsistency }),
+        ...(puzzle.phrasingVariety === undefined ? {} : { phrasingVariety: puzzle.phrasingVariety }),
+        ...(puzzle.linguisticDifficultyComparedToLogical === undefined ? {} : { linguisticDifficultyComparedToLogical: puzzle.linguisticDifficultyComparedToLogical }),
+      },
+    } : {}),
+  };
+}
+
 export function aggregateSemanticCalibrationEvidence(clues: readonly AuditedClue[], puzzles: readonly AuditedPuzzle[]): SemanticPuzzleEvidence[] {
-  return puzzles.map(puzzle => {
-    const puzzleClues = clues.filter(clue => clue.templateId === puzzle.templateId && clue.seed === puzzle.seed);
-    const mean = (select: (clue: AuditedClue) => number | undefined) => {
-      const values = puzzleClues.map(select).filter((value): value is number => value !== undefined);
-      return values.length === 0 ? undefined : values.reduce((total, value) => total + value, 0) / values.length;
-    };
-    const readability = mean(clue => clue.readability);
-    const ambiguity = mean(clue => clue.ambiguous);
-    const linguisticComplexity = mean(clue => clue.linguisticComplexity);
-    const relationshipExplicitness = mean(clue => clue.relationshipExplicitness);
-    const semanticAssessment = {
-      ...(readability === undefined ? {} : { readability }),
-      ...(ambiguity === undefined ? {} : { ambiguity }),
-      ...(linguisticComplexity === undefined ? {} : { linguisticComplexity }),
-      ...(relationshipExplicitness === undefined ? {} : { relationshipExplicitness }),
-      evaluatedClues: puzzleClues.filter(clue => clue.evaluationStatus === "complete").length,
-      totalClues: puzzleClues.length,
-    };
-    const hasPuzzleReview = puzzle.wordingRepetition !== undefined || puzzle.terminologyInconsistency !== undefined || puzzle.phrasingVariety !== undefined || puzzle.linguisticDifficultyComparedToLogical !== undefined;
-    return {
-      templateId: puzzle.templateId,
-      seed: puzzle.seed,
-      logicalDifficultyLevel: puzzle.logicalDifficultyLevel,
-      difficultyModelVersion: puzzle.difficultyModelVersion,
-      semanticAssessment,
-      ...(hasPuzzleReview ? {
-        puzzleReview: {
-          ...(puzzle.wordingRepetition === undefined ? {} : { wordingRepetition: puzzle.wordingRepetition }),
-          ...(puzzle.terminologyInconsistency === undefined ? {} : { terminologyInconsistency: puzzle.terminologyInconsistency }),
-          ...(puzzle.phrasingVariety === undefined ? {} : { phrasingVariety: puzzle.phrasingVariety }),
-          ...(puzzle.linguisticDifficultyComparedToLogical === undefined ? {} : { linguisticDifficultyComparedToLogical: puzzle.linguisticDifficultyComparedToLogical }),
-        },
-      } : {}),
-    };
-  });
+  return puzzles.map(puzzle => aggregateSemanticPuzzleEvidence(puzzle, clues));
 }
 
 export function buildClueDecisionPayload(model: string, clues: readonly AuditedClue[]): JevDecisionPayload {
@@ -523,18 +540,23 @@ export async function writeAuditCheckpoint(path: string, checkpoint: AuditCheckp
   }
 }
 
+function integerOr(value: unknown, fallback: number): number {
+  return Number.isInteger(value) ? value as number : fallback;
+}
+
+function normalizeDifficultyAuditRow(item: unknown, index: number): DifficultyCorpusAudit {
+  if (item === null || typeof item !== "object" || Array.isArray(item)) throw new Error(`invalid difficulty audit row at index ${index}`);
+  const row = item as Partial<DifficultyCorpusAudit>;
+  if (typeof row.sampleSize !== "number") throw new Error(`invalid difficulty audit sample size at index ${index}`);
+  return {
+    ...row,
+    generated: integerOr(row.generated, row.sampleSize),
+    unavailable: integerOr(row.unavailable, 0),
+  } as DifficultyCorpusAudit;
+}
+
 function normalizeDifficultyAuditRows(value: unknown): DifficultyCorpusAudit[] {
-  if (!Array.isArray(value)) return [];
-  return value.map((item, index) => {
-    if (item === null || typeof item !== "object" || Array.isArray(item)) throw new Error(`invalid difficulty audit row at index ${index}`);
-    const row = item as Partial<DifficultyCorpusAudit>;
-    if (typeof row.sampleSize !== "number") throw new Error(`invalid difficulty audit sample size at index ${index}`);
-    return {
-      ...row,
-      generated: Number.isInteger(row.generated) ? row.generated : row.sampleSize,
-      unavailable: Number.isInteger(row.unavailable) ? row.unavailable : 0,
-    } as DifficultyCorpusAudit;
-  });
+  return Array.isArray(value) ? value.map(normalizeDifficultyAuditRow) : [];
 }
 
 /** Complete missing targeted levels, persisting after each one for resumable long audits. */
@@ -649,178 +671,4 @@ export function rebuildPuzzleReviewCorpus(
       missingAnswers: [],
     };
   });
-}
-
-function escapeTableCell(value: string) {
-  return value.replaceAll("|", "\\|").replaceAll("\r", " ").replaceAll("\n", " ");
-}
-
-function formattedScore(value: number | undefined, confidence: number | undefined) {
-  if (value === undefined) return "n/a";
-  return confidence === undefined ? value.toFixed(2) : `${value.toFixed(2)} (conf. ${confidence.toFixed(2)})`;
-}
-
-function targetedExactCount(row: TargetedDifficultyCorpusAudit["levels"][number]) {
-  return row.assessedLevelCounts[row.requestedDifficultyLevel - 1] ?? 0;
-}
-
-function auditHeaderLines(report: JevAuditReport): string[] {
-  const { clueAudit } = report;
-  return [
-    "# Yokaiba JEV audit",
-    "",
-    `Started: ${report.startedAt}`,
-    `Generated: ${report.generatedAt}`,
-    `JEV model requested: ${report.configuration.requestedModel}`,
-    `JEV model resolved: ${report.configuration.resolvedModel}`,
-    `Semantic assessment schema: ${report.configuration.semanticAssessmentSchemaVersion}`,
-    `Provisional review thresholds: ${JSON.stringify(report.configuration.reviewThresholds)}`,
-    `Samples: ${report.configuration.difficultySamples} per difficulty template; ${report.configuration.clueSamples} per wording template; batch size ${report.configuration.batchSize}.`,
-    `Clues reviewed: ${clueAudit.sampledClues}; status: ${clueAudit.status}; review leads: ${clueAudit.flaggedClues.length}; incomplete: ${clueAudit.incompleteClues.length}; unavailable: ${clueAudit.unavailableClues.length}; reported cost: $${clueAudit.totalCost.toFixed(6)} (${clueAudit.totalInputTokens} input / ${clueAudit.totalOutputTokens} output tokens).`,
-    `Puzzle-level review: ${report.puzzleAudit.enabled ? "enabled" : "disabled"}; ${report.puzzleAudit.completePuzzles} complete / ${report.puzzleAudit.sampledPuzzles} sampled; ${report.puzzleAudit.flaggedPuzzles.length} review leads.`,
-  ];
-}
-
-function difficultyDistributionLines(
-  title: string,
-  rows: DifficultyCorpusAudit[],
-  emptyMessage?: string,
-): string[] {
-  const lines = [
-    `## ${title}`,
-    "",
-    "| Template | Generated / requested | Unavailable | Level distribution | No-guess trace |",
-    "| --- | ---: | ---: | --- | --- |",
-    ...rows.map(row => `| ${row.templateId} | ${row.generated}/${row.sampleSize} | ${row.unavailable} | ${row.levelCounts.map((count, index) => `${index + 1}: ${count}`).filter(entry => !entry.endsWith(": 0")).join(", ")} | ${row.humanTrace.complete} complete / ${row.generated} generated (${row.humanTrace.incomplete} incomplete) |`),
-  ];
-  if (rows.length === 0 && emptyMessage) lines.push(emptyMessage);
-  return lines;
-}
-
-function targetedDifficultyLines(report: JevAuditReport): string[] {
-  const lines = [
-    "## Targeted difficulty audit",
-    "",
-    "| Template | Level | Exact target | No-guess trace | Fallback use | Fallback attempt p50 / p95 / max |",
-    "| --- | ---: | ---: | ---: | ---: | ---: |",
-  ];
-  for (const template of report.targetedDifficultyAudit) {
-    for (const level of template.levels) {
-      const percentiles = level.fallback.attempts
-        ? `p50 ${level.fallback.attempts.p50}, p95 ${level.fallback.attempts.p95}`
-        : "p50 n/a, p95 n/a";
-      lines.push(`| ${template.templateId} | ${level.requestedDifficultyLevel} | ${targetedExactCount(level)}/${level.generated} | ${level.humanTrace.complete}/${level.generated} | ${level.fallback.used}/${level.generated} | ${percentiles}, max ${level.fallback.maximumAttempt} |`);
-    }
-  }
-  if (report.targetedDifficultyAudit.length === 0) lines.push("No targeted difficulty results were collected.");
-  lines.push("Fallback attempt percentiles include only seeds that required fallback and use the nearest-rank definition.");
-  return lines;
-}
-
-function semanticCalibrationLines(report: JevAuditReport): string[] {
-  const lines = [
-    "",
-    "## Semantic and logical calibration evidence",
-    "",
-    "Logical level and model version are deterministic. Semantic measurements are probabilistic JEV assessments and remain independent; rows below aggregate each sampled puzzle's clue scores by logical level. The JSON report keeps each template, seed, and paired raw profile for later comparison with player outcomes.",
-    "",
-    "| Template | Logical level / model | Puzzles | Readability (0–2) | Ambiguity (0–1) | Linguistic complexity (0–2) | Relationship explicitness (0–2) | Language burden vs logical level (0–2) |",
-    "| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: |",
-  ];
-  const groups = new Map<string, SemanticPuzzleEvidence[]>();
-  for (const evidence of report.semanticCalibrationEvidence) {
-    const key = `${evidence.templateId}\u0000${evidence.difficultyModelVersion}\u0000${evidence.logicalDifficultyLevel}`;
-    groups.set(key, [...(groups.get(key) ?? []), evidence]);
-  }
-  const formatMean = (values: Array<number | undefined>) => {
-    const present = values.filter((value): value is number => value !== undefined);
-    return present.length ? (present.reduce((sum, value) => sum + value, 0) / present.length).toFixed(2) : "n/a";
-  };
-  for (const rows of groups.values()) {
-    const first = rows[0]!;
-    lines.push(`| ${first.templateId} | ${first.logicalDifficultyLevel} / ${first.difficultyModelVersion} | ${rows.length} | ${formatMean(rows.map(row => row.semanticAssessment.readability))} | ${formatMean(rows.map(row => row.semanticAssessment.ambiguity))} | ${formatMean(rows.map(row => row.semanticAssessment.linguisticComplexity))} | ${formatMean(rows.map(row => row.semanticAssessment.relationshipExplicitness))} | ${formatMean(rows.map(row => row.puzzleReview?.linguisticDifficultyComparedToLogical))} |`);
-  }
-  if (report.semanticCalibrationEvidence.length === 0) lines.push("No paired semantic and logical sample evidence was collected.");
-  return lines;
-}
-
-function clueFlagLines(report: JevAuditReport): string[] {
-  const lines = ["", "## JEV wording flags", ""];
-  if (report.clueAudit.flaggedClues.length === 0) {
-    lines.push("No clue crossed the conservative review thresholds.");
-    return lines;
-  }
-  lines.push(
-    "Scores include JEV confidence in parentheses when supplied.",
-    "",
-    "| Template / clue | Text | Faithfulness | Ambiguity | Readability | Linguistic complexity | Relationship explicitness | Flag reasons | Evaluation |",
-    "| --- | --- | ---: | ---: | ---: | ---: | ---: | --- | --- |",
-  );
-  for (const clue of report.clueAudit.flaggedClues) {
-    lines.push(`| ${escapeTableCell(`${clue.templateId} / ${clue.clueId}`)} | ${escapeTableCell(clue.text)} | ${formattedScore(clue.faithful, clue.faithfulConfidence)} | ${formattedScore(clue.ambiguous, clue.ambiguousConfidence)} | ${formattedScore(clue.readability, clue.readabilityConfidence)} | ${formattedScore(clue.linguisticComplexity, clue.linguisticComplexityConfidence)} | ${formattedScore(clue.relationshipExplicitness, clue.relationshipExplicitnessConfidence)} | ${escapeTableCell(clue.flagReasons.join(", "))} | ${clue.evaluationStatus} |`);
-  }
-  return lines;
-}
-
-function puzzleReviewLines(report: JevAuditReport): string[] {
-  if (!report.puzzleAudit.enabled) return [];
-  const lines = ["", "## Puzzle-level semantic review leads", ""];
-  if (report.puzzleAudit.flaggedPuzzles.length === 0) {
-    lines.push("No puzzle-level response crossed the provisional review thresholds.");
-    return lines;
-  }
-  lines.push(
-    "These are review leads, not deterministic QA failures.",
-    "",
-    "| Template / seed | Logical level | Repetition | Terminology inconsistency | Phrasing variety | Language burden vs logical level | Evaluation |",
-    "| --- | ---: | ---: | ---: | ---: | ---: | --- |",
-  );
-  for (const puzzle of report.puzzleAudit.flaggedPuzzles) {
-    lines.push(`| ${escapeTableCell(`${puzzle.templateId} / ${puzzle.seed}`)} | ${puzzle.logicalDifficultyLevel} (${puzzle.difficultyModelVersion}) | ${formattedScore(puzzle.wordingRepetition, puzzle.wordingRepetitionConfidence)} | ${formattedScore(puzzle.terminologyInconsistency, puzzle.terminologyInconsistencyConfidence)} | ${formattedScore(puzzle.phrasingVariety, puzzle.phrasingVarietyConfidence)} | ${formattedScore(puzzle.linguisticDifficultyComparedToLogical, puzzle.linguisticDifficultyComparedToLogicalConfidence)} | ${puzzle.evaluationStatus} |`);
-  }
-  return lines;
-}
-
-function incompleteClueLines(report: JevAuditReport): string[] {
-  if (report.clueAudit.incompleteClues.length === 0) return [];
-  return [
-    "",
-    "## Incomplete JEV evaluations",
-    "",
-    "These responses were missing required scores or returned values outside the expected ranges.",
-    "",
-    "| Template / clue | Missing answers | Text |",
-    "| --- | --- | --- |",
-    ...report.clueAudit.incompleteClues.map(clue => `| ${escapeTableCell(`${clue.templateId} / ${clue.clueId}`)} | ${escapeTableCell(clue.missingAnswers.join(", "))} | ${escapeTableCell(clue.text)} |`),
-  ];
-}
-
-function providerAvailabilityLines(report: JevAuditReport): string[] {
-  if (report.clueAudit.unavailableClues.length === 0 && report.puzzleAudit.unavailablePuzzles === 0) return [];
-  return [
-    "",
-    "JEV provider results were unavailable for some or all semantic assessments. Deterministic difficulty and puzzle QA remain available; keep or resume the checkpoint to retry the semantic review.",
-  ];
-}
-
-export function buildAuditMarkdown(report: JevAuditReport): string {
-  return [
-    ...auditHeaderLines(report),
-    "",
-    ...difficultyDistributionLines("Raw generation distribution", report.difficultyAudit),
-    "",
-    "The raw distribution calls the base generator directly. Templates with `requiresHumanSolve` use a progressive strategy search on the ordinary production API path.",
-    "",
-    ...difficultyDistributionLines("Progressive delivery distribution", report.productionDifficultyAudit, "No progressive delivery results were collected."),
-    "",
-    ...targetedDifficultyLines(report),
-    ...semanticCalibrationLines(report),
-    ...clueFlagLines(report),
-    ...puzzleReviewLines(report),
-    ...incompleteClueLines(report),
-    ...providerAvailabilityLines(report),
-    "",
-    "JEV thresholds are provisional review leads, not gates or evidence that a deterministic clue contract is broken. Logical difficulty is deterministic, semantic difficulty is probabilistic JEV analysis, and aggregated player outcomes remain the empirical calibration signal. /v1/events currently accepts outcomes but does not produce these aggregates.",
-    "",
-  ].join("\n");
 }

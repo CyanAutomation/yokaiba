@@ -1,4 +1,4 @@
-import { PuzzleActionError } from "./puzzle-actions.js";
+import { PuzzleActionError } from "./puzzle-action-error.js";
 import { json } from "./json-response.js";
 
 const MAX_GENERATION_BODY_BYTES = 16 * 1024;

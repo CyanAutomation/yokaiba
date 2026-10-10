@@ -4,7 +4,10 @@ import { scenarioSummary } from "../catalogue.js";
 import type { GeneratedPuzzle, PuzzleTemplate } from "../domain/types.js";
 import { DifficultyUnavailableError, generatePuzzleForRequest } from "../generation/generator.js";
 import { DEFAULT_PUZZLE_TOKEN_TTL_SECONDS, issuePuzzleToken } from "../api/puzzle-token.js";
-import { puzzleFromToken, puzzleHint, PuzzleActionError, verifyPuzzleAnswer } from "../api/puzzle-actions.js";
+import { puzzleFromToken } from "../api/puzzle-from-token.js";
+import { puzzleHint } from "../api/puzzle-hints.js";
+import { PuzzleActionError } from "../api/puzzle-action-error.js";
+import { verifyPuzzleAnswer } from "../api/puzzle-answer.js";
 
 export interface YokaibaMcpOptions {
   puzzleTokenSecret?: string;
@@ -90,6 +93,35 @@ function puzzleOutput(puzzle: GeneratedPuzzle, puzzleToken?: string) {
   return { ...publicPuzzle, ...(puzzleToken ? { puzzleToken } : {}) };
 }
 
+function generationErrorResult(error: unknown) {
+  if (error instanceof DifficultyUnavailableError) {
+    return errorResult("difficulty_unavailable", error.message, {
+      templateId: error.templateId,
+      requestedDifficultyLevel: error.requestedDifficultyLevel,
+      availableDifficultyLevels: error.availableDifficultyLevels,
+    });
+  }
+  return errorResult("generation_failed", "puzzle generation failed");
+}
+
+async function generatePuzzleResult(
+  template: PuzzleTemplate,
+  requestedSeed: string,
+  difficultyLevel: GeneratedPuzzle["requestedDifficultyLevel"],
+  allowSeedFallback: boolean,
+  options: YokaibaMcpOptions,
+) {
+  try {
+    const puzzle = generatePuzzleForRequest(template, requestedSeed, difficultyLevel, allowSeedFallback);
+    const puzzleToken = options.puzzleTokenSecret ? await issuePuzzleToken(puzzle, options.puzzleTokenSecret, {
+      ttlSeconds: options.puzzleTokenTtlSeconds ?? DEFAULT_PUZZLE_TOKEN_TTL_SECONDS,
+    }) : undefined;
+    return textResult(puzzleOutput(puzzle, puzzleToken));
+  } catch (error) {
+    return generationErrorResult(error);
+  }
+}
+
 function actionError(error: unknown) {
   return error instanceof PuzzleActionError
     ? { code: error.code, message: error.message }
@@ -119,22 +151,13 @@ export function createYokaibaMcpHandler(templates: readonly PuzzleTemplate[], op
       const template = byId.get(templateId);
       if (!template) return errorResult("not_found", "unknown templateId");
       const requestedSeed = seed ?? crypto.randomUUID();
-      try {
-        const puzzle = generatePuzzleForRequest(template, requestedSeed, difficultyLevel as GeneratedPuzzle["requestedDifficultyLevel"], allowSeedFallback ?? false);
-        const puzzleToken = options.puzzleTokenSecret ? await issuePuzzleToken(puzzle, options.puzzleTokenSecret, {
-          ttlSeconds: options.puzzleTokenTtlSeconds ?? DEFAULT_PUZZLE_TOKEN_TTL_SECONDS,
-        }) : undefined;
-        return textResult(puzzleOutput(puzzle, puzzleToken));
-      } catch (error) {
-        if (error instanceof DifficultyUnavailableError) {
-          return errorResult("difficulty_unavailable", error.message, {
-            templateId: error.templateId,
-            requestedDifficultyLevel: error.requestedDifficultyLevel,
-            availableDifficultyLevels: error.availableDifficultyLevels,
-          });
-        }
-        return errorResult("generation_failed", "puzzle generation failed");
-      }
+      return generatePuzzleResult(
+        template,
+        requestedSeed,
+        difficultyLevel as GeneratedPuzzle["requestedDifficultyLevel"],
+        allowSeedFallback ?? false,
+        options,
+      );
     });
 
     if (options.puzzleTokenSecret) {
