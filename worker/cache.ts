@@ -25,10 +25,6 @@ export class GeneratedPuzzleCache {
     return this.#entries.size;
   }
 
-  get bodyBytes(): number {
-    return this.#bodyBytes;
-  }
-
   has(key: string): boolean {
     return this.#entries.has(key);
   }
