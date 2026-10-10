@@ -77,6 +77,27 @@ test("deployment probe retries stale metadata until the current build arrives", 
   assert.equal(elapsed, 3_000);
 });
 
+test("deployment probe stops immediately on a non-retryable status", async () => {
+  let requests = 0;
+  let sleeps = 0;
+
+  await assert.rejects(
+    waitForExpectedDeployment({
+      baseUrl: "https://deployment.example",
+      ...expected,
+      fetchImpl: () => {
+        requests += 1;
+        return Promise.resolve(new Response("forbidden", { status: 401, headers: { "x-request-id": "denied" } }));
+      },
+      sleep: async () => { sleeps += 1; },
+    }),
+    /non-retryable status 401.*x-request-id: denied/,
+  );
+
+  assert.equal(requests, 1);
+  assert.equal(sleeps, 0);
+});
+
 test("deployment probe reports sanitized context for network failures", async () => {
   const networkError = new TypeError("fetch failed");
 

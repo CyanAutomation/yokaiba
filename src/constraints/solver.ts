@@ -1,42 +1,11 @@
-import type { Clue, ClueConstraint, PuzzleSpec, Solution } from "../domain/types.js";
+import type { Clue, PuzzleSpec, Solution } from "../domain/types.js";
 import type { PuzzleSolver } from "../domain/puzzle-solver.js";
+import { category, compileConstraints, type CompiledConstraint } from "./compiled-constraints.js";
+export { satisfiesConstraint } from "./compiled-constraints.js";
 
 /** Inclusive row-count bounds supported by the exhaustive MVP solver. */
 export const MIN_SUPPORTED_ROWS = 2;
 export const MAX_SUPPORTED_ROWS = 5;
-
-function category(spec: PuzzleSpec, id: string) {
-  const found = spec.categories.find(candidate => candidate.id === id);
-  if (!found) throw new Error(`unknown category: ${id}`);
-  return found;
-}
-
-function positionOf(spec: PuzzleSpec, solution: Solution, categoryId: string, value: string): number {
-  const values = categoryId === spec.baseCategory
-    ? category(spec, categoryId).values
-    : solution.assignments[categoryId];
-  if (!values) throw new Error(`solution has no assignment for category: ${categoryId}`);
-  const result = values.indexOf(value);
-  if (result < 0) throw new Error(`unknown value ${JSON.stringify(value)} in ${categoryId}`);
-  return result;
-}
-
-export function satisfiesConstraint(spec: PuzzleSpec, solution: Solution, constraint: ClueConstraint): boolean {
-  switch (constraint.kind) {
-    case "matches":
-      return positionOf(spec, solution, spec.baseCategory, constraint.subject) === positionOf(spec, solution, constraint.category, constraint.value);
-    case "notMatches":
-      return positionOf(spec, solution, spec.baseCategory, constraint.subject) !== positionOf(spec, solution, constraint.category, constraint.value);
-    case "before":
-      return positionOf(spec, solution, constraint.left.category, constraint.left.value) < positionOf(spec, solution, constraint.right.category, constraint.right.value);
-    case "adjacent":
-      return Math.abs(positionOf(spec, solution, constraint.left.category, constraint.left.value) - positionOf(spec, solution, constraint.right.category, constraint.right.value)) === 1;
-    case "sameRow":
-      return positionOf(spec, solution, constraint.left.category, constraint.left.value) === positionOf(spec, solution, constraint.right.category, constraint.right.value);
-    case "distance":
-      return Math.abs(positionOf(spec, solution, constraint.left.category, constraint.left.value) - positionOf(spec, solution, constraint.right.category, constraint.right.value)) === constraint.distance;
-  }
-}
 
 function permutations(values: string[]): string[][] {
   // Iterative Heap's algorithm keeps the call stack constant even if the MVP's
@@ -60,12 +29,6 @@ function permutations(values: string[]): string[][] {
   return result;
 }
 
-interface CompiledConstraint {
-  /** Non-base categories that must have a permutation before this is testable. */
-  readonly requiredCategories: readonly string[];
-  readonly satisfies: (assignments: Record<string, string[]>) => boolean;
-}
-
 interface CandidateDimension {
   readonly id: string;
   readonly permutations: readonly string[][];
@@ -85,60 +48,6 @@ export interface SolverTelemetry {
 export interface SolveWithTelemetryResult {
   readonly solutions: Solution[];
   readonly telemetry: SolverTelemetry;
-}
-
-function compileConstraints(spec: PuzzleSpec, clues: readonly Clue[]): CompiledConstraint[] {
-  const base = category(spec, spec.baseCategory);
-  const knownPosition = (categoryId: string, value: string) => {
-    const values = category(spec, categoryId).values;
-    const position = values.indexOf(value);
-    if (position < 0) throw new Error(`unknown value ${JSON.stringify(value)} in ${categoryId}`);
-    return position;
-  };
-  const position = (categoryId: string, value: string) => {
-    const fixedPosition = knownPosition(categoryId, value);
-    if (categoryId === base.id) return (_assignments: Record<string, string[]>) => fixedPosition;
-    return (assignments: Record<string, string[]>) => {
-      const values = assignments[categoryId];
-      if (!values) throw new Error(`solution has no assignment for category: ${categoryId}`);
-      return values.indexOf(value);
-    };
-  };
-  const requirements = (...categoryIds: string[]) => [...new Set(categoryIds.filter(categoryId => categoryId !== base.id))];
-  const relation = (
-    left: { category: string; value: string },
-    right: { category: string; value: string },
-    satisfies: (leftPosition: number, rightPosition: number) => boolean,
-  ): CompiledConstraint => {
-    const leftPosition = position(left.category, left.value);
-    const rightPosition = position(right.category, right.value);
-    return {
-      requiredCategories: requirements(left.category, right.category),
-      satisfies: assignments => satisfies(leftPosition(assignments), rightPosition(assignments)),
-    };
-  };
-
-  return clues.map(({ constraint }) => {
-    switch (constraint.kind) {
-      case "matches": {
-        const subjectPosition = position(base.id, constraint.subject);
-        const valuePosition = position(constraint.category, constraint.value);
-        return { requiredCategories: requirements(constraint.category), satisfies: assignments => subjectPosition(assignments) === valuePosition(assignments) };
-      }
-      case "notMatches": {
-        const subjectPosition = position(base.id, constraint.subject);
-        const valuePosition = position(constraint.category, constraint.value);
-        return { requiredCategories: requirements(constraint.category), satisfies: assignments => subjectPosition(assignments) !== valuePosition(assignments) };
-      }
-      case "before": return relation(constraint.left, constraint.right, (left, right) => left < right);
-      case "adjacent": return relation(constraint.left, constraint.right, (left, right) => Math.abs(left - right) === 1);
-      case "sameRow": return relation(constraint.left, constraint.right, (left, right) => left === right);
-      case "distance": {
-        if (!Number.isInteger(constraint.distance) || constraint.distance < 1) throw new Error("distance clues require a positive integer distance");
-        return relation(constraint.left, constraint.right, (left, right) => Math.abs(left - right) === constraint.distance);
-      }
-    }
-  });
 }
 
 /** Exhaustive, deterministic solver. Intended for the MVP's deliberately small grids. */
@@ -183,19 +92,18 @@ export function solveWithTelemetry(
     return constraint.satisfies(assignments);
   });
   const visit = (depth: number) => {
-    if (results.length >= limit) return;
     if (depth === candidates.length) {
       results.push({ assignments: Object.fromEntries(originalDimensions.map(({ id }) => [id, [...assignments[id]!]])) });
       return;
     }
     const dimension = candidates[depth];
-    for (const permutation of dimension.permutations) {
+    dimension.permutations.some(permutation => {
       nodesVisited += 1;
       assignments[dimension.id] = permutation;
       if (check(constraintsReadyAtDepth[depth]!)) visit(depth + 1);
       delete assignments[dimension.id];
-      if (results.length >= limit) return;
-    }
+      return results.length >= limit;
+    });
   };
   if (limit > 0 && check(rootConstraints)) visit(0);
   return { solutions: results, telemetry: { nodesVisited, constraintChecks, elapsedMs: now() - startedAt } };

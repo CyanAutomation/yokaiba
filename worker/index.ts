@@ -8,6 +8,18 @@ import { championshipBridgeTemplate } from "../src/templates/championship-bridge
 import { hostHeaderValidationResponse } from "@modelcontextprotocol/server";
 import { json } from "../src/api/json-response.js";
 import { DEFAULT_PUZZLE_TOKEN_TTL_SECONDS, MAX_PUZZLE_TOKEN_TTL_SECONDS } from "../src/api/puzzle-token.js";
+import { emitDifficultyGeneration } from "./difficulty-telemetry.js";
+import {
+  asRateLimitDecision,
+  createRateLimiter,
+  providerRateLimitDecision,
+  restRateLimitDecision,
+  type RateLimitDecision,
+  type RateLimiter,
+  type RateLimitStore,
+} from "./rate-limit.js";
+export { createRateLimiter } from "./rate-limit.js";
+export type { RateLimitDecision, RateLimiter, RateLimitStore } from "./rate-limit.js";
 
 interface Env {
   /** Matches Budokon's API-key secret name and protects the MCP endpoint. */
@@ -134,15 +146,6 @@ async function mcpToolName(request: Request): Promise<string | undefined> {
   }
 }
 
-export type RateLimitStore = Map<string, { count: number; resetAt: number }>;
-export interface RateLimitDecision {
-  limited: boolean;
-  /** Present only when the Worker performed the limiting locally. */
-  remaining?: number;
-  /** Unix epoch seconds; present only when the Worker performed the limiting locally. */
-  resetAt?: number;
-}
-export type RateLimiter = (request: Request, rawLimit: string | undefined, scope: string) => boolean | RateLimitDecision;
 export interface WorkerOptions {
   localRateLimitStore?: RateLimitStore;
   clock?: () => number;
@@ -151,40 +154,8 @@ export interface WorkerOptions {
   cacheKeyBuilder?: typeof generatedPuzzleCacheKey;
   generatePuzzleResponse?: (request: Request) => Response | Promise<Response>;
 }
-const RATE_WINDOW_MS = 60_000;
-const MAX_RATE_LIMIT_KEYS = 10_000;
 import { GeneratedPuzzleCache, generatedPuzzleCacheKey, cachedGeneratedPuzzle, cacheGeneratedPuzzle, cachePublicGet } from "./cache.js";
 export { GeneratedPuzzleCache } from "./cache.js";
-
-export function createRateLimiter(rateLimits: RateLimitStore = new Map(), clock: () => number = Date.now): RateLimiter {
-  return (request, rawLimit, scope) => {
-    const now = clock();
-    const configured = Number(rawLimit ?? 30);
-    const limit = Number.isSafeInteger(configured) && configured > 0 ? configured : 30;
-    const key = `${scope}:${request.headers.get("cf-connecting-ip") ?? "unknown"}`;
-    const current = rateLimits.get(key);
-    if (!current || current.resetAt <= now) {
-      if (rateLimits.size >= MAX_RATE_LIMIT_KEYS) {
-        for (const [candidate, value] of rateLimits) {
-          if (value.resetAt <= now) rateLimits.delete(candidate);
-        }
-        if (rateLimits.size >= MAX_RATE_LIMIT_KEYS) rateLimits.delete(rateLimits.keys().next().value as string);
-      }
-      rateLimits.set(key, { count: 1, resetAt: now + RATE_WINDOW_MS });
-      return { limited: false, remaining: limit - 1, resetAt: Math.ceil((now + RATE_WINDOW_MS) / 1_000) };
-    }
-    current.count += 1;
-    return {
-      limited: current.count > limit,
-      remaining: Math.max(0, limit - current.count),
-      resetAt: Math.ceil(current.resetAt / 1_000),
-    };
-  };
-}
-
-function asRateLimitDecision(result: boolean | RateLimitDecision): RateLimitDecision {
-  return typeof result === "boolean" ? { limited: result } : result;
-}
 
 function configuredOrigins(rawOrigins: string | undefined) {
   return (rawOrigins ?? "").split(",").map(value => value.trim()).filter(Boolean);
@@ -208,25 +179,6 @@ function weaklyMatchesEtag(ifNoneMatch: string | null, etag: string): boolean {
 }
 
 // `contentEtag` and `cachePublicGet` were moved to ./cache.ts and are imported above.
-
-/** Emits privacy-preserving calibration telemetry: never log a caller seed or answer. */
-async function emitDifficultyGeneration(response: Response): Promise<void> {
-  const body: unknown = await response.json();
-  if (!body || typeof body !== "object" || Array.isArray(body)) return;
-  const record = body as Record<string, unknown>;
-  const difficulty = record.difficulty;
-  const error = record.error;
-  const outcome = response.status === 200 ? "generated" : "unavailable";
-  console.log(JSON.stringify({
-    event: "difficulty_generation",
-    outcome,
-    templateId: typeof record.templateId === "string" ? record.templateId : undefined,
-    requestedDifficultyLevel: typeof record.requestedDifficultyLevel === "number" ? record.requestedDifficultyLevel : undefined,
-    assessedDifficultyLevel: difficulty && typeof difficulty === "object" && typeof (difficulty as Record<string, unknown>).level === "number" ? (difficulty as Record<string, unknown>).level : undefined,
-    modelVersion: difficulty && typeof difficulty === "object" && typeof (difficulty as Record<string, unknown>).modelVersion === "string" ? (difficulty as Record<string, unknown>).modelVersion : undefined,
-    errorCode: error && typeof error === "object" && typeof (error as Record<string, unknown>).code === "string" ? (error as Record<string, unknown>).code : undefined,
-  }));
-}
 
 function observeDifficultyGeneration(response: Response, ctx: ExecutionContext): void {
   if (response.status !== 200 && response.status !== 422) return;
@@ -256,52 +208,6 @@ async function staticAsset(request: Request, env: Env, assetPath: string, conten
   headers.set("x-content-type-options", "nosniff");
   if (contentType) headers.set("content-type", contentType);
   return new Response(asset.body, { status: asset.status, statusText: asset.statusText, headers });
-}
-
-async function providerRateLimitDecision(
-  provider: Env["REST_RATE_LIMITER"] | undefined,
-  request: Request,
-  onProviderFailure: () => void,
-  key = `${request.headers.get("cf-connecting-ip") ?? "anonymous"}:${new URL(request.url).pathname}`,
-): Promise<RateLimitDecision | undefined> {
-  if (provider) {
-    try {
-      return { limited: !(await provider.limit({ key })).success };
-    } catch {
-      onProviderFailure();
-      console.error(JSON.stringify({ event: "rate_limit_provider_failure", path: new URL(request.url).pathname }));
-    }
-  }
-  return undefined;
-}
-
-async function restRateLimitDecision(
-  rateLimited: RateLimiter,
-  request: Request,
-  env: Env,
-  onRestProviderFailure: () => void,
-  onRestGenerateProviderFailure: () => void,
-  onVerifyProviderFailure: () => void,
-): Promise<RateLimitDecision> {
-  const path = new URL(request.url).pathname;
-  const protectedPuzzleOperation = ["/v1/puzzles/verify", "/v1/puzzles/hint"].includes(path);
-  const puzzleGeneration = path === "/v1/puzzles/generate";
-  const provider = protectedPuzzleOperation
-    ? env.VERIFY_RATE_LIMITER
-    : puzzleGeneration ? env.REST_GENERATE_RATE_LIMITER : env.REST_RATE_LIMITER;
-  const onProviderFailure = protectedPuzzleOperation
-    ? onVerifyProviderFailure
-    : puzzleGeneration ? onRestGenerateProviderFailure : onRestProviderFailure;
-  const providerDecision = await providerRateLimitDecision(
-    provider,
-    request,
-    onProviderFailure,
-  );
-  if (providerDecision) return providerDecision;
-  // Retain the local fallback if the relevant provider binding is unavailable.
-  if (protectedPuzzleOperation) return asRateLimitDecision(rateLimited(request, path === "/v1/puzzles/hint" ? env.HINT_RATE_LIMIT ?? "10" : env.VERIFY_RATE_LIMIT ?? "10", "protected-puzzle"));
-  if (puzzleGeneration) return asRateLimitDecision(rateLimited(request, env.REST_GENERATE_RATE_LIMIT ?? "10", "rest-generate"));
-  return asRateLimitDecision(rateLimited(request, env.REST_RATE_LIMIT ?? "60", "rest"));
 }
 
 function allowedOrigin(request: Request, hostnames: string[]) {

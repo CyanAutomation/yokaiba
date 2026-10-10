@@ -1,171 +1,23 @@
-import type { Clue, Difficulty, DifficultyCalibration, DifficultyLevel, PuzzleSpec } from "../domain/types.js";
+import type { Clue, PuzzleSpec } from "../domain/types.js";
 import type { PuzzleSolver } from "../domain/puzzle-solver.js";
-import { exhaustivePuzzleSolver, solveWithTelemetry } from "../constraints/solver.js";
+import { exhaustivePuzzleSolver } from "../constraints/solver.js";
+import type { HumanDeductionTrace } from "./human-deduction.js";
+import { evaluateHumanDeductionTrace } from "./human-deduction.js";
 
-export const DIFFICULTY_MODEL_VERSION = "yokaiba-difficulty-v4";
-/**
- * Per-clue deduction costs calibrated for {@link DIFFICULTY_MODEL_VERSION}.
- * These values are part of that model's numeric contract; changing one requires
- * a new model version and corpus calibration.
- */
-const COST: Record<Clue["constraint"]["kind"], number> = { matches: 1, notMatches: 1, before: 3, adjacent: 3, sameRow: 3, distance: 4 };
-const defaultCalibration: DifficultyCalibration = {
-  modelVersion: DIFFICULTY_MODEL_VERSION,
-  scoreThresholds: [68, 73, 79, 88, 98, 108, 118, 128, 138, 148, 158],
-  levelRange: [1, 12],
-  corpus: { sampleSize: 1_000, methodology: "Seeded corpus scored with the no-guess trace and deterministic solver telemetry." },
-};
-
-/**
- * A stable initial rubric for the 4x4 template. Relational clues require more
- * mental bookkeeping than direct facts; negative clues and compact clue sets
- * add smaller penalties. The model version is returned to clients so future
- * calibration does not silently relabel an existing puzzle.
- */
-export function assessPuzzleDifficulty(spec: PuzzleSpec, clues: readonly Clue[]): Difficulty {
-  const calibration = spec.metadata?.difficultyCalibration ?? defaultCalibration;
-  const humanSolve = evaluateHumanDeductionTrace(spec, clues);
-  const telemetry = solveWithTelemetry(spec, clues, 2).telemetry;
-  const directClues = clues.filter(clue => clue.constraint.kind === "matches" || clue.constraint.kind === "notMatches").length;
-  const relationalClues = clues.length - directClues;
-  const crossCategoryClues = clues.filter(clue => "left" in clue.constraint && clue.constraint.left.category !== clue.constraint.right.category).length;
-  // The score is intentionally deterministic: wall-clock duration varies by runtime,
-  // while a no-guess trace and solver search work provide reproducible evidence.
-  const score = humanSolve.totalCost * 2
-    + humanSolve.hardestStep * 3
-    + (humanSolve.solved ? 0 : 8)
-    + relationalClues * 2
-    + crossCategoryClues * 3
-    + Math.min(10, humanSolve.deductionPasses)
-    + Math.min(24, Math.floor(Math.log2(telemetry.nodesVisited + 1)) * 2)
-    + Math.min(16, Math.floor(telemetry.constraintChecks / 8));
-  const [minimumLevel, maximumLevel] = calibration.levelRange;
-  if (minimumLevel > maximumLevel || calibration.scoreThresholds.length !== maximumLevel - minimumLevel) throw new Error("difficulty calibration thresholds must cover its level range");
-  const offset = calibration.scoreThresholds.findIndex(threshold => score <= threshold);
-  const level = (offset < 0 ? maximumLevel : minimumLevel + offset) as DifficultyLevel;
-  const labels: Record<DifficultyLevel, string> = {
-    1: "Very easy", 2: "Easy", 3: "Gentle", 4: "Comfortable", 5: "Moderate", 6: "Challenging",
-    7: "Tricky", 8: "Hard", 9: "Very hard", 10: "Expert", 11: "Master", 12: "Extreme",
-  };
-  return {
-    level,
-    label: labels[level],
-    modelVersion: calibration.modelVersion,
-    evidence: {
-      score,
-      humanSolve: { solved: humanSolve.solved, totalCost: humanSolve.totalCost, hardestStep: humanSolve.hardestStep, deductionPasses: humanSolve.deductionPasses },
-      clueStructure: { directClues, relationalClues, crossCategoryClues },
-      solver: { nodesVisited: telemetry.nodesVisited, constraintChecks: telemetry.constraintChecks },
-    },
-  };
-}
+export { assessPuzzleDifficulty, DIFFICULTY_MODEL_VERSION } from "./difficulty-assessment.js";
+export { evaluateHumanDeductionTrace } from "./human-deduction.js";
 
 export interface PuzzleQuality {
   unique: boolean;
   redundantClueIds: string[];
   clueDiversity: { distinctKinds: number; kinds: string[] };
   readability: { unreadableClueIds: string[] };
-  humanSolve: { solved: boolean; usedGuessing: false; totalCost: number; hardestStep: number; deductionPasses: number };
+  humanSolve: HumanDeductionTrace;
 }
 
 /** Whether rendered clue prose is present and contains no unresolved placeholders. */
 export function isClueTextReadable(text: string): boolean {
   return Boolean(text.trim()) && !/\b(undefined|null)\b/i.test(text);
-}
-
-type DirectConstraint = Extract<Clue["constraint"], { kind: "matches" | "notMatches" }>;
-type RelationalConstraint = Exclude<Clue["constraint"], DirectConstraint>;
-type PossibleRows = Map<string, Array<Set<string>>>;
-
-function applyDirectConstraint(constraint: DirectConstraint, baseValues: readonly string[], possible: PossibleRows): boolean {
-  const row = baseValues.indexOf(constraint.subject);
-  const cells = possible.get(constraint.category)!;
-  if (constraint.kind === "matches") {
-    if (cells[row].size === 1 && cells[row].has(constraint.value)) return false;
-    cells[row] = new Set([constraint.value]);
-    return true;
-  }
-  return cells[row].delete(constraint.value);
-}
-
-function rowsForTerm(categoryId: string, value: string, baseCategory: string, baseValues: readonly string[], possible: PossibleRows): number[] {
-  if (categoryId === baseCategory) {
-    const row = baseValues.indexOf(value);
-    return row < 0 ? [] : [row];
-  }
-  const cells = possible.get(categoryId);
-  if (!cells) return [];
-  return cells.flatMap((cell, row) => cell.has(value) ? [row] : []);
-}
-
-function removeTermFromRows(categoryId: string, value: string, disallowedRows: Set<number>, baseCategory: string, possible: PossibleRows): boolean {
-  if (categoryId === baseCategory) return false;
-  const cells = possible.get(categoryId)!;
-  let changed = false;
-  for (const row of disallowedRows) changed = cells[row].delete(value) || changed;
-  return changed;
-}
-
-function satisfiesRelationship(constraint: RelationalConstraint, left: number, right: number): boolean {
-  switch (constraint.kind) {
-    case "before": return left < right;
-    case "sameRow": return left === right;
-    case "distance": return Math.abs(left - right) === constraint.distance;
-    case "adjacent": return Math.abs(left - right) === 1;
-  }
-}
-
-function applyRelationalConstraint(constraint: RelationalConstraint, baseCategory: string, baseValues: readonly string[], possible: PossibleRows): boolean {
-  const leftRows = rowsForTerm(constraint.left.category, constraint.left.value, baseCategory, baseValues, possible);
-  const rightRows = rowsForTerm(constraint.right.category, constraint.right.value, baseCategory, baseValues, possible);
-  const satisfies = (left: number, right: number) => satisfiesRelationship(constraint, left, right);
-  const leftDisallowed = new Set(leftRows.filter(left => !rightRows.some(right => satisfies(left, right))));
-  const rightDisallowed = new Set(rightRows.filter(right => !leftRows.some(left => satisfies(left, right))));
-  const leftChanged = removeTermFromRows(constraint.left.category, constraint.left.value, leftDisallowed, baseCategory, possible);
-  const rightChanged = removeTermFromRows(constraint.right.category, constraint.right.value, rightDisallowed, baseCategory, possible);
-  return leftChanged || rightChanged;
-}
-
-function applyDeduction(clue: Clue, spec: PuzzleSpec, baseValues: readonly string[], possible: PossibleRows): boolean {
-  const constraint = clue.constraint;
-  if (constraint.kind === "matches" || constraint.kind === "notMatches") return applyDirectConstraint(constraint, baseValues, possible);
-  return applyRelationalConstraint(constraint, spec.baseCategory, baseValues, possible);
-}
-
-function propagateAllDifferent(baseValues: readonly string[], possible: PossibleRows): boolean {
-  let changed = false;
-  for (const cells of possible.values()) {
-    const assigned = new Set(cells.filter(cell => cell.size === 1).map(cell => [...cell][0]));
-    for (const cell of cells) if (cell.size > 1) for (const value of assigned) changed = cell.delete(value) || changed;
-    const remainingValues = baseValues.flatMap((_baseValue, row) => [...cells[row]]);
-    for (const value of remainingValues) {
-      const possibleRows = cells.flatMap((cell, row) => cell.has(value) ? [row] : []);
-      if (possibleRows.length === 1 && cells[possibleRows[0]].size > 1) {
-        cells[possibleRows[0]] = new Set([value]);
-        changed = true;
-      }
-    }
-  }
-  return changed;
-}
-
-/** A no-guess human model using direct, all-different, ordering, and adjacency elimination. */
-export function evaluateHumanDeductionTrace(spec: PuzzleSpec, clues: readonly Clue[]): PuzzleQuality["humanSolve"] {
-  const base = spec.categories.find(category => category.id === spec.baseCategory)!;
-  const possible: PossibleRows = new Map();
-  for (const category of spec.categories) if (category.id !== spec.baseCategory) possible.set(category.id, base.values.map(() => new Set(category.values)));
-  const totalCost = clues.reduce((total, clue) => total + COST[clue.constraint.kind], 0);
-  const hardestStep = clues.reduce((hardest, clue) => Math.max(hardest, COST[clue.constraint.kind]), 0);
-
-  let changed = true;
-  let deductionPasses = 0;
-  while (changed) {
-    deductionPasses += 1;
-    changed = false;
-    for (const clue of clues) changed = applyDeduction(clue, spec, base.values, possible) || changed;
-    changed = propagateAllDifferent(base.values, possible) || changed;
-  }
-  return { solved: [...possible.values()].every(cells => cells.every(cell => cell.size === 1)), usedGuessing: false as const, totalCost, hardestStep, deductionPasses };
 }
 
 export function evaluatePuzzleQuality(spec: PuzzleSpec, clues: readonly Clue[], solver: PuzzleSolver = exhaustivePuzzleSolver): PuzzleQuality {

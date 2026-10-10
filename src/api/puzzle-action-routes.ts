@@ -1,5 +1,7 @@
 import type { PuzzleTemplate } from "../domain/types.js";
-import { puzzleFromToken, puzzleHint, verifyPuzzleAnswer, type HintKind } from "./puzzle-actions.js";
+import { puzzleFromToken } from "./puzzle-from-token.js";
+import { puzzleHint, type HintKind } from "./puzzle-hints.js";
+import { verifyPuzzleAnswer } from "./puzzle-answer.js";
 import { json } from "./json-response.js";
 import { badRequest, readJsonBody } from "./request-utils.js";
 

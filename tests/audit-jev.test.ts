@@ -7,25 +7,30 @@ import { exhaustivePuzzleSolver } from "../src/constraints/solver.js";
 import { generatePuzzle } from "../src/generation/generator.js";
 import { tournamentOrderTemplate } from "../src/templates/tournament-order.js";
 import { tournamentOrderV2Template } from "../src/templates/tournament-order-v2.js";
-import type { Difficulty, PuzzleTemplate } from "../src/index.js";
+import type { ClueConstraint, Difficulty, PuzzleTemplate } from "../src/index.js";
+import { parseAuditArguments } from "../scripts/audit-jev-arguments.js";
 import {
   applyJevAnswers,
   applyJevPuzzleAnswers,
   aggregateSemanticCalibrationEvidence,
+  aggregateSemanticPuzzleEvidence,
+  accumulateResponseUsage,
+  auditProgressMessage,
   assertCheckpointConfiguration,
   checkpointTargetedDifficultyLevels,
   buildClueDecisionPayload,
   buildAuditMarkdown,
   buildPuzzleDecisionPayload,
+  describeConstraint,
   JEV_REVIEW_THRESHOLDS,
   markClueUnavailable,
-  parseAuditArguments,
   puzzleReviewFlagReasons,
   rebuildPuzzleReviewCorpus,
   readJevAnswerMap,
   readJevDecisionResponse,
   readAuditCheckpoint,
   readJevAuditReport,
+  removeCompletedAuditCheckpoint,
   requestJevDecisionBatch,
   SEMANTIC_ASSESSMENT_SCHEMA_VERSION,
   writeAuditCheckpoint,
@@ -50,6 +55,50 @@ const clue = (): AuditedClue => ({
   flagReasons: [],
   missingAnswers: [],
   evaluationStatus: "pending",
+});
+
+test("audit constraint descriptions cover each supported relation", () => {
+  const term = { category: "weight", value: "-60 kg" };
+  const other = { category: "tatami", value: "Tatami 1" };
+  const cases: Array<[ClueConstraint, string]> = [
+    [{ kind: "matches", subject: "Aya", category: "weight", value: "-60 kg" }, "Aya is associated with -60 kg in weight."],
+    [{ kind: "notMatches", subject: "Aya", category: "weight", value: "-60 kg" }, "Aya is not associated with -60 kg in weight."],
+    [{ kind: "sameRow", left: term, right: other }, "-60 kg in weight belongs to the same competitor as Tatami 1 in tatami."],
+    [{ kind: "before", left: term, right: other }, "-60 kg in weight is earlier than Tatami 1 in tatami."],
+    [{ kind: "adjacent", left: term, right: other }, "-60 kg in weight is immediately next to Tatami 1 in tatami."],
+    [{ kind: "distance", left: term, right: other, distance: 2 }, "The positions of -60 kg in weight and Tatami 1 in tatami differ by exactly 2."],
+  ];
+  for (const [constraint, expected] of cases) assert.equal(describeConstraint(constraint), expected);
+});
+
+test("audit progress messages report milestones and omit intermediate samples", () => {
+  assert.equal(auditProgressMessage({ phase: "difficulty", templateId: "open-division", completed: 1, total: 20 }), "difficulty audit open-division: 1/20");
+  assert.equal(auditProgressMessage({ phase: "targeted", templateId: "open-division", requestedDifficultyLevel: 7, completed: 10, total: 20 }), "targeted audit open-division level 7: 10/20");
+  assert.equal(auditProgressMessage({ phase: "difficulty", templateId: "open-division", completed: 3, total: 20 }), undefined);
+  assert.equal(auditProgressMessage({ phase: "difficulty", templateId: "open-division", completed: 20, total: 20 }), "difficulty audit open-division: 20/20");
+});
+
+test("audit usage aggregation adds provider totals and preserves missing values", () => {
+  const checkpoint = { resolvedModel: "previous-model", totalCost: 1, totalInputTokens: 2, totalOutputTokens: 3 };
+  accumulateResponseUsage(checkpoint, {
+    model: "resolved-model",
+    answers: {},
+    usage: { cost: 0.5, inputTokens: 4, outputTokens: 6 },
+  });
+  accumulateResponseUsage(checkpoint, { answers: {}, usage: {} });
+  assert.deepEqual(checkpoint, { resolvedModel: "resolved-model", totalCost: 1.5, totalInputTokens: 6, totalOutputTokens: 9 });
+});
+
+test("completed audit checkpoint removal tolerates a missing path", async () => {
+  const directory = await mkdtemp(join(tmpdir(), "jev-remove-checkpoint-"));
+  const path = join(directory, "checkpoint.json");
+  try {
+    await writeFile(path, "{}");
+    await removeCompletedAuditCheckpoint(path);
+    await assert.doesNotReject(() => removeCompletedAuditCheckpoint(path));
+  } finally {
+    await rm(directory, { recursive: true, force: true });
+  }
 });
 
 const configuration: JevRunConfiguration = {
@@ -297,6 +346,12 @@ test("audit checkpoints round-trip atomically and reject mismatched run settings
     const legacyCheckpoint = JSON.parse(JSON.stringify(checkpoint)) as Record<string, unknown>;
     delete legacyCheckpoint.productionDifficultyAudit;
     legacyCheckpoint.version = 2;
+    legacyCheckpoint.difficultyAudit = [{
+      templateId: "legacy-template",
+      modelVersion: "difficulty-v1",
+      sampleSize: 1,
+      seedPrefix: "legacy-seed",
+    }];
     const legacyTargets = legacyCheckpoint.targetedDifficultyAudit as Array<Record<string, unknown>>;
     for (const target of legacyTargets) {
       const levels = target.levels as Array<Record<string, unknown>>;
@@ -309,6 +364,14 @@ test("audit checkpoints round-trip atomically and reject mismatched run settings
     const migrated = await readAuditCheckpoint(checkpointPath);
     assert.equal(migrated?.version, 3);
     assert.deepEqual(migrated?.productionDifficultyAudit, []);
+    assert.deepEqual(migrated?.difficultyAudit, [{
+      templateId: "legacy-template",
+      modelVersion: "difficulty-v1",
+      sampleSize: 1,
+      generated: 1,
+      unavailable: 0,
+      seedPrefix: "legacy-seed",
+    }]);
   } finally {
     await rm(directory, { recursive: true, force: true });
   }
@@ -429,6 +492,7 @@ test("optional puzzle review records language-versus-logic evidence without repl
     "0_relationshipExplicitness": { score: 1.8 },
   }, 0);
   const evidence = aggregateSemanticCalibrationEvidence([assessedClue], [assessed]);
+  assert.deepEqual(aggregateSemanticPuzzleEvidence(assessed, [assessedClue]), evidence[0]);
   assert.equal(evidence[0]?.logicalDifficultyLevel, 3);
   assert.equal(evidence[0]?.semanticAssessment.readability, 2);
   assert.equal(evidence[0]?.puzzleReview?.linguisticDifficultyComparedToLogical, 1.8);
