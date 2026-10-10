@@ -152,6 +152,26 @@ function auditCorpusWithGenerator(
 }
 
 /** Run one requested level independently so a caller can checkpoint between levels. */
+function collectTargetedDifficultySamples(
+  template: PuzzleTemplate,
+  requestedDifficultyLevel: Difficulty["level"],
+  sampleSize: number,
+  seedPrefix: string,
+  onProgress?: DifficultyAuditProgressCallback,
+): { records: DifficultyAuditRecord[]; fallbackAttempts: number[]; modelVersion: string } {
+  const records: DifficultyAuditRecord[] = [];
+  const fallbackAttempts: number[] = [];
+  let modelVersion: string | undefined;
+  for (let index = 0; index < sampleSize; index += 1) {
+    const puzzle = generatePuzzleAtDifficultyWithFallback(template, `${seedPrefix}-${requestedDifficultyLevel}-${index}`, requestedDifficultyLevel);
+    modelVersion ??= puzzle.difficulty.modelVersion;
+    records.push({ level: puzzle.difficulty.level, humanTraceComplete: puzzle.difficulty.evidence.humanSolve.solved, clueCount: puzzle.clues.length });
+    onProgress?.({ phase: "targeted", templateId: template.id, requestedDifficultyLevel, completed: index + 1, total: sampleSize });
+    if (puzzle.seedFallbackAttempt !== undefined) fallbackAttempts.push(puzzle.seedFallbackAttempt);
+  }
+  return { records, fallbackAttempts, modelVersion: modelVersion! };
+}
+
 export function auditTargetedDifficultyLevel(
   template: PuzzleTemplate,
   requestedDifficultyLevel: Difficulty["level"],
@@ -165,19 +185,16 @@ export function auditTargetedDifficultyLevel(
     throw new RangeError(`${template.id} does not advertise difficulty level ${requestedDifficultyLevel}`);
   }
 
-  const records: DifficultyAuditRecord[] = [];
-  const fallbackAttempts: number[] = [];
-  let modelVersion: string | undefined;
-  for (let index = 0; index < sampleSize; index += 1) {
-    const puzzle = generatePuzzleAtDifficultyWithFallback(template, `${seedPrefix}-${requestedDifficultyLevel}-${index}`, requestedDifficultyLevel);
-    modelVersion ??= puzzle.difficulty.modelVersion;
-    records.push({ level: puzzle.difficulty.level, humanTraceComplete: puzzle.difficulty.evidence.humanSolve.solved, clueCount: puzzle.clues.length });
-    options.onProgress?.({ phase: "targeted", templateId: template.id, requestedDifficultyLevel, completed: index + 1, total: sampleSize });
-    if (puzzle.seedFallbackAttempt !== undefined) fallbackAttempts.push(puzzle.seedFallbackAttempt);
-  }
+  const { records, fallbackAttempts, modelVersion } = collectTargetedDifficultySamples(
+    template,
+    requestedDifficultyLevel,
+    sampleSize,
+    seedPrefix,
+    options.onProgress,
+  );
   const statistics = aggregateDifficultyAuditRecords(records);
   return {
-    modelVersion: modelVersion!,
+    modelVersion,
     level: {
       requestedDifficultyLevel,
       generated: sampleSize,

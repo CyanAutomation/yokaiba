@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
+import { decodePuzzleTokenPayload } from "../src/api/puzzle-token-payload.js";
 import { generatePuzzle } from "../src/generation/generator.js";
 import { tournamentOrderTemplate } from "../src/templates/tournament-order.js";
 import { issuePuzzleToken, verifyPuzzleToken, type PuzzleTokenPayload } from "../src/api/puzzle-token.js";
@@ -12,6 +13,25 @@ function encodeBase64Url(bytes: Uint8Array): string {
   for (const byte of bytes) binary += String.fromCharCode(byte);
   return btoa(binary).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
 }
+
+test("token payload decoding validates the wire format before returning claims", () => {
+  const payload = {
+    version: 3,
+    templateId: "test-template",
+    seed: "test-seed",
+    generatorVersion: "yokaiba-generator-v5",
+    solverVersion: "yokaiba-exhaustive-v1",
+    issuedAt: 100,
+    expiresAt: 200,
+    requestedDifficultyLevel: 4,
+  };
+  const encode = (value: unknown) => encodeBase64Url(encoder.encode(JSON.stringify(value)));
+
+  assert.deepEqual(decodePuzzleTokenPayload(encode(payload)), payload);
+  assert.equal(decodePuzzleTokenPayload("not*base64"), undefined);
+  assert.equal(decodePuzzleTokenPayload(encode({ ...payload, expiresAt: payload.issuedAt })), undefined);
+  assert.equal(decodePuzzleTokenPayload(encode({ ...payload, requestedDifficultyLevel: 13 })), undefined);
+});
 
 async function signPayload(payload: unknown, signingSecret = secret): Promise<string> {
   const encodedPayload = encodeBase64Url(encoder.encode(JSON.stringify(payload)));

@@ -2,7 +2,8 @@ import { DifficultyUnavailableError, generatePuzzleForRequest } from "../generat
 import { DEFAULT_PUZZLE_TOKEN_TTL_SECONDS, issuePuzzleToken } from "./puzzle-token.js";
 import { json } from "./json-response.js";
 import type { GeneratedPuzzle, PuzzleTemplate } from "../domain/types.js";
-import { normalizeGenerationParameters, parseGenerationQuery } from "./generation-query.js";
+import { normalizeGenerationParameters } from "./generation-parameters.js";
+import { parseGenerationQuery } from "./generation-query.js";
 import { badRequest, readJsonBody } from "./request-utils.js";
 import type { RestRouterOptions } from "./router-options.js";
 
