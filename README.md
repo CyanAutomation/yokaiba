@@ -36,9 +36,17 @@ npm ci
 npm run build
 npm test
 npm run typecheck
+npm run test:mutation:audit
 npm run dev
 npm run deploy
 ```
+
+`npm run test:mutation:audit` measures the audit module against its focused
+tests with Stryker. It is a scoped diagnostic baseline; the mutation threshold
+does not fail the command until the score has been reviewed and agreed.
+Stryker temporarily mutates the selected source file in place for TypeScript 7
+compatibility, then restores it; avoid running other tests or editing that file
+while the command is running.
 
 `npm test` includes generator guarantees, REST request/response behavior, CORS, rate-limiting, health, and OpenAPI endpoint coverage.
 

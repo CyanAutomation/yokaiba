@@ -5,17 +5,12 @@ import {
   exhaustivePuzzleSolver,
   evaluatePuzzleQuality,
   renderClues,
-  aggregateDifficultyAuditRecords,
-  auditDifficultyCorpus,
-  auditTargetedDifficultyCorpus,
-  difficultyStrategyLimitForFallback,
   isIjfSeniorMensWeightClass,
   isClueTextReadable,
   satisfiesConstraint,
   solve,
   solveWithTelemetry,
   type Clue,
-  type DifficultyAuditRecord,
   type PuzzleSolver,
   type PuzzleTemplate,
 } from "../src/index.js";
@@ -357,83 +352,32 @@ test("the beginner curriculum can generate every calibrated difficulty from one 
   }
 });
 
-test("difficulty corpus audit aggregates human-trace and clue statistics", () => {
-  const statistics = aggregateDifficultyAuditRecords([
-    { level: 2, humanTraceComplete: true, clueCount: 5 },
-    { level: 2, humanTraceComplete: false, clueCount: 8 },
-    { level: 12, humanTraceComplete: true, clueCount: 11 },
-  ]);
+test("fallback limits repeated target search on dense boards while compact boards retain it", () => {
+  const countFallbackSolverCalls = (spec: PuzzleTemplate, level: 4 | 12, maxAttempts: number): number => {
+    let solverCalls = 0;
+    const countingSolver: PuzzleSolver = {
+      version: "fallback-search-counter-v1",
+      solve: () => [],
+      countSolutions: (_spec, clues) => {
+        solverCalls += 1;
+        return clues.length === 0 ? 2 : 1;
+      },
+    };
 
-  assert.deepEqual(statistics, {
-    levelCounts: [0, 2, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1],
-    humanTrace: { complete: 2, incomplete: 1 },
-    clues: { average: 8, minimum: 5, maximum: 11 },
-  });
-});
-
-test("difficulty audit reports sample progress through a callback", () => {
-  const progress: Array<{ phase: string; completed: number; total: number }> = [];
-  auditDifficultyCorpus(tournamentOrderV2Template, {
-    sampleSize: 2,
-    onProgress: event => progress.push({ phase: event.phase, completed: event.completed, total: event.total }),
-  });
-  assert.deepEqual(progress, [
-    { phase: "difficulty", completed: 1, total: 2 },
-    { phase: "difficulty", completed: 2, total: 2 },
-  ]);
-
-  const targetedProgress: Array<{ phase: string; level?: number; completed: number; total: number }> = [];
-  auditTargetedDifficultyCorpus(tournamentOrderV2Template, {
-    sampleSize: 1,
-    onProgress: event => targetedProgress.push({ phase: event.phase, level: event.requestedDifficultyLevel, completed: event.completed, total: event.total }),
-  });
-  assert.equal(targetedProgress.length, 4);
-  assert.ok(targetedProgress.every(event => event.phase === "targeted" && event.completed === 1 && event.total === 1));
-  assert.deepEqual(targetedProgress.map(event => event.level), [1, 2, 3, 4]);
-});
-
-test("difficulty corpus audit rejects levels outside the 1–12 scale", () => {
-  const record = (level: number): DifficultyAuditRecord => ({
-    level: level as DifficultyAuditRecord["level"],
-    humanTraceComplete: true,
-    clueCount: 5,
-  });
-
-  for (const level of [0, 13, 1.5, Number.NaN]) {
     assert.throws(
-      () => aggregateDifficultyAuditRecords([record(level)]),
-      { name: "RangeError", message: `difficulty level must be an integer between 1 and 12, received ${level}` },
+      () => generatePuzzleAtDifficultyWithFallback(spec, "fallback-search-counter", level, countingSolver, maxAttempts),
+      error => error instanceof DifficultyUnavailableError,
     );
-  }
-});
+    return solverCalls;
+  };
 
-test("single-seed difficulty audit summarizes its generated puzzle", () => {
-  const report = auditDifficultyCorpus(tournamentOrderTemplate, { seedPrefix: "audit-integration", sampleSize: 1 });
+  const denseOneSeed = countFallbackSolverCalls(championshipCircuitTemplate, 12, 0);
+  const denseTwoSeeds = countFallbackSolverCalls(championshipCircuitTemplate, 12, 1);
+  const compactOneSeed = countFallbackSolverCalls(tournamentOrderTemplate, 4, 0);
 
-  assert.equal(report.templateId, tournamentOrderTemplate.id);
-  assert.equal(report.sampleSize, 1);
-  assert.equal(report.generated, 1);
-  assert.equal(report.unavailable, 0);
-  assert.notEqual(report.modelVersion, "unavailable");
-  assert.equal(report.levelCounts.reduce((total, count) => total + count, 0), report.generated);
-  assert.equal(report.humanTrace.complete + report.humanTrace.incomplete, report.generated);
-  assert.ok(report.clues.minimum > 0);
-  assert.equal(report.clues.minimum, report.clues.maximum);
-  assert.equal(report.clues.average, report.clues.minimum);
-});
-
-test("targeted corpus audits prove every requested course level rather than sampling untargeted puzzles", () => {
-  const report = auditTargetedDifficultyCorpus(tournamentOrderV2Template, { seedPrefix: "targeted-audit", sampleSize: 1 });
-
-  assert.deepEqual(report.levels.map(level => level.requestedDifficultyLevel), [1, 2, 3, 4]);
-  assert.ok(report.levels.every(level => level.generated === 1 && level.humanTrace.incomplete === 0));
-  assert.ok(report.levels.every(level => level.assessedLevelCounts[level.requestedDifficultyLevel - 1] === 1));
-});
-
-test("fallback bounds dense strategy search to protect production CPU while compact boards retain full search", () => {
-  assert.equal(difficultyStrategyLimitForFallback(tournamentOrderV2Template), 64);
-  assert.equal(difficultyStrategyLimitForFallback(openDivisionTemplate), 8);
-  assert.equal(difficultyStrategyLimitForFallback(championshipCircuitTemplate), 8);
+  assert.ok(denseOneSeed > 0);
+  assert.equal(denseTwoSeeds, denseOneSeed * 2, "each additional dense-board seed should add one bounded generation pass");
+  assert.ok(compactOneSeed > denseOneSeed * 8, "compact boards should retain the broader target strategy search");
 });
 
 test("expert target generation favors relational deductions over direct facts", () => {
@@ -531,7 +475,7 @@ test("solver honours limits while retaining deterministic exhaustive results", (
 });
 
 // Profiling contract: README.md#solver-implementations documents deterministic injected timing.
-test("solver profiling telemetry measures work and honors the injected clock", () => {
+test("diagnostic solver telemetry reports search work with deterministic elapsed time", () => {
   const clue: Clue = {
     id: "aki-cat",
     constraint: { kind: "matches", subject: "Aki", category: "pet", value: "Cat" },
@@ -596,30 +540,31 @@ test("the generated clue set is minimal for uniqueness", () => {
   }
 });
 
-test("quality reports the exact clue kinds in a controlled fixture", () => {
+test("quality diagnostics report stable clue diversity for a controlled fixture", () => {
   const quality = evaluatePuzzleQuality(qualityFixtureSpec, clueKindsAndReadabilityFixture);
 
-  assert.equal(quality.clueDiversity.distinctKinds, 4);
+  assert.deepEqual(quality.clueDiversity, {
+    distinctKinds: 4,
+    kinds: ["adjacent", "before", "matches", "notMatches"],
+  });
   assert.deepEqual(
-    new Set(quality.clueDiversity.kinds),
-    new Set(["adjacent", "before", "matches", "notMatches"]),
+    evaluatePuzzleQuality(qualityFixtureSpec, [...clueKindsAndReadabilityFixture].reverse()).clueDiversity,
+    quality.clueDiversity,
+    "clue diversity should not depend on input order",
   );
 });
 
-test("clue readability rejects blank text", () => {
-  assert.equal(isClueTextReadable("   "), false);
-});
+test("clue readability accepts valid prose and rejects common rendering failures", () => {
+  const cases = [
+    { text: "Aki wore red.", readable: true },
+    { text: "   ", readable: false },
+    { text: "undefined finished first.", readable: false },
+    { text: "Red was beside null.", readable: false },
+  ];
 
-test("clue readability rejects an unresolved undefined value", () => {
-  assert.equal(isClueTextReadable("undefined finished first."), false);
-});
-
-test("clue readability rejects an unresolved null value", () => {
-  assert.equal(isClueTextReadable("Red was beside null."), false);
-});
-
-test("clue readability accepts valid clue prose", () => {
-  assert.equal(isClueTextReadable("Aki wore red."), true);
+  for (const { text, readable } of cases) {
+    assert.equal(isClueTextReadable(text), readable, `unexpected readability result for ${JSON.stringify(text)}`);
+  }
 });
 
 test("quality reports the exact unreadable clue IDs in a controlled fixture", () => {
