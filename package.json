@@ -27,6 +27,6 @@
     "swagger-ui-dist": "^5.17.14",
     "tsx": "^4.20.0",
     "typescript": "^7.0.2",
-    "wrangler": "^4.147.0"
+    "wrangler": "^4.149.0"
   }
 }
