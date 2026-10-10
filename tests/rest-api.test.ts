@@ -428,6 +428,22 @@ test("REST reports telemetry as unavailable unless an event sink accepts the out
   assert.deepEqual(await response.json(), { error: { code: "not_configured", message: "puzzle outcome storage is not configured" } });
 });
 
+test("REST hides asynchronous outcome storage failures behind a stable error", async () => {
+  const route = createRestRouter([tournamentOrderTemplate], {
+    recordOutcome: async () => { throw new Error("private storage details"); },
+  });
+  const response = await route(new Request("https://yokaiba.test/v1/events", {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ event: "puzzle_started", templateId: "tournament-order-v1" }),
+  }));
+
+  assert.equal(response.status, 503);
+  const responseBody = await response.text();
+  assert.deepEqual(JSON.parse(responseBody), { error: { code: "storage_unavailable", message: "puzzle outcome storage is unavailable" } });
+  assert.doesNotMatch(responseBody, /private storage details/);
+});
+
 test("REST verifies a complete submitted answer without exposing the solution", async () => {
   const route = createRestRouter([tournamentOrderTemplate], { puzzleTokenSecret: "test-token-secret" });
   const generated = await route(new Request("https://yokaiba.test/v1/puzzles/generate?templateId=tournament-order-v1&seed=verify-seed"));
