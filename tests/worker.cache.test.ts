@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { createRateLimiter, type RateLimitDecision } from "../worker/index.js";
+import { createRateLimiter, type RateLimitDecision } from "../worker/rate-limit.js";
 import { GeneratedPuzzleCache, generatedPuzzleCacheKey, cachedGeneratedPuzzle, cacheGeneratedPuzzle, cachePublicGet } from "../worker/cache.js";
 
 test("createRateLimiter enforces small limits and reports remaining/reset", () => {

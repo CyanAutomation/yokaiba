@@ -1,4 +1,4 @@
-import { mkdir, unlink, writeFile } from "node:fs/promises";
+import { mkdir, writeFile } from "node:fs/promises";
 import { dirname, resolve } from "node:path";
 import {
   auditDifficultyCorpus,
@@ -16,16 +16,20 @@ import {
   applyJevPuzzleAnswers,
   aggregateSemanticCalibrationEvidence,
   assertCheckpointConfiguration,
+  accumulateResponseUsage,
+  auditProgressMessage,
   checkpointTargetedDifficultyLevels,
   buildClueDecisionPayload,
   buildAuditMarkdown,
   buildPuzzleDecisionPayload,
+  describeConstraint,
   markClueUnavailable,
   markPuzzleUnavailable,
   parseAuditArguments,
   puzzleReviewFlagReasons,
   readAuditCheckpoint,
   readJevAuditReport,
+  removeCompletedAuditCheckpoint,
   rebuildPuzzleReviewCorpus,
   requestJevDecisionBatch,
   writeAuditCheckpoint,
@@ -35,7 +39,6 @@ import {
   type AuditedClue,
   type AuditedPuzzle,
   type JevAuditReport,
-  type JevDecisionResponse,
   type JevRunConfiguration,
 } from "./audit-jev-support.js";
 
@@ -50,21 +53,9 @@ function requestSemanticBatch(payload: Parameters<typeof requestJevDecisionBatch
   return requestJevDecisionBatch(apiKey, payload, ENDPOINT);
 }
 
-function describeConstraint(clue: Clue): string {
-  const constraint = clue.constraint;
-  if (constraint.kind === "matches") return `${constraint.subject} is associated with ${constraint.value} in ${constraint.category}.`;
-  if (constraint.kind === "notMatches") return `${constraint.subject} is not associated with ${constraint.value} in ${constraint.category}.`;
-  if (constraint.kind === "sameRow") return `${constraint.left.value} in ${constraint.left.category} belongs to the same competitor as ${constraint.right.value} in ${constraint.right.category}.`;
-  if (constraint.kind === "before") return `${constraint.left.value} in ${constraint.left.category} is earlier than ${constraint.right.value} in ${constraint.right.category}.`;
-  if (constraint.kind === "adjacent") return `${constraint.left.value} in ${constraint.left.category} is immediately next to ${constraint.right.value} in ${constraint.right.category}.`;
-  return `The positions of ${constraint.left.value} in ${constraint.left.category} and ${constraint.right.value} in ${constraint.right.category} differ by exactly ${constraint.distance}.`;
-}
-
-function reportAuditProgress(progress: { phase: "difficulty" | "targeted"; templateId: string; requestedDifficultyLevel?: number; completed: number; total: number }) {
-  const interval = Math.max(1, Math.ceil(progress.total / 10));
-  if (progress.completed !== 1 && progress.completed !== progress.total && progress.completed % interval !== 0) return;
-  const scope = progress.requestedDifficultyLevel === undefined ? progress.templateId : `${progress.templateId} level ${progress.requestedDifficultyLevel}`;
-  console.error(`${progress.phase} audit ${scope}: ${progress.completed}/${progress.total}`);
+function reportAuditProgress(progress: Parameters<typeof auditProgressMessage>[0]) {
+  const message = auditProgressMessage(progress);
+  if (message) console.error(message);
 }
 
 function initialClue(clue: Clue, templateId: string, seed: string, difficulty: { level: AuditedClue["logicalDifficultyLevel"]; modelVersion: string }, locale?: string): AuditedClue {
@@ -73,7 +64,7 @@ function initialClue(clue: Clue, templateId: string, seed: string, difficulty: {
     seed,
     clueId: clue.id,
     text: clue.text,
-    expectedSemantics: describeConstraint(clue),
+    expectedSemantics: describeConstraint(clue.constraint),
     constraintKind: clue.constraint.kind,
     structuredSemantics: clue.constraint,
     phraseVariant: clue.phraseVariant,
@@ -98,7 +89,7 @@ function initialPuzzle(puzzle: ReturnType<typeof generatePuzzle>, templateTitle:
     clues: puzzle.clues.map(clue => ({
       clueId: clue.id,
       text: clue.text,
-      expectedSemantics: describeConstraint(clue),
+      expectedSemantics: describeConstraint(clue.constraint),
       constraintKind: clue.constraint.kind,
       structuredSemantics: clue.constraint,
       phraseVariant: clue.phraseVariant,
@@ -239,13 +230,6 @@ async function addMissingProductionDifficultyAudits(checkpoint: AuditCheckpoint)
   }
 }
 
-function accumulateResponseUsage(checkpoint: AuditCheckpoint, response: JevDecisionResponse): void {
-  checkpoint.resolvedModel = response.model ?? checkpoint.resolvedModel;
-  checkpoint.totalCost += response.usage.cost ?? 0;
-  checkpoint.totalInputTokens += response.usage.inputTokens ?? 0;
-  checkpoint.totalOutputTokens += response.usage.outputTokens ?? 0;
-}
-
 const totalBatches = Math.ceil(checkpoint.clues.length / configuration.batchSize);
 const processedBeforeRun = checkpoint.clues.filter(clue => clue.evaluationStatus !== "pending").length;
 console.error(`JEV semantic audit: ${processedBeforeRun}/${checkpoint.clues.length} clues processed; ${totalBatches} total batches.`);
@@ -334,9 +318,7 @@ const report: JevAuditReport = {
 await mkdir(dirname(target), { recursive: true });
 await writeFile(target, `${JSON.stringify(report, null, 2)}\n`);
 await writeFile(markdownTarget, buildAuditMarkdown(report));
-if (!providerUnavailable) await unlink(checkpointPath).catch(error => {
-  if (!error || typeof error !== "object" || !("code" in error) || error.code !== "ENOENT") throw error;
-});
+if (!providerUnavailable) await removeCompletedAuditCheckpoint(checkpointPath);
 console.log(JSON.stringify({
   json: target,
   markdown: markdownTarget,

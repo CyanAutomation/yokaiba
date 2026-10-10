@@ -6,6 +6,7 @@ import {
   type PuzzleTemplate,
 } from "../src/index.js";
 import { evaluateHumanDeductionTrace } from "../src/generation/quality.js";
+import { propagateAllDifferent } from "../src/generation/all-different.js";
 
 const spec: PuzzleTemplate = {
   id: "deduction-scoring-fixture",
@@ -99,4 +100,29 @@ test("relational deductions preserve ordering, adjacency, same-row, and exact-di
   ]) {
     assert.equal(evaluateHumanDeductionTrace(threeRows, clues).solved, true);
   }
+});
+
+test("all-different deduction assigns the only value left in a row", () => {
+  const threeRows: PuzzleTemplate = {
+    ...spec,
+    categories: [
+      { id: "person", label: "Person", values: ["Aki", "Ben", "Cia"] },
+      { id: "color", label: "Color", values: ["Red", "Green", "Blue"] },
+    ],
+  };
+  const clues: Clue[] = [
+    { id: "aki-red", constraint: { kind: "matches", subject: "Aki", category: "color", value: "Red" }, text: "Aki wore red." },
+    { id: "ben-green", constraint: { kind: "matches", subject: "Ben", category: "color", value: "Green" }, text: "Ben wore green." },
+  ];
+
+  assert.equal(evaluateHumanDeductionTrace(threeRows, clues).solved, true);
+});
+
+test("all-different propagation assigns a value with one remaining row", () => {
+  const possible = new Map([
+    ["color", [new Set(["Red", "Blue"]), new Set(["Red", "Blue"]), new Set(["Red", "Green"])]],
+  ]);
+
+  assert.equal(propagateAllDifferent(possible), true);
+  assert.deepEqual([...possible.get("color")![2]!], ["Green"]);
 });

@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { puzzleHint } from "../src/api/puzzle-actions.js";
+import { puzzleHint } from "../src/api/puzzle-hints.js";
 import { generatePuzzle } from "../src/generation/generator.js";
 import { tournamentOrderTemplate } from "../src/templates/tournament-order.js";
 
