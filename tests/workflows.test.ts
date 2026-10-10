@@ -68,6 +68,44 @@ function runKasekiPoll(script: string, status: string, timeoutSeconds: number) {
   }
 }
 
+function runKasekiIdempotencyKey(script: string, inputs: { repository: string; workflow: string; runId: string }): string {
+  const assignment = script.match(/^[ \t]*idempotency_key="\$\([\s\S]*?^[ \t]*\)"/m)?.[0];
+  assert.ok(assignment, "submission step must derive an idempotency key");
+
+  const directory = mkdtempSync(join(tmpdir(), "kaseki-idempotency-test-"));
+  const bin = join(directory, "bin");
+  mkdirSync(bin);
+  writeFileSync(join(bin, "uuidgen"), [
+    "#!/bin/sh",
+    "[ \"$#\" -eq 5 ] || exit 2",
+    "[ \"$1\" = '--sha1' ] && [ \"$2\" = '--namespace' ] && [ \"$3\" = '@dns' ] && [ \"$4\" = '--name' ] || exit 2",
+    "printf '%s\\n' \"$5\"",
+    "",
+  ].join("\n"), { mode: 0o700 });
+
+  try {
+    const result = spawnSync("bash", ["--noprofile", "--norc", "-e", "-u", "-o", "pipefail", "-c", [
+      "set -euo pipefail",
+      assignment,
+      "printf '%s\\n' \"$idempotency_key\"",
+      "",
+    ].join("\n")], {
+      encoding: "utf8",
+      env: {
+        PATH: `${bin}:${process.env.PATH ?? "/usr/bin:/bin"}`,
+        GITHUB_REPOSITORY: inputs.repository,
+        GITHUB_WORKFLOW: inputs.workflow,
+        GITHUB_RUN_ID: inputs.runId,
+      },
+    });
+    if (result.error) throw result.error;
+    assert.equal(result.status, 0, result.stderr);
+    return result.stdout.trim();
+  } finally {
+    rmSync(directory, { recursive: true, force: true });
+  }
+}
+
 function assertKasekiTokenScope(workflow: Workflow, jobName: string): void {
   const currentJob = getJob(workflow, jobName);
   assert.equal(currentJob.env?.KASEKI_API_TOKEN, undefined, `${jobName} must not expose the token job-wide`);
@@ -165,17 +203,28 @@ test("Kaseki sweeps request standard pull requests, never drafts, and cap diffs"
   }
 });
 
-test("Kaseki submissions reuse an idempotency key when a workflow run is rerun", () => {
+test("Kaseki reruns derive the same submission key and distinct runs get distinct keys", () => {
+  const inputs = {
+    repository: "CyanAutomation/yokaiba",
+    workflow: "Kaseki documentation sweep",
+    runId: "12345",
+  };
+
   for (const [name, jobName, stepName] of [
     ["kaseki-docs.yaml", "docs_sweep", "Submit documentation sweep"],
     ["kaseki-dry.yaml", "dry_sweep", "Submit DRY sweep"],
   ]) {
     const workflow = readWorkflow(name);
     const submission = getRunStep(workflow, jobName, stepName);
+    const firstRunKey = runKasekiIdempotencyKey(submission, inputs);
+    const rerunKey = runKasekiIdempotencyKey(submission, inputs);
+    const newRunKey = runKasekiIdempotencyKey(submission, { ...inputs, runId: "12346" });
 
-    assert.match(submission, /uuidgen --sha1 --namespace @dns --name "\$GITHUB_REPOSITORY:\$GITHUB_WORKFLOW:\$GITHUB_RUN_ID"/);
+    assert.equal(firstRunKey, "cyanautomation/yokaiba:kaseki documentation sweep:12345");
+    assert.equal(rerunKey, firstRunKey);
+    assert.notEqual(newRunKey, firstRunKey);
     assert.match(submission, /--arg idempotencyKey "\$idempotency_key"/);
-    assert.doesNotMatch(submission, /\/proc\/sys\/kernel\/random\/uuid|uuidgen \| tr/);
+    assert.match(submission, /idempotencyKey:\s*\$idempotencyKey/);
   }
 });
 
