@@ -2,7 +2,7 @@
 
 ## Prerequisites
 
-- Node.js 22 or newer. The minimum version is declared in `package.json` and matches the Node version used by CI.
+- Node.js 24.x. The supported range is declared in `package.json`, and `.nvmrc` supplies the version used by CI and local version managers.
 - npm, which is bundled with Node.js.
 
 Install and start the local Cloudflare Worker:
