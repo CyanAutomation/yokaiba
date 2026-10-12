@@ -4,6 +4,8 @@
 
 Yokaiba generates deterministic, uniquely solvable judo logic-grid puzzles for games and integrations. Its hosted service provides a public REST API and an authenticated Model Context Protocol (MCP) endpoint.
 
+Yokaiba is intended for game and integration developers. Its hosted REST API and MCP service are the supported integration surfaces; this private application package does not publish a stable TypeScript SDK.
+
 ## Contents
 
 - [Capabilities](#capabilities)
@@ -22,8 +24,6 @@ Yokaiba generates deterministic, uniquely solvable judo logic-grid puzzles for g
 - REST endpoints for scenarios, generation, answer verification, hints, and optional anonymous outcome events.
 - Streamable HTTP MCP tools for scenario discovery and puzzle generation, with token-protected puzzle actions when configured.
 - A deterministic 1–12 puzzle difficulty model, with separate optional language review and observed player outcomes.
-
-The supported integration surfaces are the hosted REST API and MCP service. The TypeScript solver is currently an internal part of this private application package; direct module imports are not a published or stable SDK contract.
 
 ## Try the hosted API
 
