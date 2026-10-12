@@ -6,7 +6,7 @@ import { join } from "node:path";
 import test from "node:test";
 import { parseYamlDocument } from "./helpers/yaml.js";
 
-// Workflow behavior contracts are documented in README.md#github-workflow-policy.
+// Workflow behavior contracts are documented in docs/operations-and-deployment.md#github-workflow-policy.
 const packageJson = JSON.parse(readFileSync(new URL("../package.json", import.meta.url), "utf8")) as {
   scripts?: Record<string, string>;
 };
@@ -119,7 +119,7 @@ function assertKasekiTokenScope(workflow: Workflow, jobName: string): void {
   ]);
 }
 
-// Workflow policy: README.md#github-workflow-policy.
+// Workflow policy: docs/operations-and-deployment.md#github-workflow-policy.
 test("Kaseki validation workflows invoke scripts declared by this package", () => {
   for (const name of ["kaseki-docs.yaml", "kaseki-dry.yaml"]) {
     const workflow = readWorkflow(name);
@@ -171,7 +171,7 @@ test("Kaseki sweeps share one concurrency group and remain main-only", () => {
   assert.equal(getJob(docs, "docs_sweep").if, "github.ref == 'refs/heads/main'");
 });
 
-// Controller allowlist contract: README.md#github-workflow-policy.
+// Controller allowlist contract: docs/operations-and-deployment.md#github-workflow-policy.
 test("Kaseki sweep validation accepts the approved controller and rejects lookalike URLs", () => {
   for (const [name, jobName, stepName] of [
     ["kaseki-dry.yaml", "dry_sweep", "Validate Kaseki configuration"],
@@ -228,7 +228,7 @@ test("Kaseki reruns derive the same submission key and distinct runs get distinc
   }
 });
 
-// Polling contract: README.md#github-workflow-policy.
+// Polling contract: docs/operations-and-deployment.md#github-workflow-policy.
 test("Kaseki sweeps stop on terminal results and respect the polling deadline", () => {
   for (const [name, jobName] of [["kaseki-docs.yaml", "docs_sweep"], ["kaseki-dry.yaml", "dry_sweep"]]) {
     const workflow = readWorkflow(name);
@@ -310,7 +310,7 @@ test("Dependabot updates GitHub Actions and npm dependencies weekly", () => {
   }
 });
 
-// Runner policy: README.md#github-workflow-policy.
+// Runner policy: docs/operations-and-deployment.md#github-workflow-policy.
 test("GitHub workflow jobs use a versioned Ubuntu runner instead of a floating label", () => {
   for (const name of ["validate.yml", "validate-reusable.yml", "deploy-cloudflare.yml", "kaseki-docs.yaml", "kaseki-dry.yaml"]) {
     const workflow = readWorkflow(name);

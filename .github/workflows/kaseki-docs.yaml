@@ -20,7 +20,7 @@ env:
   REF: main
   TASK_DESCRIPTION: Keep README.md and docs/ accurate against the current implementation.
   ALLOWLIST: README.md,docs/**/*.md
-  VALIDATION_COMMAND: npm run typecheck && npm test && npm run build
+  VALIDATION_COMMAND: npm run docs:check && npm run typecheck && npm test && npm run build
 
 jobs:
   docs_sweep:

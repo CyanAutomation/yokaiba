@@ -112,7 +112,7 @@ test("generated puzzle cache evicts least-recently-used bodies to meet its byte 
   assert.equal(cache.has("new"), true);
 });
 
-// Cache contract: README.md#local-response-cache-policy.
+// Cache contract: docs/operations-and-deployment.md#local-response-cache-policy.
 test("replaced and expired responses release capacity for later cache entries", async () => {
   const cache = new GeneratedPuzzleCache(10, 5);
   await cacheGeneratedPuzzle(cache, "replace", new Response("12345"), 0);
@@ -187,7 +187,7 @@ test("generated puzzle cache keys namespace secrets without exposing them", asyn
   }
 });
 
-// Secret-derived cache state is bounded by the policy in README.md#local-response-cache-policy.
+// Secret-derived cache state is bounded by the policy in docs/operations-and-deployment.md#local-response-cache-policy.
 test("cache key derivation bounds secret namespace digests with least-recently-used eviction", async () => {
   const request = new Request("https://example.com/v1/puzzles/generate?templateId=template&seed=seed");
   const digestCache = new Map<string | undefined, Promise<string>>();
@@ -217,7 +217,7 @@ test("cache key derivation bounds secret namespace digests with least-recently-u
   assert.equal(digestCalls, 12);
 });
 
-// Recovery contract: failed digests are retried under README.md#local-response-cache-policy.
+// Recovery contract: failed digests are retried under docs/operations-and-deployment.md#local-response-cache-policy.
 test("cache-key derivation recovers from a transient digest failure", async () => {
   const request = new Request("https://example.com/v1/puzzles/generate?templateId=template&seed=seed");
   const failure = new Error("test digest failure");
