@@ -409,7 +409,7 @@ test("the exhaustive solver fulfils the public solver contract", () => {
   assert.deepEqual(exhaustivePuzzleSolver.solve(spec, clues, 1), expectedAssignments.slice(0, 1));
   assert.equal(exhaustivePuzzleSolver.countSolutions(spec, clues, 10), 2);
 
-  // Replay contract: README.md, "Solver implementations".
+  // Replay contract: docs/development.md#solver-internals.
   assert.equal(exhaustivePuzzleSolver.version, "yokaiba-exhaustive-v1");
 });
 
@@ -474,7 +474,7 @@ test("solver honours limits while retaining deterministic exhaustive results", (
   assert.deepEqual(solve(solverFixtureSpec, [], 0), []);
 });
 
-// Profiling contract: README.md#solver-implementations documents deterministic injected timing.
+// Profiling contract: docs/development.md#solver-internals documents deterministic injected timing.
 test("diagnostic solver telemetry reports search work with deterministic elapsed time", () => {
   const clue: Clue = {
     id: "aki-cat",

@@ -18,7 +18,7 @@ const fourRowOpenDivisionAuditFixture = {
   categories: openDivisionTemplate.categories.map(category => ({ ...category, values: category.values.slice(0, 4) })),
 };
 
-// Audit report and calibration contract: README.md#difficulty-audit-and-calibration.
+// Audit report and calibration contract: docs/difficulty-and-calibration.md#difficulty-audit-and-calibration.
 test("fallback attempt summaries use nearest-rank p50 and p95", () => {
   assert.deepEqual(fallbackAttemptPercentiles([32, 3, 1, 9, 4, 7, 2, 6, 5, 8]), { p50: 5, p95: 32 });
   assert.deepEqual(fallbackAttemptPercentiles([]), { p50: 0, p95: 0 });
