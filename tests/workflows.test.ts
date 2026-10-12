@@ -9,6 +9,7 @@ import { parseYamlDocument } from "./helpers/yaml.js";
 // Workflow behavior contracts are documented in docs/operations-and-deployment.md#github-workflow-policy.
 const packageJson = JSON.parse(readFileSync(new URL("../package.json", import.meta.url), "utf8")) as {
   scripts?: Record<string, string>;
+  engines?: { node?: string };
 };
 
 type Workflow = Record<string, any>;
@@ -16,6 +17,25 @@ type Workflow = Record<string, any>;
 function readWorkflow(name: string): Workflow {
   return parseYamlDocument(readFileSync(new URL(`../.github/workflows/${name}`, import.meta.url), "utf8"));
 }
+
+test("Node.js version is pinned consistently for local development, package installs, and CI", () => {
+  const packageLock = JSON.parse(readFileSync(new URL("../package-lock.json", import.meta.url), "utf8")) as {
+    packages?: Record<string, { engines?: { node?: string } }>;
+  };
+
+  assert.equal(readFileSync(new URL("../.nvmrc", import.meta.url), "utf8").trim(), "24");
+  assert.equal(packageJson.engines?.node, ">=24 <25");
+  assert.equal(packageLock.packages?.[""]?.engines?.node, packageJson.engines?.node);
+
+  for (const name of ["validate-reusable.yml", "deploy-cloudflare.yml"]) {
+    const workflow = readWorkflow(name);
+    const setupNode = getJob(workflow, name === "validate-reusable.yml" ? "validate" : "deploy").steps
+      .find((step: Workflow) => String(step.uses).startsWith("actions/setup-node@")) as Workflow | undefined;
+
+    assert.equal(setupNode?.with?.["node-version-file"], ".nvmrc", `${name} must use the repository Node.js pin`);
+    assert.equal(setupNode?.with?.["node-version"], undefined, `${name} must not duplicate the Node.js version`);
+  }
+});
 
 function getJob(workflow: Workflow, name: string): Workflow {
   const job = workflow.jobs?.[name] as Workflow | undefined;
