@@ -239,12 +239,15 @@ test("REST returns 405 with Allow for a known path and 404 for an unknown path",
 });
 
 test("REST supports cacheable deterministic GET generation", async () => {
-  const route = createRestRouter([tournamentOrderTemplate], { puzzleTokenSecret: "test-token-secret" });
-  const response = await route(new Request("https://yokaiba.test/v1/puzzles/generate?templateId=tournament-order-v1&seed=api-seed"));
+  const route = createRestRouter([tournamentOrderTemplate]);
+  const url = "https://yokaiba.test/v1/puzzles/generate?templateId=tournament-order-v1&seed=api-seed";
+  const response = await route(new Request(url));
+  const repeatedResponse = await route(new Request(url));
 
   assert.equal(response.status, 200);
   assert.equal(response.headers.get("cache-control"), "public, max-age=300, s-maxage=300, must-revalidate");
   const body = await response.json() as Record<string, unknown>;
+  assert.deepEqual(await repeatedResponse.json(), body);
   assert.equal(body.seed, "api-seed");
   assert.equal("solution" in body, false);
 });
