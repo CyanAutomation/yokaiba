@@ -5,6 +5,7 @@ import { createYokaibaMcpHandler } from "../src/mcp/server.js";
 import { tournamentOrderV2Template } from "../src/templates/tournament-order-v2.js";
 import { createRestRouter } from "../src/api/router.js";
 import type { PuzzleTemplate } from "../src/domain/types.js";
+import { verifyPuzzleToken } from "../src/api/puzzle-token.js";
 
 async function rpc(handler: ReturnType<typeof createYokaibaMcpHandler>, id: number, method: string, params: Record<string, unknown> = {}) {
   const response = await handler.fetch(new Request("https://yokaiba.test/mcp", {
@@ -27,6 +28,13 @@ async function callTool(handler: ReturnType<typeof createYokaibaMcpHandler>, id:
 function structuredContent(result: Record<string, unknown>): Record<string, any> {
   assert.ok(result.structuredContent && typeof result.structuredContent === "object");
   return result.structuredContent as Record<string, any>;
+}
+
+async function stablePuzzleTokenClaims(token: string, secret: string) {
+  const claims = await verifyPuzzleToken(token, secret);
+  if (!claims || claims.version !== 3) throw new Error("expected a current-version puzzle token");
+  const { issuedAt: _issuedAt, expiresAt: _expiresAt, ...stableClaims } = claims;
+  return stableClaims;
 }
 
 test("MCP advertises build version and structured schemas for each available tool", async () => {
@@ -53,7 +61,16 @@ test("MCP puzzle generation matches REST, preserves a token, and never exposes t
   assert.equal("solution" in mcp, false);
   assert.equal(typeof mcp.puzzleToken, "string");
   assert.equal(mcp.difficulty.evidence.humanSolve.solved, true);
-  assert.deepEqual(mcp, restPuzzle);
+
+  const { puzzleToken: mcpToken, ...mcpPublicPuzzle } = mcp;
+  const { puzzleToken: restToken, ...restPublicPuzzle } = restPuzzle as Record<string, unknown>;
+  assert.deepEqual(mcpPublicPuzzle, restPublicPuzzle);
+
+  const [mcpClaims, restClaims] = await Promise.all([
+    stablePuzzleTokenClaims(mcpToken as string, options.puzzleTokenSecret),
+    stablePuzzleTokenClaims(restToken as string, options.puzzleTokenSecret),
+  ]);
+  assert.deepEqual(mcpClaims, restClaims);
 });
 
 test("MCP verifies answers and advances through spoiler-safe clue hints", async () => {

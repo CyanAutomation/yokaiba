@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { decodePuzzleTokenPayload } from "../src/api/puzzle-token-payload.js";
+import { decodePuzzleTokenPayload, MAX_PUZZLE_TOKEN_TTL_SECONDS } from "../src/api/puzzle-token-payload.js";
 import { generatePuzzle } from "../src/generation/generator.js";
 import { tournamentOrderTemplate } from "../src/templates/tournament-order.js";
 import { issuePuzzleToken, verifyPuzzleToken, type PuzzleTokenPayload } from "../src/api/puzzle-token.js";
@@ -31,6 +31,29 @@ test("token payload decoding validates the wire format before returning claims",
   assert.equal(decodePuzzleTokenPayload("not*base64"), undefined);
   assert.equal(decodePuzzleTokenPayload(encode({ ...payload, expiresAt: payload.issuedAt })), undefined);
   assert.equal(decodePuzzleTokenPayload(encode({ ...payload, requestedDifficultyLevel: 13 })), undefined);
+  assert.deepEqual(decodePuzzleTokenPayload(encode({
+    version: 2,
+    templateId: "test-template",
+    seed: "legacy-seed",
+    generatorVersion: "yokaiba-generator-v4",
+    solverVersion: "yokaiba-exhaustive-v1",
+  })), {
+    version: 2,
+    templateId: "test-template",
+    seed: "legacy-seed",
+    generatorVersion: "yokaiba-generator-v4",
+    solverVersion: "yokaiba-exhaustive-v1",
+  });
+  assert.notEqual(decodePuzzleTokenPayload(encode({
+    ...payload,
+    issuedAt: 10,
+    expiresAt: 10 + MAX_PUZZLE_TOKEN_TTL_SECONDS,
+  })), undefined);
+  assert.equal(decodePuzzleTokenPayload(encode({
+    ...payload,
+    issuedAt: 10,
+    expiresAt: 11 + MAX_PUZZLE_TOKEN_TTL_SECONDS,
+  })), undefined);
 });
 
 async function signPayload(payload: unknown, signingSecret = secret): Promise<string> {
