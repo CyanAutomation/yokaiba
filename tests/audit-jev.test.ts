@@ -246,9 +246,15 @@ test("JEV answer values outside their expected ranges are incomplete rather than
 });
 
 test("missing or malformed answer maps are treated as empty so the batch can be reported incomplete", () => {
-  assert.deepEqual(readJevAnswerMap(undefined), {});
-  assert.deepEqual(readJevAnswerMap(null), {});
-  assert.deepEqual(readJevAnswerMap(["not", "an", "answer", "map"]), {});
+  for (const rawAnswers of [undefined, null, ["not", "an", "answer", "map"]]) {
+    const answers = readJevAnswerMap(rawAnswers);
+    assert.deepEqual(answers, {});
+
+    const evaluated = applyJevAnswers(clue(), answers, 0, "2026-09-29T00:00:00.000Z");
+    assert.equal(evaluated.evaluationStatus, "incomplete");
+    assert.deepEqual(evaluated.missingAnswers, ["faithful", "ambiguous", "readability", "linguisticComplexity", "relationshipExplicitness"]);
+    assert.equal(evaluated.flagged, false);
+  }
 });
 
 test("audit Markdown reports targeted delivery, fallbacks, confidence, and incomplete evaluations", () => {
