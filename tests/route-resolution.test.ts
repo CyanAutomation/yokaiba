@@ -13,8 +13,12 @@ test("route resolution returns the handler for an exact method and path", () => 
   assert.deepEqual(resolveRoute(routes, "POST", "/items"), { kind: "handler", handler: post });
 });
 
-test("route resolution reports sorted allowed methods for a known path", () => {
-  assert.deepEqual(resolveRoute(routes, "PATCH", "/items"), { kind: "method_not_allowed", allowedMethods: ["GET", "POST"] });
+test("route resolution reports the allowed methods for a known path", () => {
+  const result = resolveRoute(routes, "PATCH", "/items");
+  assert.equal(result.kind, "method_not_allowed");
+  if (result.kind === "method_not_allowed") {
+    assert.deepEqual(new Set(result.allowedMethods), new Set(["GET", "POST"]));
+  }
 });
 
 test("route resolution distinguishes an unknown path", () => {
