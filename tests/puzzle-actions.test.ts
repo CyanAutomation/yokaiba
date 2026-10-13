@@ -12,3 +12,12 @@ test("clue and elimination hints never contain a solution placement", () => {
     assert.deepEqual(Object.keys(hint).sort(), ["clue", "kind"]);
   }
 });
+
+test("hints reject a puzzle with no available clues", () => {
+  const generated = generatePuzzle(tournamentOrderTemplate, "empty-clue-hint");
+  const puzzle = { ...generated, clues: [] };
+
+  for (const kind of ["clue", "elimination"] as const) {
+    assert.throws(() => puzzleHint(puzzle, kind), /No clues available for hints/);
+  }
+});

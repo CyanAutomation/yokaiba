@@ -342,6 +342,37 @@ test("the beginner curriculum can generate every calibrated difficulty from one 
   }
 });
 
+test("dense-board fallback solver work stays within its configured seed-attempt budget", () => {
+  const requestedSeed = "fallback-work-budget";
+  const fallbackSeeds = [requestedSeed, `${requestedSeed}:fallback:1`];
+  const solverFor = (onCall: () => void): PuzzleSolver => ({
+    version: "fallback-work-budget-v1",
+    solve: () => [],
+    countSolutions: (_spec, clues) => {
+      onCall();
+      return clues.length === 0 ? 2 : 1;
+    },
+  });
+  const generationCallsForSeed = (seed: string): number => {
+    let calls = 0;
+    generatePuzzle(championshipCircuitTemplate, seed, solverFor(() => { calls += 1; }));
+    return calls;
+  };
+  const maximumCalls = fallbackSeeds.reduce((total, seed) => total + generationCallsForSeed(seed), 0);
+  let solverCalls = 0;
+  const boundedSolver = solverFor(() => {
+    solverCalls += 1;
+    if (solverCalls > maximumCalls) throw new Error("fallback exceeded its configured seed-attempt budget");
+  });
+
+  assert.throws(
+    () => generatePuzzleAtDifficultyWithFallback(championshipCircuitTemplate, requestedSeed, 12, boundedSolver, 1),
+    error => error instanceof DifficultyUnavailableError,
+  );
+  // This deterministic solver-call proxy protects the Worker's per-seed CPU budget.
+  assert.equal(solverCalls, maximumCalls);
+});
+
 test("expert target generation favors relational deductions over direct facts", () => {
   const puzzle = generatePuzzle(championshipCircuitTemplate, "expert-relational", undefined, { difficultyLevel: 12, strategy: 0 });
 
