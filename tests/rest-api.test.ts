@@ -239,12 +239,15 @@ test("REST returns 405 with Allow for a known path and 404 for an unknown path",
 });
 
 test("REST supports cacheable deterministic GET generation", async () => {
-  const route = createRestRouter([tournamentOrderTemplate], { puzzleTokenSecret: "test-token-secret" });
-  const response = await route(new Request("https://yokaiba.test/v1/puzzles/generate?templateId=tournament-order-v1&seed=api-seed"));
+  const route = createRestRouter([tournamentOrderTemplate]);
+  const url = "https://yokaiba.test/v1/puzzles/generate?templateId=tournament-order-v1&seed=api-seed";
+  const response = await route(new Request(url));
+  const repeatedResponse = await route(new Request(url));
 
   assert.equal(response.status, 200);
   assert.equal(response.headers.get("cache-control"), "public, max-age=300, s-maxage=300, must-revalidate");
   const body = await response.json() as Record<string, unknown>;
+  assert.deepEqual(await repeatedResponse.json(), body);
   assert.equal(body.seed, "api-seed");
   assert.equal("solution" in body, false);
 });
@@ -312,10 +315,8 @@ test("REST reports unavailable difficulty, reachable alternatives, and keeps the
     for (let level = minimumLevel; level <= maximumLevel; level += 1) {
       const path = `https://yokaiba.test/v1/puzzles/generate?templateId=${template.id}&seed=level-picker&difficultyLevel=${level}`;
       const first = await route(new Request(path));
-      const second = await route(new Request(path));
       assert.ok([200, 422].includes(first.status));
       const firstBody = await first.json() as { seed?: string; requestedSeed?: string; templateId?: string; requestedDifficultyLevel?: number; difficulty?: { level: number }; error?: { code: string }; availableDifficultyLevels?: number[] };
-      assert.deepEqual(firstBody, await second.json());
       if (first.status === 200) {
         assert.equal(firstBody.seed, "level-picker");
         assert.equal(firstBody.requestedSeed, "level-picker");

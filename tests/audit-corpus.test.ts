@@ -112,7 +112,7 @@ test("production distribution reports the calibrated levels for a fixed seed sam
   assert.deepEqual(report.clues, { average: 8, minimum: 8, maximum: 8 });
 });
 
-test("progressive audit counts a deterministic unavailable sample and reports zeroed statistics", () => {
+test("progressive audit reports unavailable samples with or without a progress callback", () => {
   const progress: unknown[] = [];
   const report = auditProductionDifficultyCorpus(fourRowOpenDivisionAuditFixture, {
     sampleSize: 1,
@@ -127,13 +127,12 @@ test("progressive audit counts a deterministic unavailable sample and reports ze
   assert.deepEqual(report.humanTrace, { complete: 0, incomplete: 0 });
   assert.deepEqual(report.clues, { average: 0, minimum: 0, maximum: 0 });
   assert.deepEqual(progress, [{ phase: "difficulty", templateId: fourRowOpenDivisionAuditFixture.id, completed: 1, total: 1 }]);
-});
 
-test("progressive audits can report an unavailable sample without a progress callback", () => {
-  assert.doesNotThrow(() => auditProductionDifficultyCorpus(fourRowOpenDivisionAuditFixture, {
+  const withoutProgress = auditProductionDifficultyCorpus(fourRowOpenDivisionAuditFixture, {
     sampleSize: 1,
     seedPrefix: "audit-progressive-small-4-17",
-  }));
+  });
+  assert.deepEqual(withoutProgress, report);
 });
 
 test("a targeted course level can be audited independently", () => {
