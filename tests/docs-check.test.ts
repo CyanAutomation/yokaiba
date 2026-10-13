@@ -39,6 +39,46 @@ test("documentation checker reports broken links, anchors, and package script re
   });
 });
 
+test("documentation checker handles duplicate anchors and encoded links while checking fenced commands", async () => {
+  await withFixture(async root => {
+    await writeFile(path.join(root, "README.md"), [
+      "# Project",
+      "",
+      "## Setup",
+      "## Setup",
+      "",
+      "[Second heading](README.md#setup-1)",
+      "[Encoded path](docs%20guide/guide.md#quick-start)",
+      "",
+      "```sh",
+      "[Example only](missing.md)",
+      "npm run missing-script",
+      "```",
+      "",
+    ].join("\n"));
+    await mkdir(path.join(root, "docs guide"));
+    await writeFile(path.join(root, "docs guide", "guide.md"), "# Guide\n\n## Quick start\n");
+
+    assert.deepEqual(inspectMarkdown(root), [{
+      file: "README.md",
+      line: 11,
+      message: "unknown package script: npm run missing-script",
+    }]);
+  });
+});
+
+test("documentation checker reports malformed local URL encoding at the link line", async () => {
+  await withFixture(async root => {
+    await writeFile(path.join(root, "README.md"), "# Project\n\n[Bad link](docs/%E0%A4%A.md)\n");
+
+    assert.deepEqual(inspectMarkdown(root), [{
+      file: "README.md",
+      line: 3,
+      message: "invalid URL encoding in local link: docs/%E0%A4%A.md",
+    }]);
+  });
+});
+
 test("README generation quick starts call a registered route and produce a public puzzle", async () => {
   const readme = await readFile(new URL("../README.md", import.meta.url), "utf8");
   const examples = [...readme.matchAll(/curl -fsS '((?:https?:\/\/[^']+)?\/v1\/puzzles\/generate\?[^']+)'/g)];
