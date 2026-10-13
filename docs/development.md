@@ -36,8 +36,6 @@ npm run build
 
 `npm run docs:check` validates local Markdown links and heading anchors, checks referenced `npm run` scripts, and runs Markdown lint. `npm test` runs the Node test suite. The repository also provides `npm run audit:difficulty` and `npm run audit:difficulty:targeted` for deterministic generation audits; see [difficulty and calibration](difficulty-and-calibration.md) before interpreting their results.
 
-`npm run test:mutation:audit` is an optional scoped diagnostic. Stryker temporarily mutates the selected source file in place and restores it, so do not run other tests or edit that file while the command is active.
-
 ## Solver internals
 
 Generation and quality evaluation depend on the internal `PuzzleSolver` contract. The built-in exhaustive solver supports grids with 2–5 rows. Any internal alternative must preserve clue semantics, solution-limit behavior, deterministic solution ordering, and a stable version; generated puzzles record the solver version for replay. These modules are not a published SDK API.
