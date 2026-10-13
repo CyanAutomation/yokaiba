@@ -13,10 +13,11 @@ test("clue and elimination hints never contain a solution placement", () => {
   }
 });
 
-test("clue and elimination hints reject puzzles without clues", () => {
-  const puzzle = generatePuzzle(tournamentOrderTemplate, "empty-clue-hint");
-  puzzle.clues = [];
+test("hints reject a puzzle with no available clues", () => {
+  const generated = generatePuzzle(tournamentOrderTemplate, "empty-clue-hint");
+  const puzzle = { ...generated, clues: [] };
 
-  assert.throws(() => puzzleHint(puzzle, "clue"), /No clues available for hints/);
-  assert.throws(() => puzzleHint(puzzle, "elimination"), /No clues available for hints/);
+  for (const kind of ["clue", "elimination"] as const) {
+    assert.throws(() => puzzleHint(puzzle, kind), /No clues available for hints/);
+  }
 });
