@@ -22,6 +22,7 @@ export function createDeductionPossibilities(spec: PuzzleSpec): { baseValues: re
 
 function applyDirectConstraint(constraint: DirectConstraint, baseValues: readonly string[], possible: PossibleRows): boolean {
   const row = baseValues.indexOf(constraint.subject);
+  if (row < 0) return false;
   const cells = possible.get(constraint.category)!;
   if (constraint.kind === "matches") {
     if (cells[row].size === 1 && cells[row].has(constraint.value)) return false;
@@ -41,11 +42,13 @@ function rowsForTerm(categoryId: string, value: string, baseCategory: string, ba
   return cells.flatMap((cell, row) => cell.has(value) ? [row] : []);
 }
 
-function removeTermFromRows(categoryId: string, value: string, disallowedRows: Set<number>, baseCategory: string, possible: PossibleRows): boolean {
+export function removeTermFromRows(categoryId: string, value: string, disallowedRows: Set<number>, baseCategory: string, possible: PossibleRows): boolean {
   if (categoryId === baseCategory) return false;
   const cells = possible.get(categoryId)!;
   let changed = false;
-  for (const row of disallowedRows) changed = cells[row].delete(value) || changed;
+  for (const row of disallowedRows) {
+    if (row >= 0 && row < cells.length) changed = cells[row]!.delete(value) || changed;
+  }
   return changed;
 }
 

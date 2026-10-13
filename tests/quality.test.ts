@@ -78,6 +78,16 @@ test("an unconstrained puzzle stays unsolved and records its stable initial pass
   });
 });
 
+test("an unknown direct-clue subject does not crash the deduction trace", () => {
+  const invalidSubjectClue: Clue = {
+    id: "unknown-red",
+    constraint: { kind: "matches", subject: "Unknown", category: "color", value: "Red" },
+    text: "The unknown person wore red.",
+  };
+
+  assert.equal(evaluateHumanDeductionTrace(spec, [invalidSubjectClue]).solved, false);
+});
+
 test("relational deductions preserve ordering, adjacency, same-row, and exact-distance propagation", () => {
   const threeRows: PuzzleTemplate = {
     ...spec,
