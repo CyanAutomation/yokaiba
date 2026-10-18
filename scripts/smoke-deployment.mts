@@ -3,24 +3,35 @@ import { readDeploymentConfig } from "./deployment-config.mjs";
 
 const { baseUrl, expectedBuildVersion, expectedBuildSha } = readDeploymentConfig(process.env);
 
-async function get(path, options) {
+function asRecord(value: unknown): Record<string, unknown> | undefined {
+  return typeof value === "object" && value !== null && !Array.isArray(value)
+    ? value as Record<string, unknown>
+    : undefined;
+}
+
+async function get(path: string, options?: RequestInit): Promise<Response> {
   const response = await fetch(new URL(path, baseUrl), options);
   if (!response.ok) throw new Error(`${path} returned ${response.status}`);
   return response;
 }
 
+async function getObject(path: string): Promise<Record<string, unknown>> {
+  const body: unknown = await (await get(path)).json();
+  const object = asRecord(body);
+  if (!object) throw new Error(`${path} returned an invalid response body`);
+  return object;
+}
+
 await waitForExpectedDeployment({ baseUrl, expectedBuildVersion, expectedBuildSha });
 
-const ready = await get("/readyz");
-const readyBody = await ready.json();
+const readyBody = await getObject("/readyz");
 if (readyBody.status !== "ready"
   || readyBody.rateLimitProvider !== "configured"
   || readyBody.generateRateLimitProvider !== "configured") {
   throw new Error("readiness did not confirm the production REST and generation rate-limit bindings");
 }
 
-const version = await get("/v1/version");
-const versionBody = await version.json();
+const versionBody = await getObject("/v1/version");
 if (versionBody.serviceVersion !== expectedBuildVersion || versionBody.buildSha !== expectedBuildSha) {
   throw new Error("version response does not identify the deployment that this workflow released");
 }
@@ -29,8 +40,11 @@ if (!versionBody.generatorVersion || !versionBody.solverVersion) throw new Error
 const puzzlePath = "/v1/puzzles/generate?templateId=tournament-order-v1&seed=deployment-smoke";
 const puzzle = await get(puzzlePath);
 const etag = puzzle.headers.get("etag");
-const puzzleBody = await puzzle.json();
-if (!Array.isArray(puzzleBody.clues) || "solution" in puzzleBody) throw new Error("puzzle response has an invalid public shape");
+const puzzleValue: unknown = await puzzle.json();
+const puzzleBody = asRecord(puzzleValue);
+if (!puzzleBody || !Array.isArray(puzzleBody.clues) || "solution" in puzzleBody) {
+  throw new Error("puzzle response has an invalid public shape");
+}
 if (!etag) throw new Error("cacheable puzzle response did not include an ETag");
 
 const cached = await fetch(new URL(puzzlePath, baseUrl), { headers: { "if-none-match": etag } });
