@@ -343,18 +343,22 @@ test("the beginner curriculum can generate every calibrated difficulty from one 
 });
 
 // CPU guard for bounded fallback: docs/difficulty-and-calibration.md#targeted-seed-fallback.
-test("dense-board fallback generates only the requested seed and configured fallback candidates", () => {
+test("dense-board fallback respects its configured derived-seed attempt budget", () => {
   const requestedSeed = "fallback-work-budget";
-  const maxAttempts = 1;
 
+  // This deterministic seed reaches level 9 on its second derived candidate.
   assert.throws(
-    () => generatePuzzleAtDifficultyWithFallback(championshipCircuitTemplate, requestedSeed, 7, exhaustivePuzzleSolver, maxAttempts),
+    () => generatePuzzleAtDifficultyWithFallback(championshipCircuitTemplate, requestedSeed, 9, exhaustivePuzzleSolver, 1),
     error => {
       assert.ok(error instanceof DifficultyUnavailableError);
-      assert.deepEqual(error.availableDifficultyLevels, [11, 12]);
       return true;
     },
   );
+
+  const puzzle = generatePuzzleAtDifficultyWithFallback(championshipCircuitTemplate, requestedSeed, 9, exhaustivePuzzleSolver, 2);
+  assert.equal(puzzle.difficulty.level, 9);
+  assert.equal(puzzle.requestedSeed, requestedSeed);
+  assert.equal(puzzle.seedFallbackAttempt, 2);
 });
 
 test("expert target generation favors relational deductions over direct facts", () => {
