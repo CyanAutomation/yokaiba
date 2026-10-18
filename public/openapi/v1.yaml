@@ -7,14 +7,14 @@ info:
     Cross-origin browser clients must be listed in the `REST_ALLOWED_ORIGINS` Worker secret; unlisted origins receive no CORS permission.
 servers:
   - url: /
-    description: Current deployment (used by Swagger UI)
+    description: Current deployment
   - url: https://yokaiba.scheimann.workers.dev
     description: Production
 paths:
   /:
     get:
       operationId: redirectToDocs
-      summary: Redirect to the interactive API documentation
+      summary: Redirect to the API documentation page
       responses:
         '302':
           description: Redirect to `/docs`
@@ -80,10 +80,10 @@ paths:
   /docs:
     get:
       operationId: getDocs
-      summary: Interactive Swagger UI
+      summary: REST API documentation page
       responses:
         '200':
-          description: Browser-based API reference
+          description: Static HTML API reference
           headers:
             X-Request-Id: { $ref: '#/components/headers/RequestId' }
           content:
@@ -100,10 +100,10 @@ paths:
   /docs/:
     get:
       operationId: getDocsTrailingSlash
-      summary: Interactive Swagger UI (trailing-slash alias)
+      summary: REST API documentation page (trailing-slash alias)
       responses:
         '200':
-          description: Browser-based API reference
+          description: Static HTML API reference
           headers: { X-Request-Id: { $ref: '#/components/headers/RequestId' } }
           content: { text/html: { schema: { type: string } } }
         '405': { $ref: '#/components/responses/MethodNotAllowed' }
