@@ -1,5 +1,4 @@
 import assert from "node:assert/strict";
-import { readFile, stat } from "node:fs/promises";
 import test from "node:test";
 import worker, { createRateLimiter, createWorker, GeneratedPuzzleCache } from "../worker/index.js";
 
@@ -711,38 +710,26 @@ test("worker uses a separate provider and quota for REST puzzle generation", asy
   assert.equal(response.headers.get("ratelimit-limit"), "10");
 });
 
-test("worker serves self-hosted Swagger UI with complete security controls", async () => {
+test("worker serves a static API documentation page with security controls", async () => {
   for (const path of ["/docs", "/docs/"]) {
     const docs = await worker.fetch(new Request(`https://yokaiba.test${path}`), {}, {} as ExecutionContext);
     assert.equal(docs.status, 200);
 
     const contentSecurityPolicy = docs.headers.get("content-security-policy") ?? "";
     assert.match(contentSecurityPolicy, /(?:^|; )default-src 'none'(?:;|$)/);
-    assert.match(contentSecurityPolicy, /(?:^|; )script-src 'self' 'unsafe-inline'(?:;|$)/);
-    assert.match(contentSecurityPolicy, /(?:^|; )style-src 'self' 'unsafe-inline'(?:;|$)/);
-    assert.match(contentSecurityPolicy, /(?:^|; )img-src 'self' data:(?:;|$)/);
-    assert.match(contentSecurityPolicy, /(?:^|; )connect-src 'self'(?:;|$)/);
+    assert.match(contentSecurityPolicy, /(?:^|; )style-src 'unsafe-inline'(?:;|$)/);
     assert.match(contentSecurityPolicy, /(?:^|; )base-uri 'none'(?:;|$)/);
     assert.match(contentSecurityPolicy, /(?:^|; )frame-ancestors 'none'(?:;|$)/);
     assert.equal(docs.headers.get("x-content-type-options"), "nosniff");
     assert.ok(docs.headers.get("x-request-id"));
 
     const docsDocument = await docs.text();
-    assert.match(docsDocument, /href="\/swagger-ui\/swagger-ui\.css"/);
-    assert.match(docsDocument, /src="\/swagger-ui\/swagger-ui-bundle\.js"/);
+    assert.match(docs.headers.get("content-type") ?? "", /^text\/html; charset=utf-8$/);
+    assert.match(docsDocument, /<title>Yokaiba API documentation<\/title>/);
+    assert.match(docsDocument, /<code>\/v1\/puzzles\/generate<\/code>/);
     assert.match(docsDocument, /href="\/openapi\/chatgpt-actions-v1\.yaml"/);
-    assert.doesNotMatch(docsDocument, /unpkg\.com/);
+    assert.doesNotMatch(docsDocument, /swagger-ui|<script\b|unpkg\.com/i);
   }
-});
-
-test("self-hosted Swagger UI assets are present in the configured static assets directory", async () => {
-  const stylesheet = await stat(new URL("../public/swagger-ui/swagger-ui.css", import.meta.url));
-  const bundle = await stat(new URL("../public/swagger-ui/swagger-ui-bundle.js", import.meta.url));
-  const wranglerConfiguration = await readFile(new URL("../wrangler.toml", import.meta.url), "utf8");
-
-  assert.ok(stylesheet.isFile() && stylesheet.size > 0);
-  assert.ok(bundle.isFile() && bundle.size > 0);
-  assert.match(wranglerConfiguration, /\[assets\]\s+directory\s*=\s*"\.\/public"/);
 });
 
 test("worker delegates OpenAPI requests to their canonical asset paths", async () => {

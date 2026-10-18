@@ -27,7 +27,7 @@ Yokaiba is intended for game and integration developers. Its hosted REST API and
 
 ## Try the hosted API
 
-The [interactive API reference](https://yokaiba.scheimann.workers.dev/docs) and [OpenAPI contract](https://yokaiba.scheimann.workers.dev/openapi/v1.yaml) list the complete REST interface.
+The [API documentation](https://yokaiba.scheimann.workers.dev/docs) and [OpenAPI contract](https://yokaiba.scheimann.workers.dev/openapi/v1.yaml) list the REST interface.
 
 Generate a reproducible puzzle with a template ID and seed:
 
@@ -56,7 +56,7 @@ This first result does not require secrets. Local answer verification and hints 
 
 ## Integrate with Yokaiba
 
-- **REST:** Start with the [API usage guide](docs/api-usage.md), [interactive Swagger UI](https://yokaiba.scheimann.workers.dev/docs), or [full OpenAPI contract](https://yokaiba.scheimann.workers.dev/openapi/v1.yaml). The [ChatGPT Actions OpenAPI contract](https://yokaiba.scheimann.workers.dev/openapi/chatgpt-actions-v1.yaml) is a compact alternative.
+- **REST:** Start with the [API usage guide](docs/api-usage.md), [API documentation](https://yokaiba.scheimann.workers.dev/docs), or [full OpenAPI contract](https://yokaiba.scheimann.workers.dev/openapi/v1.yaml). The [ChatGPT Actions OpenAPI contract](https://yokaiba.scheimann.workers.dev/openapi/chatgpt-actions-v1.yaml) is a compact alternative.
 - **MCP:** Connect to `https://yokaiba.scheimann.workers.dev/mcp`. The endpoint uses Streamable HTTP and requires a configured API key and hostname allowlist. Setup and client configuration are in the [operations and deployment guide](docs/operations-and-deployment.md#mcp-and-deployment).
 - **Difficulty:** Read how logical, semantic, and observed difficulty are measured in [difficulty and calibration](docs/difficulty-and-calibration.md).
 
