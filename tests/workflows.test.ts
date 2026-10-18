@@ -351,9 +351,22 @@ test("Dependabot updates GitHub Actions and npm dependencies weekly", () => {
   }
 });
 
+test("external README links run weekly and manually outside pull-request validation", () => {
+  const workflow = readWorkflow("docs-links.yml");
+  const job = getJob(workflow, "links");
+
+  assert.equal(workflow.on.pull_request, undefined);
+  assert.ok(Array.isArray(workflow.on.schedule) && workflow.on.schedule.some((entry: Workflow) => entry.cron));
+  assert.ok(Object.hasOwn(workflow.on, "workflow_dispatch"));
+  assert.match(job["runs-on"], /^ubuntu-\d+\.\d+$/);
+  assert.ok(job.steps.some((step: Workflow) => step.run === "npm ci"));
+  assert.ok(job.steps.some((step: Workflow) => step.run === "npm run docs:links"));
+  assert.ok(packageJson.scripts?.["docs:links"]);
+});
+
 // Runner policy: docs/operations-and-deployment.md#github-workflow-policy.
 test("GitHub workflow jobs use a versioned Ubuntu runner instead of a floating label", () => {
-  for (const name of ["validate.yml", "validate-reusable.yml", "deploy-cloudflare.yml", "kaseki-docs.yaml", "kaseki-dry.yaml"]) {
+  for (const name of ["validate.yml", "validate-reusable.yml", "deploy-cloudflare.yml", "kaseki-docs.yaml", "kaseki-dry.yaml", "docs-links.yml"]) {
     const workflow = readWorkflow(name);
     for (const [jobName, job] of Object.entries(workflow.jobs as Record<string, Workflow>)) {
       if (job.uses) continue;

@@ -36,6 +36,15 @@ npm run build
 
 `npm run docs:check` validates local Markdown links and heading anchors, checks referenced `npm run` scripts, and runs Markdown lint. `npm test` runs the Node test suite. The repository also provides `npm run audit:difficulty` and `npm run audit:difficulty:targeted` for deterministic generation audits; see [difficulty and calibration](difficulty-and-calibration.md) before interpreting their results.
 
+The weekly external-link workflow checks the README's linked destinations with `npm run docs:links`. It also supports manual runs; external checks are kept separate from pull-request validation because third-party sites can be temporarily unavailable.
+
+## Architecture
+
+- `worker/index.ts` is the Cloudflare Worker entry point. It dispatches REST and MCP requests, applies Worker-level controls, and serves the API docs and OpenAPI assets.
+- `src/api/` contains REST routing and request handlers. `src/mcp/` registers the Streamable HTTP MCP tools.
+- `src/generation/` builds deterministic puzzles and difficulty evidence. `src/constraints/` and `src/domain/` provide the solver and puzzle model used by generation and answer actions.
+- `public/openapi/` contains the REST contracts served through the Worker asset binding.
+
 ## Solver internals
 
 Generation and quality evaluation depend on the internal `PuzzleSolver` contract. The built-in exhaustive solver supports grids with 2–5 rows. Any internal alternative must preserve clue semantics, solution-limit behavior, deterministic solution ordering, and a stable version; generated puzzles record the solver version for replay. These modules are not a published SDK API.

@@ -115,7 +115,7 @@ const docsDocument = `<!doctype html>
       <a href="/openapi/v1.yaml">REST OpenAPI specification</a>
       <a href="/openapi/chatgpt-actions-v1.yaml">ChatGPT Actions specification</a>
       <a href="https://github.com/CyanAutomation/yokaiba/blob/main/docs/api-usage.md">REST usage guide</a>
-      <a href="https://github.com/CyanAutomation/yokaiba#mcp-and-deployment">MCP setup</a>
+      <a href="https://github.com/CyanAutomation/yokaiba/blob/main/docs/operations-and-deployment.md#mcp-and-deployment">MCP setup</a>
     </nav>
   </header>
 
@@ -145,7 +145,7 @@ const docsDocument = `<!doctype html>
 
     <section aria-labelledby="mcp-title">
       <h2 id="mcp-title">MCP</h2>
-      <p>Connect to <code>https://yokaiba.scheimann.workers.dev/mcp</code> using Streamable HTTP. MCP requires an API key and an allowed hostname. See the <a href="https://github.com/CyanAutomation/yokaiba#mcp-and-deployment">MCP setup guide</a> for client configuration and available tools.</p>
+      <p>Connect to <code>https://yokaiba.scheimann.workers.dev/mcp</code> using Streamable HTTP. MCP requires an API key and an allowed hostname. See the <a href="https://github.com/CyanAutomation/yokaiba/blob/main/docs/operations-and-deployment.md#mcp-and-deployment">MCP setup guide</a> for client configuration and available tools.</p>
     </section>
   </main>
 </body>
