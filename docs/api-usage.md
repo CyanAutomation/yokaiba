@@ -2,7 +2,7 @@
 
 ## REST API
 
-The API root redirects to the interactive [Swagger UI](https://yokaiba.scheimann.workers.dev/docs), and the complete contract is published at [`/openapi/v1.yaml`](https://yokaiba.scheimann.workers.dev/openapi/v1.yaml). A compact, ChatGPT Actions-oriented REST contract is also published at [`/openapi/chatgpt-actions-v1.yaml`](https://yokaiba.scheimann.workers.dev/openapi/chatgpt-actions-v1.yaml). The repository sources are [public/openapi/v1.yaml](../public/openapi/v1.yaml) and [public/openapi/chatgpt-actions-v1.yaml](../public/openapi/chatgpt-actions-v1.yaml). Swagger UI is bundled from the pinned `swagger-ui-dist` development dependency and served from this Worker, so the documentation page has no runtime CDN dependency. Run `npm run vendor:swagger-ui` after updating that dependency.
+The API root redirects to the [API documentation page](https://yokaiba.scheimann.workers.dev/docs), and the complete contract is published at [`/openapi/v1.yaml`](https://yokaiba.scheimann.workers.dev/openapi/v1.yaml). A compact, ChatGPT Actions-oriented REST contract is also published at [`/openapi/chatgpt-actions-v1.yaml`](https://yokaiba.scheimann.workers.dev/openapi/chatgpt-actions-v1.yaml). The repository sources are [public/openapi/v1.yaml](../public/openapi/v1.yaml) and [public/openapi/chatgpt-actions-v1.yaml](../public/openapi/chatgpt-actions-v1.yaml). The `/docs` page is plain HTML and links to both machine-readable OpenAPI contracts.
 
 - `GET /healthz`
 - `GET /readyz`
