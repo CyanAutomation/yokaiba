@@ -14,7 +14,9 @@ JEV audit checkpoints are written before generation begins, after each distribut
 
 The audit review thresholds are centralized provisional leads, not validated cutoffs or CI gates. Evaluate them against labelled examples before relying on them for release decisions. Use `OPENROUTER_API_KEY` only in the invoking environment; it is not read from project files or written into reports.
 
-When `difficultyLevel` is supplied, generation searches deterministic clue-order strategies for that exact seed. It never substitutes another seed by default: if no strategy reaches the requested band, the API returns `422` with `difficulty_unavailable` and `availableDifficultyLevels`. Set `allowSeedFallback=true` to opt into a bounded deterministic search of derived seeds; the response retains `requestedSeed`, returns the replayable selected `seed`, and includes `seedFallbackAttempt`. All targeted curriculum levels reject clue sets that the bounded no-guess model cannot complete.
+### Targeted seed fallback
+
+When `difficultyLevel` is supplied, generation searches deterministic clue-order strategies for that exact seed. It never substitutes another seed by default: if no strategy reaches the requested band, the API returns `422` with `difficulty_unavailable` and `availableDifficultyLevels`. Set `allowSeedFallback=true` to opt into a bounded deterministic search of derived seeds; the response retains `requestedSeed`, returns the replayable selected `seed`, and includes `seedFallbackAttempt`. The fallback search tries the requested seed followed by at most the configured number of derived seeds. All targeted curriculum levels reject clue sets that the bounded no-guess model cannot complete.
 
 For a production browser client, handle validation, unavailable-difficulty, rate-limit, and conditional-cache responses explicitly:
 
@@ -46,6 +48,8 @@ npm run audit:difficulty:targeted -- 1000
 ```
 
 The distribution report includes per-level counts, clue-count range, and completion of the bounded no-guess trace for every template. The targeted report exercises every advertised level through the same deterministic fallback path used by the course, reporting fallback use and no-guess completion per level. Treat both as regression gates, not evidence of player difficulty. For player validation, send anonymized `puzzle_started`, `puzzle_completed`, `hint_used`, `mistake`, and `puzzle_abandoned` outcomes to `POST /v1/events` with `schemaVersion: 1`, template, difficulty, clue-count, hint/mistake totals, elapsed time, and optional `smartMarkingEnabled`. The version field is optional for older clients; omitted versions are stored as legacy version 0. Version 1 requires `hintsUsed` and `mistakes` on every event, plus `elapsedMs` for completions and abandonment. Never send a seed, player identifier, or answer cells. Segment calibration by smart-marking use: it is an advanced-player efficiency feature, not a hint or assist. Recalibrate template-specific thresholds on a held-out player sample, version the model, and retain historic metadata with every outcome.
+
+A standalone targeted audit also accepts a template without `difficultyCalibration` metadata. For those templates, the audit accepts requested levels 1–12; pass `sampleSize` explicitly when you want a smaller run.
 
 They also include a **signed** `puzzleToken` when `PUZZLE_TOKEN_SECRET` is configured. New tokens expire after seven days by default; `PUZZLE_TOKEN_TTL_SECONDS` can set a lifetime from one second to 30 days. The token payload is base64url-encoded, readable reproducibility metadata (including the seed), followed by an HMAC signature. It protects against tampering; it does not encrypt the seed, hide the puzzle solution from a determined caller, or make public deterministic puzzles cheat-proof. Keep it with the puzzle in the browser and submit only the player’s completed non-base category assignments:
 

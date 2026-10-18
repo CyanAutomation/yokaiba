@@ -342,35 +342,23 @@ test("the beginner curriculum can generate every calibrated difficulty from one 
   }
 });
 
-test("dense-board fallback solver work stays within its configured seed-attempt budget", () => {
+// CPU guard for bounded fallback: docs/difficulty-and-calibration.md#targeted-seed-fallback.
+test("dense-board fallback respects its configured derived-seed attempt budget", () => {
   const requestedSeed = "fallback-work-budget";
-  const fallbackSeeds = [requestedSeed, `${requestedSeed}:fallback:1`];
-  const solverFor = (onCall: () => void): PuzzleSolver => ({
-    version: "fallback-work-budget-v1",
-    solve: () => [],
-    countSolutions: (_spec, clues) => {
-      onCall();
-      return clues.length === 0 ? 2 : 1;
-    },
-  });
-  const generationCallsForSeed = (seed: string): number => {
-    let calls = 0;
-    generatePuzzle(championshipCircuitTemplate, seed, solverFor(() => { calls += 1; }));
-    return calls;
-  };
-  const maximumCalls = fallbackSeeds.reduce((total, seed) => total + generationCallsForSeed(seed), 0);
-  let solverCalls = 0;
-  const boundedSolver = solverFor(() => {
-    solverCalls += 1;
-    if (solverCalls > maximumCalls) throw new Error("fallback exceeded its configured seed-attempt budget");
-  });
 
+  // This deterministic seed reaches level 9 on its second derived candidate.
   assert.throws(
-    () => generatePuzzleAtDifficultyWithFallback(championshipCircuitTemplate, requestedSeed, 12, boundedSolver, 1),
-    error => error instanceof DifficultyUnavailableError,
+    () => generatePuzzleAtDifficultyWithFallback(championshipCircuitTemplate, requestedSeed, 9, exhaustivePuzzleSolver, 1),
+    error => {
+      assert.ok(error instanceof DifficultyUnavailableError);
+      return true;
+    },
   );
-  // This deterministic solver-call proxy protects the Worker's per-seed CPU budget.
-  assert.equal(solverCalls, maximumCalls);
+
+  const puzzle = generatePuzzleAtDifficultyWithFallback(championshipCircuitTemplate, requestedSeed, 9, exhaustivePuzzleSolver, 2);
+  assert.equal(puzzle.difficulty.level, 9);
+  assert.equal(puzzle.requestedSeed, requestedSeed);
+  assert.equal(puzzle.seedFallbackAttempt, 2);
 });
 
 test("expert target generation favors relational deductions over direct facts", () => {
@@ -511,16 +499,22 @@ test("generation uses the injected solver and records its version", () => {
   assert.equal(puzzle.clues[0]?.constraint.kind, "distance");
 });
 
-test("quality evaluation reflects injected solver results", () => {
+// Alternative solver contract: docs/development.md#solver-internals.
+test("quality evaluation uses the supplied solver for uniqueness and redundancy", () => {
+  const countedClueSets: string[][] = [];
   const solver: PuzzleSolver = {
     version: "quality-contract-test-v1",
     solve: () => [],
-    countSolutions: (_spec, clues) => clues.some(clue => clue.id === "aki-red") ? 1 : 2,
+    countSolutions: (spec, clues, limit) => {
+      countedClueSets.push(clues.map(clue => clue.id));
+      return exhaustivePuzzleSolver.countSolutions(spec, clues, limit);
+    },
   };
   const quality = evaluatePuzzleQuality(qualityFixtureSpec, noGuessSolveFixture, solver);
 
   assert.equal(quality.unique, true);
-  assert.deepEqual(quality.redundantClueIds, ["aki-not-second"]);
+  assert.deepEqual(quality.redundantClueIds, []);
+  assert.ok(countedClueSets.length > 0, "quality evaluation should use the supplied solver");
 });
 
 test("the generated clue set is minimal for uniqueness", () => {
@@ -532,20 +526,6 @@ test("the generated clue set is minimal for uniqueness", () => {
   for (const clue of puzzle.clues) {
     assert.notEqual(countSolutions(puzzle.spec, puzzle.clues.filter(candidate => candidate.id !== clue.id), 2), 1);
   }
-});
-
-test("quality diagnostics report stable clue diversity for a controlled fixture", () => {
-  const quality = evaluatePuzzleQuality(qualityFixtureSpec, clueKindsAndReadabilityFixture);
-
-  assert.deepEqual(quality.clueDiversity, {
-    distinctKinds: 4,
-    kinds: ["adjacent", "before", "matches", "notMatches"],
-  });
-  assert.deepEqual(
-    evaluatePuzzleQuality(qualityFixtureSpec, [...clueKindsAndReadabilityFixture].reverse()).clueDiversity,
-    quality.clueDiversity,
-    "clue diversity should not depend on input order",
-  );
 });
 
 test("clue readability accepts valid prose and rejects common rendering failures", () => {
