@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { mkdtemp, rm, writeFile } from "node:fs/promises";
+import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import test from "node:test";
@@ -87,18 +87,6 @@ test("audit usage aggregation adds provider totals and preserves missing values"
   });
   accumulateResponseUsage(checkpoint, { answers: {}, usage: {} });
   assert.deepEqual(checkpoint, { resolvedModel: "resolved-model", totalCost: 1.5, totalInputTokens: 6, totalOutputTokens: 9 });
-});
-
-test("completed audit checkpoint removal tolerates a missing path", async () => {
-  const directory = await mkdtemp(join(tmpdir(), "jev-remove-checkpoint-"));
-  const path = join(directory, "checkpoint.json");
-  try {
-    await writeFile(path, "{}");
-    await removeCompletedAuditCheckpoint(path);
-    await assert.doesNotReject(() => removeCompletedAuditCheckpoint(path));
-  } finally {
-    await rm(directory, { recursive: true, force: true });
-  }
 });
 
 const configuration: JevRunConfiguration = {
@@ -319,7 +307,7 @@ test("audit Markdown reports targeted delivery, fallbacks, confidence, and incom
   assert.match(buildAuditMarkdown(legacyReport), /p50 n\/a, p95 n\/a, max 3/);
 });
 
-test("audit checkpoints round-trip atomically and reject mismatched run settings", async () => {
+test("audit checkpoints round-trip, migrate older versions, and remove completed files", async () => {
   const directory = await mkdtemp(join(tmpdir(), "jev-audit-test-"));
   const checkpointPath = join(directory, "audit.checkpoint.json");
   const checkpoint: AuditCheckpoint = {
@@ -378,6 +366,10 @@ test("audit checkpoints round-trip atomically and reject mismatched run settings
       unavailable: 0,
       seedPrefix: "legacy-seed",
     }]);
+
+    await removeCompletedAuditCheckpoint(checkpointPath);
+    await assert.rejects(readFile(checkpointPath), { code: "ENOENT" });
+    await assert.doesNotReject(() => removeCompletedAuditCheckpoint(checkpointPath));
   } finally {
     await rm(directory, { recursive: true, force: true });
   }

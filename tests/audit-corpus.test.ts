@@ -83,12 +83,22 @@ test("targeted difficulty audits reject levels outside the template's advertised
   );
 });
 
-test("targeted audits support templates without calibration metadata", () => {
+// Standalone targeted-audit contract: docs/difficulty-and-calibration.md#difficulty-audit-and-calibration.
+test("targeted audits default to levels 1 through 12 without calibration metadata", () => {
   const templateWithoutCalibration = { ...tournamentOrderTemplate, metadata: undefined };
   const result = auditTargetedDifficultyLevel(templateWithoutCalibration, 1, { sampleSize: 1 });
+  const maximumLevelResult = auditTargetedDifficultyLevel(templateWithoutCalibration, 12, { sampleSize: 1 });
 
   assert.equal(result.level.requestedDifficultyLevel, 1);
   assert.equal(result.level.generated, 1);
+  assert.equal(maximumLevelResult.level.requestedDifficultyLevel, 12);
+  assert.equal(maximumLevelResult.level.generated, 1);
+  assert.equal(result.modelVersion, "yokaiba-difficulty-v4");
+  assert.equal(result.level.assessedLevelCounts[0], 1);
+  assert.equal(result.level.assessedLevelCounts.reduce((total, count) => total + count, 0), 1);
+  assert.equal(result.level.humanTrace.complete + result.level.humanTrace.incomplete, 1);
+  assert.deepEqual(result.level.fallback, { used: 0, maximumAttempt: 0, attempts: { p50: 0, p95: 0 } });
+  assert.ok(result.level.clues.minimum > 0);
 });
 
 test("production distribution audit follows the progressive no-guess path", () => {
