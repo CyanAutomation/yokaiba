@@ -24,6 +24,20 @@ test("deployment output parser selects the last direct Worker deployment", () =>
   assert.equal(parseWranglerDeploymentUrl(output), "https://yokaiba-new.workers.dev");
 });
 
+test("deployment output parser skips blank lines between Wrangler records", () => {
+  const output = [
+    JSON.stringify({ type: "upload" }),
+    "",
+    JSON.stringify({
+      type: "deploy",
+      worker_name: "yokaiba",
+      targets: ["https://yokaiba.workers.dev"],
+    }),
+  ].join("\n");
+
+  assert.equal(parseWranglerDeploymentUrl(output), "https://yokaiba.workers.dev");
+});
+
 test("deployment output parser rejects missing deployment records", () => {
   assert.throws(() => parseWranglerDeploymentUrl(JSON.stringify({ type: "upload" })), /did not write machine-readable deployment information/);
 });

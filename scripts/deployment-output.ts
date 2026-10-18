@@ -18,7 +18,7 @@ function isDirectWorkerUrl(target: unknown): target is string {
 export function parseWranglerDeploymentUrl(output: string): string {
   let records: unknown[];
   try {
-    records = output.trim().split(/\r?\n/).map(line => JSON.parse(line) as unknown);
+    records = output.trim().split(/\r?\n/).filter(line => line.trim() !== "").map(line => JSON.parse(line) as unknown);
   } catch (error) {
     throw new Error("Wrangler wrote invalid machine-readable deployment information", { cause: error });
   }
