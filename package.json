@@ -13,6 +13,10 @@
     "audit:difficulty": "tsx scripts/audit-difficulty.mts",
     "audit:difficulty:targeted": "tsx scripts/audit-targeted-difficulty.mts",
     "audit:jev": "tsx scripts/audit-jev.mts",
+    "deployment:record-output": "tsx scripts/record-deployment-output.mts",
+    "deployment:health": "tsx scripts/health-deployment.mts",
+    "deployment:smoke": "tsx scripts/smoke-deployment.mts",
+    "deployment:contract": "tsx scripts/contract-deployment.mts",
     "deploy": "wrangler deploy"
   },
   "dependencies": {

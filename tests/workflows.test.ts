@@ -290,6 +290,27 @@ test("Cloudflare deployment uses shared validation and quotes shell inputs", () 
   assert.doesNotMatch(deployStep.run, /--var BUILD_VERSION:\$\{\{/);
 });
 
+test("Cloudflare deployment runs typed scripts for version and deployment checks", () => {
+  const deploy = readWorkflow("deploy-cloudflare.yml");
+  const versionStep = getRunStep(deploy, "deploy", "Read package version");
+  const smokeStep = getRunStep(deploy, "deploy", "Smoke-test deployed public API");
+
+  assert.match(versionStep, /npm pkg get version/);
+  assert.doesNotMatch(versionStep, /\bnode\b/);
+  assert.equal(getRunStep(deploy, "deploy", "Probe direct Worker deployment"), "npm run deployment:health");
+  assert.match(smokeStep, /if ! npm run deployment:smoke; then/);
+  assert.match(smokeStep, /exit 1/);
+  assert.equal(getRunStep(deploy, "deploy", "Contract-test deployed public API"), "npm run deployment:contract");
+
+  const deployScript = getRunStep(deploy, "deploy", "Deploy Worker");
+  assert.match(deployScript, /npm run deployment:record-output/);
+  assert.doesNotMatch(deployScript, /node\s*<<|require\(/);
+
+  for (const name of ["deployment:record-output", "deployment:health", "deployment:smoke", "deployment:contract"]) {
+    assert.ok(packageJson.scripts?.[name], `package.json must define ${name}`);
+  }
+});
+
 test("Kaseki workflows scope the token to gateway, submit, and poll steps", () => {
   const docs = readWorkflow("kaseki-docs.yaml");
   const dry = readWorkflow("kaseki-dry.yaml");
