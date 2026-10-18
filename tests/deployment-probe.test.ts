@@ -1,9 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-// @ts-expect-error The deployment scripts are intentionally plain JavaScript entry points.
 import { waitForExpectedDeployment } from "../scripts/deployment-probe.mjs";
-// @ts-expect-error The deployment configuration helper is a plain JavaScript entry point.
 import { readDeploymentConfig } from "../scripts/deployment-config.mjs";
 
 const expected = { expectedBuildVersion: "1.2.3", expectedBuildSha: "abc123" };

@@ -1,5 +1,14 @@
+export interface DeploymentConfig {
+  baseUrl: URL;
+  expectedBuildVersion: string;
+  expectedBuildSha: string;
+}
+
 /** Read and validate the deployment metadata shared by post-deploy checks. */
-export function readDeploymentConfig(env, baseUrlDescription = "canonical deployed Worker origin") {
+export function readDeploymentConfig(
+  env: NodeJS.ProcessEnv,
+  baseUrlDescription = "canonical deployed Worker origin",
+): DeploymentConfig {
   const rawBaseUrl = env.DEPLOYMENT_URL;
   if (!rawBaseUrl) throw new Error(`DEPLOYMENT_URL must contain the ${baseUrlDescription}`);
   const expectedBuildSha = env.EXPECTED_BUILD_SHA;
