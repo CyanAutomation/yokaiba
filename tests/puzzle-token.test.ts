@@ -151,6 +151,7 @@ test("verification rejects malformed, extra-part, tampered, and wrongly keyed to
   }
 
   const [payload, signature] = validToken.split(".");
-  assert.equal(await verifyPuzzleToken(`${payload}.${signature!.slice(0, -1)}A`, secret), undefined);
+  const tamperedSignature = `${signature!.startsWith("A") ? "B" : "A"}${signature!.slice(1)}`;
+  assert.equal(await verifyPuzzleToken(`${payload}.${tamperedSignature}`, secret), undefined);
   assert.equal(await verifyPuzzleToken(validToken, "different-secret"), undefined);
 });

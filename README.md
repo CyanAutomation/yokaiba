@@ -35,6 +35,16 @@ Generate a reproducible puzzle with a template ID and seed:
 curl -fsS 'https://yokaiba.scheimann.workers.dev/v1/puzzles/generate?templateId=tournament-order-v2&seed=first-puzzle'
 ```
 
+Current response preview for this seed:
+
+```text
+templateId: tournament-order-v2
+seed: first-puzzle
+difficulty: level 2 (Easy)
+clues: 7
+solution: not returned
+```
+
 The response includes the puzzle specification and clues, plus replay metadata. The hidden solution is not returned. Answer verification and hints require a configured `PUZZLE_TOKEN_SECRET`; see [operations and deployment](docs/operations-and-deployment.md#browser-cors-and-abuse-controls) for setup and token limitations.
 
 ## Run locally
@@ -71,7 +81,7 @@ npm test
 npm run build
 ```
 
-For larger changes, open a [GitHub issue](https://github.com/CyanAutomation/yokaiba/issues) to discuss the approach before submitting a pull request. Pull requests should include relevant tests and documentation updates. The [development guide](docs/development.md) describes the local workflow and contribution expectations.
+For a component map and request flow, see the [Architecture overview](docs/development.md#architecture). For larger changes, open a [GitHub issue](https://github.com/CyanAutomation/yokaiba/issues) to discuss the approach before submitting a pull request. Pull requests should include relevant tests and documentation updates. The [development guide](docs/development.md) describes the local workflow and contribution expectations.
 
 ## Deploy
 
