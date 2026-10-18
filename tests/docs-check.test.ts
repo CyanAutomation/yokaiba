@@ -6,6 +6,7 @@ import test from "node:test";
 import { createRestRouter } from "../src/api/router.js";
 import { tournamentOrderV2Template } from "../src/templates/tournament-order-v2.js";
 import { inspectMarkdown } from "../scripts/check-docs.js";
+import { createWorker } from "../worker/index.js";
 
 async function withFixture(run: (root: string) => Promise<void>) {
   const root = await mkdtemp(path.join(os.tmpdir(), "yokaiba-docs-check-"));
@@ -97,4 +98,58 @@ test("README generation quick starts call a registered route and produce a publi
     assert.ok(puzzle.clues.length > 0);
     assert.equal(puzzle.solution, undefined, "public generation must not expose the hidden solution");
   }
+});
+
+test("README response preview matches the deterministic generation example", async () => {
+  const readme = await readFile(new URL("../README.md", import.meta.url), "utf8");
+  const preview = /Current response preview[\s\S]*?```text\n([\s\S]*?)\n```/.exec(readme)?.[1];
+  assert.ok(preview, "expected a text preview of the generation response");
+
+  const fields = new Map(preview.split("\n").map(line => {
+    const separator = line.indexOf(":");
+    return [line.slice(0, separator), line.slice(separator + 1).trim()];
+  }));
+  const router = createRestRouter([tournamentOrderV2Template]);
+  const response = await router(new Request("https://yokaiba.test/v1/puzzles/generate?templateId=tournament-order-v2&seed=first-puzzle"));
+  assert.equal(response.status, 200);
+  const puzzle = await response.json() as {
+    templateId: string;
+    seed: string;
+    difficulty: { level: number; label: string };
+    clues: unknown[];
+    solution?: unknown;
+  };
+
+  assert.equal(fields.get("templateId"), puzzle.templateId);
+  assert.equal(fields.get("seed"), puzzle.seed);
+  assert.equal(fields.get("difficulty"), `level ${puzzle.difficulty.level} (${puzzle.difficulty.label})`);
+  assert.equal(fields.get("clues"), String(puzzle.clues.length));
+  assert.equal(fields.get("solution"), "not returned");
+  assert.equal(puzzle.solution, undefined);
+});
+
+test("README links contributors to the documented architecture overview", async () => {
+  const [readme, guide] = await Promise.all([
+    readFile(new URL("../README.md", import.meta.url), "utf8"),
+    readFile(new URL("../docs/development.md", import.meta.url), "utf8"),
+  ]);
+
+  assert.match(readme, /\[Architecture overview\]\(docs\/development\.md#architecture\)/);
+  assert.match(guide, /^## Architecture$/m);
+  assert.match(guide, /`worker\/index\.ts`/);
+  assert.match(guide, /`src\/api\/`/);
+  assert.match(guide, /`src\/mcp\/`/);
+  assert.match(guide, /`src\/generation\/`/);
+  assert.match(guide, /`src\/constraints\/`/);
+});
+
+test("hosted API docs point both MCP setup links at the operations guide", async () => {
+  const worker = createWorker();
+  const response = await worker.fetch(new Request("https://yokaiba.test/docs"), {}, {} as ExecutionContext);
+  assert.equal(response.status, 200);
+  const html = await response.text();
+  const setupGuide = "https://github.com/CyanAutomation/yokaiba/blob/main/docs/operations-and-deployment.md#mcp-and-deployment";
+
+  assert.equal(html.split(setupGuide).length - 1, 2);
+  assert.doesNotMatch(html, /github\.com\/CyanAutomation\/yokaiba#mcp-and-deployment/);
 });
