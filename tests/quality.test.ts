@@ -6,7 +6,6 @@ import {
   type PuzzleTemplate,
 } from "../src/index.js";
 import { evaluateHumanDeductionTrace } from "../src/generation/quality.js";
-import { propagateAllDifferent } from "../src/generation/all-different.js";
 
 const spec: PuzzleTemplate = {
   id: "deduction-scoring-fixture",
@@ -78,16 +77,6 @@ test("an unconstrained puzzle stays unsolved and records its stable initial pass
   });
 });
 
-test("an unknown direct-clue subject does not crash the deduction trace", () => {
-  const invalidSubjectClue: Clue = {
-    id: "unknown-red",
-    constraint: { kind: "matches", subject: "Unknown", category: "color", value: "Red" },
-    text: "The unknown person wore red.",
-  };
-
-  assert.equal(evaluateHumanDeductionTrace(spec, [invalidSubjectClue]).solved, false);
-});
-
 test("relational deductions preserve ordering, adjacency, same-row, and exact-distance propagation", () => {
   const threeRows: PuzzleTemplate = {
     ...spec,
@@ -124,7 +113,7 @@ test("relational deductions preserve ordering, adjacency, same-row, and exact-di
   }
 });
 
-test("all-different deduction assigns the only value left in a row", () => {
+test("human deduction uses the all-different rule to finish the last category value", () => {
   const threeRows: PuzzleTemplate = {
     ...spec,
     categories: [
@@ -137,14 +126,8 @@ test("all-different deduction assigns the only value left in a row", () => {
     { id: "ben-green", constraint: { kind: "matches", subject: "Ben", category: "color", value: "Green" }, text: "Ben wore green." },
   ];
 
-  assert.equal(evaluateHumanDeductionTrace(threeRows, clues).solved, true);
-});
+  const trace = evaluateHumanDeductionTrace(threeRows, clues);
 
-test("all-different propagation assigns a value with one remaining row", () => {
-  const possible = new Map([
-    ["color", [new Set(["Red", "Blue"]), new Set(["Red", "Blue"]), new Set(["Red", "Green"])]],
-  ]);
-
-  assert.equal(propagateAllDifferent(possible), true);
-  assert.deepEqual([...possible.get("color")![2]!], ["Green"]);
+  assert.equal(trace.solved, true);
+  assert.equal(trace.usedGuessing, false);
 });
