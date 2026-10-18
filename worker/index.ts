@@ -71,7 +71,7 @@ interface Env {
   MCP_PUZZLE_ACTION_RATE_LIMITER?: { limit(options: { key: string }): Promise<{ success: boolean }> };
   /** Cloudflare Analytics Engine dataset for anonymous puzzle outcome events. */
   PUZZLE_OUTCOMES?: AnalyticsEngineDataset;
-  /** Static public assets, including Swagger UI and the canonical OpenAPI document. */
+  /** Static public assets, including the canonical OpenAPI documents. */
   ASSETS?: { fetch(request: Request): Promise<Response> };
 }
 
@@ -81,13 +81,75 @@ const templates = [tournamentOrderV2Template, tournamentOrderTemplate, openDivis
 
 const encoder = new TextEncoder();
 
-const swaggerUiDocument = `<!doctype html>
-<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Yokaiba API reference</title><link rel="stylesheet" href="/swagger-ui/swagger-ui.css"></head>
-<body><header><h1>Yokaiba API</h1><nav aria-label="API integration options"><a href="/openapi/v1.yaml">REST OpenAPI</a> · <a href="/openapi/chatgpt-actions-v1.yaml">ChatGPT Actions OpenAPI</a> · <a href="https://github.com/CyanAutomation/yokaiba#mcp-and-deployment">MCP setup and tool guide</a> · MCP endpoint: <code>/mcp</code></nav></header><main id="swagger-ui" aria-label="Yokaiba REST API reference"></main>
-<script src="/swagger-ui/swagger-ui-bundle.js"></script>
-<script>window.ui = SwaggerUIBundle({url:"/openapi/v1.yaml",dom_id:"#swagger-ui",deepLinking:true,presets:[SwaggerUIBundle.presets.apis],layout:"BaseLayout"});</script>
-</body></html>`;
+const docsDocument = `<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="description" content="REST API and MCP documentation for Yokaiba." />
+  <title>Yokaiba API documentation</title>
+  <style>
+    :root { color-scheme: light dark; font: 16px/1.6 system-ui, sans-serif; }
+    body { max-width: 960px; margin: 0 auto; padding: 2rem 1.25rem 4rem; }
+    header { margin-bottom: 2.5rem; }
+    h1, h2 { line-height: 1.2; }
+    h1 { margin-bottom: .35rem; }
+    p { max-width: 72ch; }
+    a { color: #1674d1; }
+    nav, .links { display: flex; flex-wrap: wrap; gap: .6rem 1.25rem; }
+    .links { margin: 1.25rem 0 2rem; }
+    table { width: 100%; border-collapse: collapse; margin: 1rem 0 2rem; }
+    th, td { text-align: left; vertical-align: top; padding: .7rem; border-bottom: 1px solid #8886; }
+    th { font-size: .9rem; }
+    code { font: .92em ui-monospace, monospace; overflow-wrap: anywhere; }
+    .method { display: inline-block; min-width: 3.3em; font-weight: 700; }
+    .note { padding: .8rem 1rem; border-left: 3px solid #1674d1; background: #8881; }
+    @media (max-width: 600px) { body { padding: 1.25rem .8rem 3rem; } th, td { padding: .55rem .35rem; } }
+  </style>
+</head>
+<body>
+  <header>
+    <h1>Yokaiba API</h1>
+    <p>Build judo logic-grid puzzle experiences with the REST API, or connect an MCP client to discover and use Yokaiba tools.</p>
+    <nav aria-label="API specifications and guides">
+      <a href="/openapi/v1.yaml">REST OpenAPI specification</a>
+      <a href="/openapi/chatgpt-actions-v1.yaml">ChatGPT Actions specification</a>
+      <a href="https://github.com/CyanAutomation/yokaiba/blob/main/docs/api-usage.md">REST usage guide</a>
+      <a href="https://github.com/CyanAutomation/yokaiba#mcp-and-deployment">MCP setup</a>
+    </nav>
+  </header>
+
+  <main>
+    <section aria-labelledby="rest-title">
+      <h2 id="rest-title">REST API</h2>
+      <p>REST endpoints return JSON. Puzzle generation and public catalogue endpoints are available without authentication. Answer verification and hints require a configured <code>PUZZLE_TOKEN_SECRET</code> and the token returned with a generated puzzle.</p>
+      <table>
+        <thead><tr><th scope="col">Method</th><th scope="col">Endpoint</th><th scope="col">Description</th></tr></thead>
+        <tbody>
+          <tr><td><span class="method">GET</span></td><td><a href="/healthz"><code>/healthz</code></a></td><td>Check that the service is responding.</td></tr>
+          <tr><td><span class="method">GET</span></td><td><a href="/readyz"><code>/readyz</code></a></td><td>Check service readiness and configured providers.</td></tr>
+          <tr><td><span class="method">GET</span></td><td><a href="/v1/scenarios"><code>/v1/scenarios</code></a></td><td>List available puzzle scenarios and board categories.</td></tr>
+          <tr><td><span class="method">GET</span></td><td><a href="/v1/capabilities"><code>/v1/capabilities</code></a></td><td>Discover supported features and difficulty ranges.</td></tr>
+          <tr><td><span class="method">GET</span></td><td><a href="/v1/version"><code>/v1/version</code></a></td><td>Get service, generator, and solver versions.</td></tr>
+          <tr><td><span class="method">GET · POST</span></td><td><code>/v1/puzzles/generate</code></td><td>Generate a puzzle. GET supports deterministic, cacheable requests; POST supports JSON bodies.</td></tr>
+          <tr><td><span class="method">POST</span></td><td><code>/v1/puzzles/verify</code></td><td>Verify submitted answers using a puzzle token.</td></tr>
+          <tr><td><span class="method">POST</span></td><td><code>/v1/puzzles/hint</code></td><td>Request a bounded hint using a puzzle token.</td></tr>
+          <tr><td><span class="method">POST</span></td><td><code>/v1/events</code></td><td>Record an anonymous puzzle outcome for calibration.</td></tr>
+        </tbody>
+      </table>
+      <h3>Generate a puzzle</h3>
+      <p>Use a template ID from <code>/v1/scenarios</code> and a seed to make a reproducible request:</p>
+      <pre><code>curl 'https://yokaiba.scheimann.workers.dev/v1/puzzles/generate?templateId=tournament-order-v2&amp;seed=first-puzzle'</code></pre>
+      <p class="note">The generated response contains the puzzle and a token for later verification or hints. It does not include the hidden solution.</p>
+    </section>
+
+    <section aria-labelledby="mcp-title">
+      <h2 id="mcp-title">MCP</h2>
+      <p>Connect to <code>https://yokaiba.scheimann.workers.dev/mcp</code> using Streamable HTTP. MCP requires an API key and an allowed hostname. See the <a href="https://github.com/CyanAutomation/yokaiba#mcp-and-deployment">MCP setup guide</a> for client configuration and available tools.</p>
+    </section>
+  </main>
+</body>
+</html>`;
 
 function constantTimeEqual(expected: string, candidate: string): boolean {
   const expectedBytes = encoder.encode(expected);
@@ -186,12 +248,12 @@ function observeDifficultyGeneration(response: Response, ctx: ExecutionContext):
   if (typeof ctx.waitUntil === "function") ctx.waitUntil(task); else void task;
 }
 
-function swaggerUiResponse(): Response {
-  return new Response(swaggerUiDocument, {
+function docsResponse(): Response {
+  return new Response(docsDocument, {
     headers: {
       "content-type": "text/html; charset=utf-8",
       "cache-control": "no-store",
-      "content-security-policy": "default-src 'none'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src 'self'; base-uri 'none'; frame-ancestors 'none'",
+      "content-security-policy": "default-src 'none'; style-src 'unsafe-inline'; base-uri 'none'; frame-ancestors 'none'",
       "referrer-policy": "no-referrer",
       "x-content-type-options": "nosniff",
     },
@@ -340,7 +402,7 @@ async function staticRoute(path: string, request: Request, env: Env, build: Retu
   if (path === "/") response = new Response(null, { status: 302, headers: { location: new URL("/docs", request.url).toString(), "cache-control": "no-store" } });
   else if (path === "/healthz") response = json({ status: "ok", build });
   else if (path === "/readyz") response = await readinessResponse(env, build, failures);
-  else if (path === "/docs" || path === "/docs/") response = swaggerUiResponse();
+  else if (path === "/docs" || path === "/docs/") response = docsResponse();
   else response = await staticAsset(request, env, path, "application/yaml; charset=utf-8");
   if (request.method === "HEAD") return new Response(null, { status: response.status, statusText: response.statusText, headers: response.headers });
   return response;
