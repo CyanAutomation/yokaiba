@@ -62,12 +62,33 @@ jobs:
             sed -i "s/REPLACE_WITH_D1_DATABASE_ID/$PUZZLE_FEEDBACK_DATABASE_ID/" wrangler.toml
           else
             awk '
-              BEGIN { skip = 0 }
-              /^\[\[d1_databases\]\]$/ { skip = 1; next }
-              skip && /^$/ { skip = 0; next }
-              !skip { print }
-            ' wrangler.toml > wrangler.toml.tmp
-            mv wrangler.toml.tmp wrangler.toml
+              function flush_block() {
+                if (in_d1 && !drop_block) printf "%s", block
+                block = ""
+                in_d1 = 0
+                drop_block = 0
+              }
+              /^\[\[d1_databases\]\]$/ {
+                flush_block()
+                in_d1 = 1
+                block = $0 ORS
+                next
+              }
+              (/^\[[[:alnum:]_.-]+\]$/ || /^\[\[[[:alnum:]_.-]+\]\]$/) && $0 !~ /^\[\[d1_databases\]\]$/ {
+                flush_block()
+                print
+                next
+              }
+              {
+                if (in_d1) {
+                  if ($0 ~ /^binding = "PUZZLE_FEEDBACK"$/) drop_block = 1
+                  block = block $0 ORS
+                } else {
+                  print
+                }
+              }
+              END { flush_block() }
+            ' wrangler.toml > wrangler.toml.tmp && mv wrangler.toml.tmp wrangler.toml
           fi
 
       - name: Deploy Worker
