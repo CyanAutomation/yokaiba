@@ -30,13 +30,14 @@ function distanceClue(overrides: Partial<AuditedClue> = {}): AuditedClue {
   };
 }
 
-test("distance wording pairs preserve the saved v5 clue and reproduce the prior places-apart text", () => {
-  const source = distanceClue();
+test("distance wording pairs preserve saved v5 semantics and render both comparison variants", () => {
+  const source = distanceClue({ text: "Text saved before the current wording was rendered." });
   const pair = buildDistancePhrasingPairs([source], [tournamentOrderTemplate])[0]!;
 
   assert.equal(pair.seed, source.seed);
   assert.equal(pair.sourceClueId, source.clueId);
-  assert.equal(pair.betweenCount.text, source.text);
+  assert.equal(pair.betweenCount.text,
+    "Exactly one competitor finished between the -60 kg competitor and the competitor who finished 3rd in the tournament order.");
   assert.deepEqual(pair.betweenCount.structuredSemantics, pair.placesApart.structuredSemantics);
   assert.equal(pair.betweenCount.languageVersion, undefined);
   assert.equal(pair.placesApart.languageVersion, undefined);
