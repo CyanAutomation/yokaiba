@@ -22,6 +22,7 @@ export interface RestRateLimitEnvironment {
   REST_GENERATE_RATE_LIMIT?: string;
   VERIFY_RATE_LIMIT?: string;
   HINT_RATE_LIMIT?: string;
+  FEEDBACK_RATE_LIMIT?: string;
 }
 
 const RATE_WINDOW_MS = 60_000;
@@ -95,10 +96,12 @@ export async function providerRateLimitDecision(
 }
 
 export function restRateLimitConfiguration(path: string, env: RestRateLimitEnvironment): { limit: string; scope: string } {
-  const scope = path === "/v1/puzzles/verify" || path === "/v1/puzzles/hint"
+  const scope = path === "/v1/feedback" ? "feedback"
+    : path === "/v1/puzzles/verify" || path === "/v1/puzzles/hint"
     ? "protected-puzzle"
     : path === "/v1/puzzles/generate" ? "rest-generate" : "rest";
-  const limit = scope === "protected-puzzle"
+  const limit = scope === "feedback" ? env.FEEDBACK_RATE_LIMIT ?? "10"
+    : scope === "protected-puzzle"
     ? path === "/v1/puzzles/hint" ? env.HINT_RATE_LIMIT ?? "10" : env.VERIFY_RATE_LIMIT ?? "10"
     : scope === "rest-generate" ? env.REST_GENERATE_RATE_LIMIT ?? "10" : env.REST_RATE_LIMIT ?? "60";
   return { limit, scope };
@@ -113,7 +116,7 @@ export async function restRateLimitDecision(
   onVerifyProviderFailure: () => void,
 ): Promise<RateLimitDecision> {
   const path = new URL(request.url).pathname;
-  const protectedPuzzleOperation = ["/v1/puzzles/verify", "/v1/puzzles/hint"].includes(path);
+  const protectedPuzzleOperation = ["/v1/puzzles/verify", "/v1/puzzles/hint", "/v1/feedback"].includes(path);
   const puzzleGeneration = path === "/v1/puzzles/generate";
   const provider = protectedPuzzleOperation
     ? env.VERIFY_RATE_LIMITER

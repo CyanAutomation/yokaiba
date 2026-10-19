@@ -32,7 +32,7 @@ function structuredContent(result: Record<string, unknown>): Record<string, any>
 
 async function stablePuzzleTokenClaims(token: string, secret: string) {
   const claims = await verifyPuzzleToken(token, secret);
-  if (!claims || claims.version !== 3) throw new Error("expected a current-version puzzle token");
+  if (!claims || claims.version !== 4) throw new Error("expected a current-version puzzle token");
   const { issuedAt: _issuedAt, expiresAt: _expiresAt, ...stableClaims } = claims;
   return stableClaims;
 }

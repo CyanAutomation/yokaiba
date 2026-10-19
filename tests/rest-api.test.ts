@@ -147,6 +147,7 @@ test("OpenAPI documents every public REST endpoint", async () => {
     "/v1/puzzles/verify": { post: { statuses: ["200", "400", "405", "429", "503"], schema: "PuzzleVerificationResult", requestSchema: "PuzzleVerificationRequest", headers: ["Access-Control-Allow-Origin", "X-Request-Id"] } },
     "/v1/puzzles/hint": { post: { statuses: ["200", "400", "405", "429", "503"], schema: "PuzzleHintResult", requestSchema: "PuzzleHintRequest", headers: ["Access-Control-Allow-Origin", "X-Request-Id"] } },
     "/v1/events": { post: { statuses: ["202", "400", "405", "429", "503"], schema: "Accepted", requestSchema: "PuzzleOutcomeEvent", headers: ["Access-Control-Allow-Origin", "X-Request-Id"], successStatus: "202" } },
+    "/v1/feedback": { post: { statuses: ["200", "202", "400", "405", "409", "429", "503"], schema: "PuzzleFeedbackAccepted", requestSchema: "PuzzleFeedbackRequest", headers: ["Access-Control-Allow-Origin", "X-Request-Id"] } },
   } as const;
 
   assert.deepEqual(Object.keys(specification.paths), Object.keys(endpoints));
@@ -197,6 +198,7 @@ test("REST generation redacts the hidden solution and includes reproducibility m
   assert.equal(body.seed, "api-seed");
   assert.equal("solution" in body, false);
   assert.equal(typeof body.puzzleToken, "string");
+  assert.match(body.puzzleFingerprint as string, /^[a-f0-9]{64}$/);
   const difficulty = body.difficulty as { level: number; label: string; modelVersion: string; evidence: { score: number } };
   assert.ok(Array.from({ length: 12 }, (_value, index) => index + 1).includes(difficulty.level));
   assert.equal(difficulty.modelVersion, "yokaiba-difficulty-v5");
@@ -366,7 +368,7 @@ test("REST capabilities expose client-safe feature flags and catalogue metadata"
   assert.equal(response.headers.get("cache-control"), "public, max-age=300, s-maxage=300, must-revalidate");
   assert.deepEqual(await response.json(), {
     apiVersion: "v1",
-    features: { answerVerification: false, conditionalGet: true, difficultySelection: true, difficultyModelSelection: true, hints: false, outcomeTelemetry: false, seedFallback: true },
+    features: { answerVerification: false, conditionalGet: true, difficultySelection: true, difficultyModelSelection: true, feedback: false, hints: false, outcomeTelemetry: false, seedFallback: true },
     difficultyModels: {
       default: "yokaiba-difficulty-v5",
       supported: ["yokaiba-difficulty-v4", "yokaiba-difficulty-v5"],

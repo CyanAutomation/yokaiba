@@ -5,9 +5,9 @@ const MAX_GENERATION_BODY_BYTES = 16 * 1024;
 const INVALID_JSON_BODY_MESSAGE = "request body must be valid JSON";
 
 /** Read bounded bytes instead of trusting a spoofable or absent Content-Length header. */
-export async function readJsonBody(request: Request): Promise<unknown> {
+export async function readJsonBody(request: Request, maximumBytes = MAX_GENERATION_BODY_BYTES): Promise<unknown> {
   const declaredLength = Number(request.headers.get("content-length"));
-  if (Number.isFinite(declaredLength) && declaredLength > MAX_GENERATION_BODY_BYTES) throw new TypeError(INVALID_JSON_BODY_MESSAGE);
+  if (Number.isFinite(declaredLength) && declaredLength > maximumBytes) throw new TypeError(INVALID_JSON_BODY_MESSAGE);
   if (!request.body) throw new TypeError(INVALID_JSON_BODY_MESSAGE);
   const reader = request.body.getReader();
   const chunks: Uint8Array[] = [];
@@ -17,7 +17,7 @@ export async function readJsonBody(request: Request): Promise<unknown> {
       const { done, value } = await reader.read();
       if (done) break;
       bytes += value.byteLength;
-      if (bytes > MAX_GENERATION_BODY_BYTES) {
+      if (bytes > maximumBytes) {
         await reader.cancel();
         throw new TypeError(INVALID_JSON_BODY_MESSAGE);
       }
