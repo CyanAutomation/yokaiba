@@ -13,6 +13,7 @@ import {
   asRateLimitDecision,
   createRateLimiter,
   providerRateLimitDecision,
+  restRateLimitConfiguration,
   restRateLimitDecision,
   type RateLimitDecision,
   type RateLimiter,
@@ -304,10 +305,7 @@ function buildInfo(env: Env) {
 }
 
 function configuredRestLimit(path: string, env: Env): string {
-  if (path === "/v1/puzzles/generate") return env.REST_GENERATE_RATE_LIMIT ?? "10";
-  if (path === "/v1/puzzles/verify") return env.VERIFY_RATE_LIMIT ?? "10";
-  if (path === "/v1/puzzles/hint") return env.HINT_RATE_LIMIT ?? "10";
-  return env.REST_RATE_LIMIT ?? "60";
+  return restRateLimitConfiguration(path, env).limit;
 }
 
 function finalizeResponse(response: Response, request: Request, env: Env, context: RequestContext): Response {
@@ -605,9 +603,7 @@ async function dispatchWorkerRequest(
       () => { dependencies.failures.rest = true; },
       () => { dependencies.failures.restGenerate = true; },
       () => { dependencies.failures.verify = true; });
-    context.rateLimitScope = path === "/v1/puzzles/verify" || path === "/v1/puzzles/hint"
-      ? "protected-puzzle"
-      : path === "/v1/puzzles/generate" ? "rest-generate" : "rest";
+    context.rateLimitScope = restRateLimitConfiguration(path, env).scope;
     if (context.rateLimitDecision.limited) return finish(tooManyRequests());
   }
 
