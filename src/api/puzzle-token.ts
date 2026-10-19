@@ -1,5 +1,6 @@
 import type { GeneratedPuzzle } from "../domain/types.js";
 import { base64UrlEncode, isValidTokenSignature, signTokenPayload, tokenSecretList } from "./puzzle-token-crypto.js";
+import { puzzleFingerprint, selectedDifficultyModel } from "./puzzle-fingerprint.js";
 import { decodePuzzleTokenPayload, MAX_PUZZLE_TOKEN_TTL_SECONDS, type PuzzleTokenPayload, type VerifiedPuzzleTokenPayload } from "./puzzle-token-payload.js";
 export { MAX_PUZZLE_TOKEN_TTL_SECONDS } from "./puzzle-token-payload.js";
 export type { PuzzleTokenPayload, VerifiedPuzzleTokenPayload } from "./puzzle-token-payload.js";
@@ -7,6 +8,11 @@ export type { PuzzleTokenPayload, VerifiedPuzzleTokenPayload } from "./puzzle-to
 const encoder = new TextEncoder();
 export const DEFAULT_PUZZLE_TOKEN_TTL_SECONDS = 7 * 24 * 60 * 60;
 export type PuzzleTokenSecrets = string | readonly string[];
+
+export interface IssuedPuzzleToken {
+  token: string;
+  puzzleFingerprint: string;
+}
 
 export interface IssuePuzzleTokenOptions {
   /** Unix time in seconds; injectable to make expiry behavior deterministic in tests. */
@@ -19,25 +25,40 @@ export async function issuePuzzleToken(
   secret: string,
   options: IssuePuzzleTokenOptions = {},
 ): Promise<string> {
+  return (await issuePuzzleTokenWithIdentity(puzzle, secret, options)).token;
+}
+
+export async function issuePuzzleTokenWithIdentity(
+  puzzle: GeneratedPuzzle,
+  secret: string,
+  options: IssuePuzzleTokenOptions = {},
+): Promise<IssuedPuzzleToken> {
   const issuedAt = options.now ?? Math.floor(Date.now() / 1_000);
   const ttlSeconds = options.ttlSeconds ?? DEFAULT_PUZZLE_TOKEN_TTL_SECONDS;
   if (!Number.isSafeInteger(issuedAt) || issuedAt < 0) throw new TypeError("token issue time must be a non-negative integer");
   if (!Number.isSafeInteger(ttlSeconds) || ttlSeconds < 1 || ttlSeconds > MAX_PUZZLE_TOKEN_TTL_SECONDS) {
     throw new TypeError(`token lifetime must be between 1 and ${MAX_PUZZLE_TOKEN_TTL_SECONDS} seconds`);
   }
+  const fingerprint = await puzzleFingerprint(puzzle);
   const payload: PuzzleTokenPayload = {
-    version: 3,
+    version: 4,
     templateId: puzzle.templateId,
     seed: puzzle.seed,
+    requestedSeed: puzzle.requestedSeed,
     generatorVersion: puzzle.generatorVersion,
     solverVersion: puzzle.solverVersion,
+    puzzleFingerprint: fingerprint,
+    assessedDifficultyLevel: puzzle.difficulty.level,
+    difficultyModelVersion: puzzle.difficulty.modelVersion,
+    ...(puzzle.generationStrategy === undefined ? {} : { generationStrategy: puzzle.generationStrategy }),
+    ...(puzzle.seedFallbackAttempt === undefined ? {} : { seedFallbackAttempt: puzzle.seedFallbackAttempt }),
     issuedAt,
     expiresAt: issuedAt + ttlSeconds,
     ...(puzzle.requestedDifficultyLevel === undefined ? {} : { requestedDifficultyLevel: puzzle.requestedDifficultyLevel }),
-    ...(puzzle.difficultyModel === undefined ? {} : { difficultyModel: puzzle.difficultyModel }),
+    difficultyModel: selectedDifficultyModel(puzzle),
   };
   const encodedPayload = base64UrlEncode(encoder.encode(JSON.stringify(payload)));
-  return `${encodedPayload}.${base64UrlEncode(await signTokenPayload(secret, encodedPayload))}`;
+  return { token: `${encodedPayload}.${base64UrlEncode(await signTokenPayload(secret, encodedPayload))}`, puzzleFingerprint: fingerprint };
 }
 
 /** Verify with the active key and optional previous keys during a bounded rotation window. */

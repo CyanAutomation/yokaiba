@@ -3,7 +3,7 @@ import { z } from "zod";
 import { scenarioSummary } from "../catalogue.js";
 import type { GeneratedPuzzle, PuzzleTemplate } from "../domain/types.js";
 import { DifficultyUnavailableError, generatePuzzleForRequest } from "../generation/generator.js";
-import { DEFAULT_PUZZLE_TOKEN_TTL_SECONDS, issuePuzzleToken } from "../api/puzzle-token.js";
+import { DEFAULT_PUZZLE_TOKEN_TTL_SECONDS, issuePuzzleTokenWithIdentity } from "../api/puzzle-token.js";
 import { puzzleFromToken } from "../api/puzzle-from-token.js";
 import { puzzleHint } from "../api/puzzle-hints.js";
 import { PuzzleActionError } from "../api/puzzle-action-error.js";
@@ -70,6 +70,7 @@ const PuzzleOutputSchema = z.object({
   generatorVersion: z.string(),
   solverVersion: z.string(),
   puzzleToken: z.string().optional(),
+  puzzleFingerprint: z.string().regex(/^[a-f0-9]{64}$/).optional(),
   spec: z.object({
     id: z.string(),
     title: z.string(),
@@ -107,9 +108,9 @@ function errorResult(code: string, message: string, extra: Record<string, unknow
   return textResult({ error: { code, message }, ...extra }, true);
 }
 
-function puzzleOutput(puzzle: GeneratedPuzzle, puzzleToken?: string) {
+function puzzleOutput(puzzle: GeneratedPuzzle, issuedToken?: { token: string; puzzleFingerprint: string }) {
   const { solution: _solution, ...publicPuzzle } = puzzle;
-  return { ...publicPuzzle, ...(puzzleToken ? { puzzleToken } : {}) };
+  return { ...publicPuzzle, ...(issuedToken ? { puzzleToken: issuedToken.token, puzzleFingerprint: issuedToken.puzzleFingerprint } : {}) };
 }
 
 function generationErrorResult(error: unknown) {
@@ -134,10 +135,10 @@ async function generatePuzzleResult(
 ) {
   try {
     const puzzle = generatePuzzleForRequest(template, requestedSeed, difficultyLevel, allowSeedFallback, undefined, difficultyModel ?? "v5");
-    const puzzleToken = options.puzzleTokenSecret ? await issuePuzzleToken(puzzle, options.puzzleTokenSecret, {
+    const issuedToken = options.puzzleTokenSecret ? await issuePuzzleTokenWithIdentity(puzzle, options.puzzleTokenSecret, {
       ttlSeconds: options.puzzleTokenTtlSeconds ?? DEFAULT_PUZZLE_TOKEN_TTL_SECONDS,
     }) : undefined;
-    return textResult(puzzleOutput(puzzle, puzzleToken));
+    return textResult(puzzleOutput(puzzle, issuedToken));
   } catch (error) {
     return generationErrorResult(error);
   }

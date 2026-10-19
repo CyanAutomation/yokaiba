@@ -1,6 +1,7 @@
 import { DifficultyUnavailableError, generatePuzzleForRequest } from "../generation/generator.js";
 import type { GeneratedPuzzle, PuzzleTemplate } from "../domain/types.js";
 import { verifyPuzzleToken, type PuzzleTokenSecrets } from "./puzzle-token.js";
+import { puzzleFingerprint } from "./puzzle-fingerprint.js";
 import { PuzzleActionError } from "./puzzle-action-error.js";
 
 /** v3-v6 preserve puzzle-solution semantics for tokens issued by older releases. */
@@ -26,6 +27,9 @@ export async function puzzleFromToken(puzzleToken: string, templates: Map<string
     throw error;
   }
   if (!supportsTokenGeneratorVersion(token.generatorVersion, puzzle.generatorVersion) || puzzle.solverVersion !== token.solverVersion) {
+    throw new PuzzleActionError("unsupported_puzzle_version", "puzzleToken references an unsupported puzzle version");
+  }
+  if (token.version === 4 && token.generatorVersion === puzzle.generatorVersion && await puzzleFingerprint(puzzle) !== token.puzzleFingerprint) {
     throw new PuzzleActionError("unsupported_puzzle_version", "puzzleToken references an unsupported puzzle version");
   }
   return puzzle;

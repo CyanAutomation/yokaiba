@@ -1,3 +1,5 @@
+import type { FeedbackSink } from "./feedback-route.js";
+
 export interface RestRouterOptions {
   /** Required to issue tamper-proof puzzle tokens for server-side verification. */
   puzzleTokenSecret?: string;
@@ -9,4 +11,6 @@ export interface RestRouterOptions {
   buildSha?: string;
   /** Durable anonymous outcome sink. The endpoint returns 202 only after this accepts the event. */
   recordOutcome?: (event: Record<string, unknown>) => void | Promise<void>;
+  /** Durable anonymous puzzle-difficulty feedback sink. */
+  recordFeedback?: FeedbackSink;
 }
