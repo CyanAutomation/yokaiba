@@ -3,7 +3,7 @@ info:
   title: Yokaiba API
   version: 0.1.0
   description: |
-    Deterministic, uniquely-solvable judo logic-grid puzzles. REST is public; MCP uses a separate API key. The Streamable HTTP MCP endpoint is `/mcp`; it offers `list_scenarios` and `generate_puzzle`, plus `verify_puzzle_answer` and `get_puzzle_hint` when `PUZZLE_TOKEN_SECRET` is configured. MCP authentication and tool discovery use MCP protocol requests, not REST paths. The Action-focused REST contract is available at `/openapi/chatgpt-actions-v1.yaml`. Outcome telemetry is written to a configured Cloudflare Analytics Engine dataset; payloads are anonymous and unknown fields are discarded. See the repository README for MCP connection guidance.
+    Deterministic, uniquely-solvable judo logic-grid puzzles. REST is public; MCP uses a separate API key. The Streamable HTTP MCP endpoint is `/mcp`; it offers `list_scenarios` and `generate_puzzle`, plus `verify_puzzle_answer` and `get_puzzle_hint` when `PUZZLE_TOKEN_SECRET` is configured. MCP authentication and tool discovery use MCP protocol requests, not REST paths. The Action-focused REST contract is available at `/openapi/chatgpt-actions-v1.yaml`. Outcome telemetry is anonymous and uses Analytics Engine; puzzle difficulty feedback is separately stored in D1. See the repository README for MCP connection guidance.
     Cross-origin browser clients must be listed in the `REST_ALLOWED_ORIGINS` Worker secret; unlisted origins receive no CORS permission.
 servers:
   - url: /
@@ -354,6 +354,38 @@ paths:
         '405': { $ref: '#/components/responses/MethodNotAllowed' }
         '429': { $ref: '#/components/responses/RateLimited' }
         '503': { $ref: '#/components/responses/NotConfigured' }
+  /v1/feedback:
+    post:
+      operationId: submitPuzzleDifficultyFeedback
+      summary: Store anonymous difficulty feedback for a signed puzzle
+      description: The signed puzzle token supplies trusted puzzle identity and generation metadata. Completion state and gameplay measurements are self-reported; no account, answer grid, or personal identity is required.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/PuzzleFeedbackRequest' }
+      responses:
+        '202':
+          description: New feedback was accepted into D1.
+          headers:
+            Access-Control-Allow-Origin: { $ref: '#/components/headers/AccessControlAllowOrigin' }
+            X-Request-Id: { $ref: '#/components/headers/RequestId' }
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/PuzzleFeedbackAccepted' }
+        '200':
+          description: An idempotent retry of the accepted feedback.
+          headers:
+            Access-Control-Allow-Origin: { $ref: '#/components/headers/AccessControlAllowOrigin' }
+            X-Request-Id: { $ref: '#/components/headers/RequestId' }
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/PuzzleFeedbackAccepted' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '405': { $ref: '#/components/responses/MethodNotAllowed' }
+        '409': { description: Idempotency key was reused with different feedback. }
+        '429': { $ref: '#/components/responses/RateLimited' }
+        '503': { $ref: '#/components/responses/NotConfigured' }
 components:
   parameters:
     TemplateId:
@@ -622,9 +654,10 @@ components:
         difficultyModel: { type: string, enum: [v4, v5, compare] }
         difficultyProfile: { $ref: '#/components/schemas/DifficultyProfile' }
         selectionDiagnostics: { type: object, additionalProperties: true }
+        puzzleFingerprint: { type: string, pattern: '^[a-f0-9]{64}$', description: Stable SHA-256 identity of this generated puzzle and its generation metadata; present with a signed puzzle token. }
         puzzleToken:
           type: string
-          description: HMAC-signed token required by verification and hints. New tokens expire after the configured lifetime (seven days by default, maximum 30 days). Its base64url payload contains reproducibility metadata (including the seed), so it is not encryption; present when PUZZLE_TOKEN_SECRET is configured.
+          description: HMAC-signed token required by verification, hints, and feedback. New tokens expire after the configured lifetime (seven days by default, maximum 30 days). Its base64url payload contains reproducibility metadata (including the seed), so it is not encryption; present when PUZZLE_TOKEN_SECRET is configured.
         spec: { $ref: '#/components/schemas/PuzzleSpec' }
         clues: { type: array, items: { $ref: '#/components/schemas/Clue' } }
         difficulty: { $ref: '#/components/schemas/Difficulty' }
@@ -715,10 +748,30 @@ components:
         hintsUsed: { type: integer, minimum: 0, maximum: 100 }
         mistakes: { type: integer, minimum: 0, maximum: 100 }
         smartMarkingEnabled: { type: boolean, description: "Whether the player enabled the optional advanced efficiency feature; not a hint or assist." }
+    PuzzleFeedbackRequest:
+      type: object
+      required: [puzzleToken, rating, outcome, hintsUsed, mistakes, idempotencyKey]
+      additionalProperties: false
+      properties:
+        puzzleToken: { type: string, minLength: 1, maxLength: 3000 }
+        rating: { type: string, enum: [too_easy, just_right, too_hard] }
+        reason: { type: string, enum: [difficult_to_start, confusing_clues, too_many_deductions, took_too_long, other], description: Only allowed with too_hard; optional. }
+        outcome: { type: string, enum: [completed, in_progress] }
+        hintsUsed: { type: integer, minimum: 0, maximum: 100 }
+        mistakes: { type: integer, minimum: 0, maximum: 100 }
+        elapsedMs: { type: integer, minimum: 0, maximum: 86400000 }
+        smartMarkingEnabled: { type: boolean }
+        idempotencyKey: { type: string, format: uuid }
     Accepted:
       type: object
       required: [accepted]
       properties: { accepted: { type: boolean, const: true } }
+    PuzzleFeedbackAccepted:
+      type: object
+      required: [accepted, duplicate]
+      properties:
+        accepted: { type: boolean, const: true }
+        duplicate: { type: boolean }
     Error:
       type: object
       required: [error]

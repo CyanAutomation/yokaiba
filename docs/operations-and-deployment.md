@@ -18,13 +18,64 @@ For key rotation, set a new `PUZZLE_TOKEN_SECRET` and include the former key(s) 
 
 Allowed origins receive `GET, POST, OPTIONS` CORS headers, including `Access-Control-Max-Age: 86400` (24-hour preflight cache). Public GET responses also provide an ETag and return `304 Not Modified` for a matching `If-None-Match` request.
 
-The Worker uses a best-effort per-isolate REST rate limit (60 requests/minute by default; configure `REST_RATE_LIMIT`) when no provider binding is available. Puzzle generation has a separate 10 requests/minute limit (`REST_GENERATE_RATE_LIMIT` / `REST_GENERATE_RATE_LIMITER`) because it can perform multiple solver searches. Answer verification and puzzle hints use the dedicated `VERIFY_RATE_LIMITER` provider, with local fallback defaults of 10 requests/minute via `VERIFY_RATE_LIMIT` and `HINT_RATE_LIMIT`. REST responses publish `RateLimit-Limit` and `RateLimit-Policy`. When the Worker applies the local fallback, it also publishes `RateLimit-Remaining` and Unix-second `RateLimit-Reset`; the Cloudflare binding reports only allow/deny, so those two quota fields are absent while it is enforcing requests. Rate-limited responses always publish `RateLimit-Remaining: 0` and `Retry-After`. Allowed browser origins can send `If-None-Match` and read ETag, request ID, and rate-limit headers. Each Worker isolate also keeps a bounded, five-minute LRU response cache for deterministic GET generation as a second layer behind edge caching; verification and POST generation are never retained there.
+The Worker uses a best-effort per-isolate REST rate limit (60 requests/minute by default; configure `REST_RATE_LIMIT`) when no provider binding is available. Puzzle generation has a separate 10 requests/minute limit (`REST_GENERATE_RATE_LIMIT` / `REST_GENERATE_RATE_LIMITER`) because it can perform multiple solver searches. Answer verification, puzzle hints, and feedback use the dedicated `VERIFY_RATE_LIMITER` provider, with local fallback defaults of 10 requests/minute via `VERIFY_RATE_LIMIT`, `HINT_RATE_LIMIT`, and `FEEDBACK_RATE_LIMIT`. Feedback has its own path-specific counter and never stores the rate-limiting IP. REST responses publish `RateLimit-Limit` and `RateLimit-Policy`. When the Worker applies the local fallback, it also publishes `RateLimit-Remaining` and Unix-second `RateLimit-Reset`; the Cloudflare binding reports only allow/deny, so those two quota fields are absent while it is enforcing requests. Rate-limited responses always publish `RateLimit-Remaining: 0` and `Retry-After`. Allowed browser origins can send `If-None-Match` and read ETag, request ID, and rate-limit headers. Each Worker isolate also keeps a bounded, five-minute LRU response cache for deterministic GET generation as a second layer behind edge caching; verification and POST generation are never retained there.
 
 ### Local response cache policy
 
 The generated-puzzle response cache retains at most 128 entries and 16 MiB of response bodies. It evicts least-recently-used entries to stay within those bounds, expires entries after five minutes, and returns an individually oversized response without retaining it. Cache keys use a digest namespace for the puzzle-token signing secret, never the secret itself. The per-isolate namespace digest memoization is bounded to 10 LRU entries and does not retain failed digest attempts, so a later request can retry.
 
-For production, configure the Cloudflare Rate Limiting bindings in `wrangler.toml`: `REST_RATE_LIMITER` for general REST traffic, `REST_GENERATE_RATE_LIMITER` for puzzle generation, `VERIFY_RATE_LIMITER` for answer verification, and the four MCP bindings described below. Their namespaces must remain distinct because their limits differ. The `PUZZLE_OUTCOMES` Analytics Engine binding is also declared there and writes to `yokaiba_puzzle_outcomes`; confirm the dataset is available to the account and review its retention/access settings before relying on it. `/readyz` reports every provider separately. A rate-limit binding exception logs `rate_limit_provider_failure` and changes the affected readiness field to `fallback`; an Analytics Engine write exception makes `outcomeTelemetryProvider` report `failing` for that Worker isolate and returns `503` for the event. Every rate-limit rejection logs `rate_limited`. The readiness status remains `ready` while an optional provider is disabled or falling back; inspect the provider fields when checking deployment configuration.
+For production, configure the Cloudflare Rate Limiting bindings in `wrangler.toml`: `REST_RATE_LIMITER` for general REST traffic, `REST_GENERATE_RATE_LIMITER` for puzzle generation, `VERIFY_RATE_LIMITER` for answer verification, hints and feedback, and the four MCP bindings described below. Their namespaces must remain distinct because their limits differ. The `PUZZLE_OUTCOMES` Analytics Engine binding is also declared there and writes to `yokaiba_puzzle_outcomes`; confirm the dataset is available to the account and review its retention/access settings before relying on it. `/readyz` reports every provider separately. A rate-limit binding exception logs `rate_limit_provider_failure` and changes the affected readiness field to `fallback`; an Analytics Engine write exception makes `outcomeTelemetryProvider` report `failing` for that Worker isolate and returns `503` for the event. Every rate-limit rejection logs `rate_limited`. The readiness status remains `ready` while an optional provider is disabled or falling back; inspect the provider fields when checking deployment configuration.
+
+### Anonymous puzzle difficulty feedback
+
+`POST /v1/feedback` stores player ratings in the `PUZZLE_FEEDBACK` D1 binding. It is independent of Analytics Engine outcome telemetry. Feedback requests need a current v4 signed puzzle token; the token carries a stable SHA-256 fingerprint of the complete generated clue configuration, template, seeds, assessed difficulty, generator/solver versions, model version, and generation strategy. The endpoint verifies that signature without regenerating the puzzle. Completion state and gameplay measurements are explicitly self-reported; the API does not verify that a puzzle was completed.
+
+Create the database once, copy the ID printed by Wrangler into `wrangler.toml` in place of `REPLACE_WITH_D1_DATABASE_ID`, then apply the versioned migration:
+
+```sh
+npx wrangler d1 create yokaiba-puzzle-feedback
+npx wrangler d1 migrations apply yokaiba-puzzle-feedback --remote
+```
+
+For local development, keep the placeholder ID in the checkout and use Wrangler's local D1 emulator:
+
+```sh
+npx wrangler d1 migrations apply yokaiba-puzzle-feedback --local
+npm run dev
+```
+
+The table stores the fingerprint, template and difficulty versions, generation metadata (including replay seeds), rating, optional fixed reason, self-reported outcome, hint/mistake/time measurements, smart-marking state, and server submission time. It does not store puzzle tokens, solutions, answer grids, IP addresses, names, or email addresses. D1 is the authoritative feedback store; Analytics Engine remains optional and is not used as a fallback.
+
+Keep records for up to 12 months, then delete older submissions during routine maintenance:
+
+```sh
+npx wrangler d1 execute yokaiba-puzzle-feedback --remote --command="DELETE FROM puzzle_feedback WHERE datetime(submitted_at) < datetime('now', '-365 days')"
+```
+
+Example read-only queries for future calibration work:
+
+```sql
+-- Ratings by requested and assessed difficulty level
+SELECT requested_level, assessed_level, rating, COUNT(*) AS responses
+FROM puzzle_feedback GROUP BY requested_level, assessed_level, rating ORDER BY requested_level, rating;
+
+-- Ratings by template
+SELECT template_id, rating, COUNT(*) AS responses
+FROM puzzle_feedback GROUP BY template_id, rating ORDER BY template_id, rating;
+
+-- Ratings for an exact generated puzzle fingerprint
+SELECT puzzle_fingerprint, rating, reason, outcome, submitted_at
+FROM puzzle_feedback WHERE puzzle_fingerprint = 'REPLACE_WITH_FINGERPRINT' ORDER BY submitted_at;
+
+-- Most frequent reasons selected for difficult puzzles
+SELECT reason, COUNT(*) AS responses
+FROM puzzle_feedback WHERE rating = 'too_hard' AND reason IS NOT NULL
+GROUP BY reason ORDER BY responses DESC;
+
+-- Feedback grouped by difficulty-model version
+SELECT difficulty_model_version, rating, COUNT(*) AS responses
+FROM puzzle_feedback GROUP BY difficulty_model_version, rating ORDER BY difficulty_model_version, rating;
+```
 
 ## MCP and deployment
 

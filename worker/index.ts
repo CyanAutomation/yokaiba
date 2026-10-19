@@ -9,6 +9,7 @@ import { hostHeaderValidationResponse } from "@modelcontextprotocol/server";
 import { json } from "../src/api/json-response.js";
 import { DEFAULT_PUZZLE_TOKEN_TTL_SECONDS, MAX_PUZZLE_TOKEN_TTL_SECONDS } from "../src/api/puzzle-token.js";
 import { emitDifficultyGeneration } from "./difficulty-telemetry.js";
+import { createPuzzleFeedbackSink, type D1DatabaseLike } from "./puzzle-feedback-storage.js";
 import {
   asRateLimitDecision,
   createRateLimiter,
@@ -56,6 +57,8 @@ interface Env {
   VERIFY_RATE_LIMIT?: string;
   /** Optional best-effort puzzle-hint requests per minute; defaults to 10. */
   HINT_RATE_LIMIT?: string;
+  /** Optional best-effort feedback submissions per minute; defaults to 10. */
+  FEEDBACK_RATE_LIMIT?: string;
   /** Optional Cloudflare Rate Limiting binding for production-wide general REST enforcement. */
   REST_RATE_LIMITER?: { limit(options: { key: string }): Promise<{ success: boolean }> };
   /** Optional Cloudflare Rate Limiting binding for REST puzzle generation. */
@@ -72,6 +75,8 @@ interface Env {
   MCP_PUZZLE_ACTION_RATE_LIMITER?: { limit(options: { key: string }): Promise<{ success: boolean }> };
   /** Cloudflare Analytics Engine dataset for anonymous puzzle outcome events. */
   PUZZLE_OUTCOMES?: AnalyticsEngineDataset;
+  /** Cloudflare D1 database for durable anonymous player feedback. */
+  PUZZLE_FEEDBACK?: D1DatabaseLike;
   /** Static public assets, including the canonical OpenAPI documents. */
   ASSETS?: { fetch(request: Request): Promise<Response> };
 }
@@ -136,6 +141,7 @@ const docsDocument = `<!doctype html>
           <tr><td><span class="method">POST</span></td><td><code>/v1/puzzles/verify</code></td><td>Verify submitted answers using a puzzle token.</td></tr>
           <tr><td><span class="method">POST</span></td><td><code>/v1/puzzles/hint</code></td><td>Request a bounded hint using a puzzle token.</td></tr>
           <tr><td><span class="method">POST</span></td><td><code>/v1/events</code></td><td>Record an anonymous puzzle outcome for calibration.</td></tr>
+          <tr><td><span class="method">POST</span></td><td><code>/v1/feedback</code></td><td>Store anonymous difficulty feedback for a signed generated puzzle.</td></tr>
         </tbody>
       </table>
       <h3>Generate a puzzle</h3>
@@ -443,6 +449,7 @@ async function generateRestResponse(
       try { writePuzzleOutcome(env.PUZZLE_OUTCOMES!, event); }
       catch (error) { dependencies.failures.outcomeTelemetry = true; throw error; }
     } } : {}),
+    ...(env.PUZZLE_FEEDBACK ? { recordFeedback: createPuzzleFeedbackSink(env.PUZZLE_FEEDBACK) } : {}),
   });
   return router(request);
 }
