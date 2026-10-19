@@ -3,7 +3,7 @@ import { dirname, resolve } from "node:path";
 import {
   auditDifficultyCorpus,
   auditProductionDifficultyCorpus,
-  generatePuzzle,
+  auditClueAblation,
   type Clue,
 } from "../src/index.js";
 import { championshipBridgeTemplate } from "../src/templates/championship-bridge.js";
@@ -34,6 +34,8 @@ import {
   requestJevDecisionBatch,
   writeAuditCheckpoint,
   SEMANTIC_ASSESSMENT_SCHEMA_VERSION,
+  JEV_AUDIT_GENERATION_MODEL_VERSION,
+  generateJevAuditPuzzle,
   JEV_REVIEW_THRESHOLDS,
   type AuditCheckpoint,
   type AuditedClue,
@@ -58,7 +60,14 @@ function reportAuditProgress(progress: Parameters<typeof auditProgressMessage>[0
   if (message) console.error(message);
 }
 
-function initialClue(clue: Clue, templateId: string, seed: string, difficulty: { level: AuditedClue["logicalDifficultyLevel"]; modelVersion: string }, locale?: string): AuditedClue {
+function initialClue(
+  clue: Clue,
+  templateId: string,
+  seed: string,
+  difficulty: { level: AuditedClue["logicalDifficultyLevel"]; modelVersion: string },
+  contribution: ReturnType<typeof auditClueAblation>[number] | undefined,
+  locale?: string,
+): AuditedClue {
   return {
     templateId,
     seed,
@@ -72,6 +81,11 @@ function initialClue(clue: Clue, templateId: string, seed: string, difficulty: {
     ...(locale === undefined ? {} : { locale }),
     logicalDifficultyLevel: difficulty.level,
     difficultyModelVersion: difficulty.modelVersion,
+    ...(contribution === undefined ? {} : {
+      uniqueWithoutClue: contribution.uniqueWithout,
+      humanTraceCompleteWithoutClue: contribution.humanTraceCompleteWithout,
+      logicalContribution: contribution.logicalContribution,
+    }),
     evaluationStatus: "pending",
     missingAnswers: [],
     flagged: false,
@@ -79,7 +93,7 @@ function initialClue(clue: Clue, templateId: string, seed: string, difficulty: {
   };
 }
 
-function initialPuzzle(puzzle: ReturnType<typeof generatePuzzle>, templateTitle: string): AuditedPuzzle {
+function initialPuzzle(puzzle: ReturnType<typeof generateJevAuditPuzzle>, templateTitle: string): AuditedPuzzle {
   return {
     templateId: puzzle.templateId,
     templateTitle,
@@ -115,7 +129,14 @@ if (sourceOutputPath === target) throw new Error("--puzzle-review-from and --out
 let configuration: JevRunConfiguration;
 if (sourceReport) {
   const { resolvedModel: _resolvedModel, ...sourceConfiguration } = sourceReport.configuration;
-  configuration = { ...sourceConfiguration, batchSize: args.batchSize, puzzleReview: true };
+  configuration = {
+    ...sourceConfiguration,
+    generationModelVersion: sourceConfiguration.generationModelVersion
+      ?? sourceReport.clueAudit.clues[0]?.difficultyModelVersion
+      ?? JEV_AUDIT_GENERATION_MODEL_VERSION,
+    batchSize: args.batchSize,
+    puzzleReview: true,
+  };
 } else {
   configuration = {
     difficultySamples: args.difficultySamples,
@@ -124,6 +145,7 @@ if (sourceReport) {
     endpoint: ENDPOINT,
     requestedModel: MODEL,
     semanticAssessmentSchemaVersion: SEMANTIC_ASSESSMENT_SCHEMA_VERSION,
+    generationModelVersion: JEV_AUDIT_GENERATION_MODEL_VERSION,
     puzzleReview: args.puzzleReview,
     reviewThresholds: JEV_REVIEW_THRESHOLDS,
   };
@@ -199,8 +221,9 @@ if (!sourceReport) {
     const reportInterval = Math.max(1, Math.ceil(configuration.clueSamples / 10));
     for (let sample = 0; sample < configuration.clueSamples; sample += 1) {
       const seed = `jev-wording-${sample}`;
-      const puzzle = generatePuzzle(template, seed);
-      clues.push(...puzzle.clues.map(clue => initialClue(clue, template.id, seed, puzzle.difficulty, template.metadata?.locales.default)));
+      const puzzle = generateJevAuditPuzzle(template, seed);
+      const contributionByClue = new Map(auditClueAblation(template, puzzle.clues).map(result => [result.clueId, result]));
+      clues.push(...puzzle.clues.map(clue => initialClue(clue, template.id, seed, puzzle.difficulty, contributionByClue.get(clue.id), template.metadata?.locales.default)));
       puzzles.push(initialPuzzle(puzzle, template.title));
       if ((sample + 1) % reportInterval === 0 || sample + 1 === configuration.clueSamples) {
         console.error(`generated wording clues ${template.id}: ${sample + 1}/${configuration.clueSamples}`);
