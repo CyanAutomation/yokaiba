@@ -2,7 +2,7 @@ import type { Clue, ClueConstraint, PuzzleTemplate } from "../domain/types.js";
 import { hash } from "../domain/hash.js";
 import { renderConstraintText } from "./clue-language.js";
 
-export const CLUE_LANGUAGE_VERSION = "yokaiba-clue-prose-v8";
+export const CLUE_LANGUAGE_VERSION = "yokaiba-clue-prose-v9";
 
 function chooseVariant(seed: string, clue: Clue, count: number, previousFamily?: string) {
   let index = hash(`${seed}:${clue.id}:${CLUE_LANGUAGE_VERSION}`) % count;
