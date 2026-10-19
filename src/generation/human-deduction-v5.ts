@@ -175,7 +175,8 @@ export function evaluateHumanDeductionTraceV5(spec: PuzzleSpec, clues: readonly 
       placements: input.placements,
       dependencyDepth,
       estimatedCognitiveCost: Math.min(5, Number((cognitiveBase + Math.max(0, dependencyDepth - 1) * 0.25).toFixed(2))),
-      workingMemoryDemand: input.workingMemoryDemand,
+      // Include unresolved categories carried forward by the prerequisite chain.
+      workingMemoryDemand: Math.max(input.workingMemoryDemand, relevantPossibilities(categories)),
       triggeredAutomaticPropagation: false,
     };
     steps.push(step);

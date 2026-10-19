@@ -34,6 +34,7 @@ export interface DifficultyV5TargetSample {
   traceStatus?: string;
   candidateAttempts?: number;
   eligibleCandidates?: number;
+  fallbackSeedAttempt?: number;
   selectedRankDistance?: number;
   observedLevels?: DifficultyLevel[];
   candidateScoreRange?: { minimum: number; maximum: number; complete: number; incomplete: number };
