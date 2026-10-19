@@ -74,14 +74,14 @@ jobs:
                 block = $0 ORS
                 next
               }
-              (/^\[[[:alnum:]_.-]+\]$/ || /^\[\[[[:alnum:]_.-]+\]\]$/) && $0 !~ /^\[\[d1_databases\]\]$/ {
+              (/^\[[[:alnum:]_.-]+\]$/ || /^\[\[[[:alnum:]_.-]+\]\]$/) {
                 flush_block()
                 print
                 next
               }
               {
                 if (in_d1) {
-                  if ($0 ~ /^binding = "PUZZLE_FEEDBACK"$/) drop_block = 1
+                  if ($0 ~ /^[[:space:]]*binding[[:space:]]*=[[:space:]]*"PUZZLE_FEEDBACK"$/) drop_block = 1
                   block = block $0 ORS
                 } else {
                   print
