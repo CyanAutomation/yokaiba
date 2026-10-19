@@ -13,7 +13,7 @@ import { generatePuzzle } from "../src/generation/generator.js";
 import { tournamentOrderV2Template } from "../src/templates/tournament-order-v2.js";
 
 test("v5 audit arguments accept independent paired and targeted sample counts", () => {
-  assert.deepEqual(parseDifficultyV5AuditArguments([]), { samples: 25, targetSamples: 3, outputBase: undefined });
+  assert.deepEqual(parseDifficultyV5AuditArguments([]), { samples: 25, targetSamples: 25, outputBase: undefined });
   assert.deepEqual(parseDifficultyV5AuditArguments(["--samples", "100", "--target-samples", "7", "--out", "reports/run"]), {
     samples: 100, targetSamples: 7, outputBase: "reports/run",
   });

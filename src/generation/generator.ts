@@ -11,6 +11,8 @@ import { random, shuffled } from "./rng.js";
 export const GENERATOR_VERSION = "yokaiba-generator-v6";
 /** Version of the built-in solver used when callers do not provide one. */
 export const SOLVER_VERSION = exhaustivePuzzleSolver.version;
+export const DEFAULT_DIFFICULTY_MODEL = "v5" as const;
+export const DEFAULT_DIFFICULTY_MODEL_VERSION = DIFFICULTY_MODEL_V5;
 const MAX_DIFFICULTY_STRATEGIES = 64;
 const DENSE_FALLBACK_STRATEGY_LIMIT = 8;
 const V5_STRATEGY_LIMIT = 12;
@@ -512,7 +514,7 @@ export function generatePuzzleForRequest(
   difficultyLevel?: DifficultyLevel,
   allowSeedFallback = false,
   solver: PuzzleSolver = exhaustivePuzzleSolver,
-  difficultyModel: "v4" | "v5" | "compare" = "v5",
+  difficultyModel: "v4" | "v5" | "compare" = DEFAULT_DIFFICULTY_MODEL,
 ): GeneratedPuzzle {
   if (difficultyModel === "compare") {
     const legacy = difficultyLevel === undefined

@@ -254,7 +254,7 @@ test("relational clues name the competitors without mid-sentence capitalization"
     assert.match(beforeClue.text, /competitor who finished 2nd.*competitor who finished 4th/i);
     assert.match(beforeClue.text, /(came before|was earlier than)/i);
     assert.doesNotMatch(beforeClue.text, /In the .*?, The competitor/);
-    assert.ok(rendered.some(clue => /competitor on Tatami 4.*competitor who finished 3rd.*exactly one place apart/i.test(clue.text)));
+    assert.ok(rendered.some(clue => /no competitor finished between the competitor on Tatami 4 and the competitor who finished 3rd/i.test(clue.text)));
   }
 
   assert.deepEqual(coveredVariants, new Set(["before-0", "before-1"]));
@@ -272,13 +272,13 @@ test("ordered clue prose avoids a duplicated order word and states exact place d
     const rendered = renderClues(tournamentOrderTemplate, seed, clues);
     assert.ok(rendered.every(clue => !/order order/i.test(clue.text)));
     const distance = rendered.find(clue => clue.id === "weight-distance")!;
-    assert.match(distance.text, /-73 kg competitor.*competitor on Tatami 1.*exactly three places apart/i);
+    assert.match(distance.text, /exactly two competitors finished between the -73 kg competitor and the competitor on Tatami 1/i);
     assert.doesNotMatch(distance.text, /positions of .* differed by exactly/i);
 
     const onePlace = renderClues(tournamentOrderTemplate, seed, [clues[2]!])[0]!;
     onePlaceVariants.add(onePlace.phraseVariant!);
     assert.match(onePlace.text, /competitor on Tatami 4.*competitor who finished 3rd/);
-    assert.match(onePlace.text, /exactly one place apart/);
+    assert.match(onePlace.text, /no competitor finished between/i);
     assert.match(onePlace.text, /tournament order/);
     assert.doesNotMatch(onePlace.text, /positions of .* differed by exactly/);
   }
