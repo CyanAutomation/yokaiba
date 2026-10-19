@@ -596,7 +596,12 @@ export function assertCheckpointConfiguration(actual: JevRunConfiguration, expec
   const keys: (keyof JevRunConfiguration)[] = ["difficultySamples", "clueSamples", "batchSize", "endpoint", "requestedModel", "semanticAssessmentSchemaVersion", "generationModelVersion", "puzzleReview"];
   const mismatches = keys.filter(key => actual[key] !== expected[key]);
   if (JSON.stringify(actual.reviewThresholds) !== JSON.stringify(expected.reviewThresholds)) mismatches.push("reviewThresholds");
-  if (mismatches.length > 0) throw new Error(`audit checkpoint configuration does not match this run: ${mismatches.join(", ")}`);
+  if (mismatches.length > 0) {
+    const modelMismatch = mismatches.includes("generationModelVersion")
+      ? ` (checkpoint ${actual.generationModelVersion}, current ${expected.generationModelVersion}; use a new output path for the current model)`
+      : "";
+    throw new Error(`audit checkpoint configuration does not match this run: ${mismatches.join(", ")}${modelMismatch}`);
+  }
 }
 
 export async function writeAuditCheckpoint(path: string, checkpoint: AuditCheckpoint): Promise<void> {
@@ -671,6 +676,42 @@ export async function checkpointTargetedDifficultyLevels(
   }
 }
 
+function checkpointGenerationModelVersion(checkpoint: Record<string, unknown>): string {
+  const versions = new Set<string>();
+  const addVersion = (value: unknown, key: "difficultyModelVersion" | "modelVersion") => {
+    if (!Array.isArray(value)) return;
+    for (const row of value) {
+      if (!row || typeof row !== "object") continue;
+      const version = (row as Record<string, unknown>)[key];
+      if (typeof version === "string" && version !== "unavailable" && version !== "unresolved") versions.add(version);
+    }
+  };
+
+  addVersion(checkpoint.clues, "difficultyModelVersion");
+  addVersion(checkpoint.puzzles, "difficultyModelVersion");
+  addVersion(checkpoint.difficultyAudit, "modelVersion");
+  addVersion(checkpoint.productionDifficultyAudit, "modelVersion");
+  addVersion(checkpoint.targetedDifficultyAudit, "modelVersion");
+
+  if (versions.size > 1) {
+    throw new Error(`invalid audit checkpoint: mixed generation model versions (${[...versions].sort().join(", ")})`);
+  }
+
+  const configuration = checkpoint.configuration && typeof checkpoint.configuration === "object"
+    ? checkpoint.configuration as Record<string, unknown>
+    : undefined;
+  const configuredVersion = configuration?.generationModelVersion;
+  if (typeof configuredVersion === "string") {
+    const sampleVersion = versions.values().next().value;
+    if (sampleVersion !== undefined && sampleVersion !== configuredVersion) {
+      throw new Error(`invalid audit checkpoint: configured generation model ${configuredVersion} does not match saved samples ${sampleVersion}`);
+    }
+    return configuredVersion;
+  }
+
+  return versions.values().next().value ?? DEFAULT_DIFFICULTY_MODEL_VERSION;
+}
+
 export async function readAuditCheckpoint(path: string): Promise<AuditCheckpoint | undefined> {
   let source: string;
   try {
@@ -691,9 +732,14 @@ export async function readAuditCheckpoint(path: string): Promise<AuditCheckpoint
   if (!checkpoint || (checkpoint.version !== 2 && checkpoint.version !== 3) || !Array.isArray(checkpoint.clues) || !Array.isArray(checkpoint.puzzles) || !Array.isArray(checkpoint.difficultyAudit) || !Array.isArray(checkpoint.targetedDifficultyAudit)) {
     throw new Error(`invalid audit checkpoint: ${path}`);
   }
+  const parsedCheckpoint = checkpoint as unknown as AuditCheckpoint;
   return {
-    ...checkpoint as unknown as AuditCheckpoint,
+    ...parsedCheckpoint,
     version: 3,
+    configuration: {
+      ...parsedCheckpoint.configuration,
+      generationModelVersion: checkpointGenerationModelVersion(checkpoint),
+    },
     difficultyAudit: normalizeDifficultyAuditRows(checkpoint.difficultyAudit),
     productionDifficultyAudit: normalizeDifficultyAuditRows(checkpoint.productionDifficultyAudit),
   };
