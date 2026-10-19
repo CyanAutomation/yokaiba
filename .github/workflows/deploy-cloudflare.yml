@@ -74,7 +74,7 @@ jobs:
                 block = $0 ORS
                 next
               }
-              (/^\[[[:alnum:]_.-]+\]$/ || /^\[\[[[:alnum:]_.-]+\]\]$/) {
+              (/^\[[[:alnum:]_.-]+\]$/ || /^\[\[[[:alnum:]_.-]+\]\]$/) && $0 !~ /^\[\[d1_databases\]\]$/ {
                 flush_block()
                 print
                 next
