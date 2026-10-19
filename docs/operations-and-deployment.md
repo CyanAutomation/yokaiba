@@ -30,14 +30,14 @@ For production, configure the Cloudflare Rate Limiting bindings in `wrangler.tom
 
 `POST /v1/feedback` stores player ratings in the `PUZZLE_FEEDBACK` D1 binding. It is independent of Analytics Engine outcome telemetry. Feedback requests need a current v4 signed puzzle token; the token carries a stable SHA-256 fingerprint of the complete generated clue configuration, template, seeds, assessed difficulty, generator/solver versions, model version, and generation strategy. The endpoint verifies that signature without regenerating the puzzle. Completion state and gameplay measurements are explicitly self-reported; the API does not verify that a puzzle was completed.
 
-Create the database once, copy the ID printed by Wrangler into `wrangler.toml` in place of `REPLACE_WITH_D1_DATABASE_ID`, then apply the versioned migration:
+Create the database once, copy the ID printed by Wrangler into `wrangler.toml`, then apply the versioned migration:
 
 ```sh
 npx wrangler d1 create yokaiba-puzzle-feedback
 npx wrangler d1 migrations apply yokaiba-puzzle-feedback --remote
 ```
 
-For local development, keep the placeholder ID in the checkout and use Wrangler's local D1 emulator:
+For local development, use Wrangler's local D1 emulator; the configured database ID does not make local commands write to production:
 
 ```sh
 npx wrangler d1 migrations apply yokaiba-puzzle-feedback --local
