@@ -4,7 +4,7 @@ import { performance } from "node:perf_hooks";
 import {
   DifficultyUnavailableError,
   generatePuzzle,
-  generatePuzzleAtDifficultyV5,
+  generatePuzzleForRequest,
 } from "../src/generation/generator.js";
 import { DIFFICULTY_MODEL_VERSION } from "../src/generation/difficulty-assessment.js";
 import { DIFFICULTY_MODEL_V5 } from "../src/generation/difficulty-profile.js";
@@ -80,7 +80,7 @@ for (const template of templates) {
       const seed = `${seedPrefix}-target-${template.id}-${level}-${index}`;
       const started = performance.now();
       try {
-        const puzzle = generatePuzzleAtDifficultyV5(template, seed, level as 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8 | 9 | 10 | 11 | 12);
+        const puzzle = generatePuzzleForRequest(template, seed, level as 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8 | 9 | 10 | 11 | 12, true, undefined, "v5");
         const elapsedMs = Number((performance.now() - started).toFixed(3));
         samples.push({
           seed,
@@ -91,6 +91,7 @@ for (const template of templates) {
           traceStatus: puzzle.difficultyProfile!.logical.status,
           candidateAttempts: puzzle.selectionDiagnostics?.strategiesAttempted,
           eligibleCandidates: puzzle.selectionDiagnostics?.eligibleCandidates,
+          ...(puzzle.seedFallbackAttempt === undefined ? {} : { fallbackSeedAttempt: puzzle.seedFallbackAttempt }),
           selectedRankDistance: puzzle.selectionDiagnostics?.selectedRankDistance,
           candidateScoreRange: puzzle.selectionDiagnostics?.candidateScoreRange,
           clueMetadata: clueMetadata(puzzle),

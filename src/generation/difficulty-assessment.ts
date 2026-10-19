@@ -110,7 +110,7 @@ export function assessPuzzleDifficultyV5(
     score: round(100 * meanAlternatives / normalizedAlternativeCapacity),
     direction: "higher_is_harder" as const,
     raw: { meanRelevantAlternatives: Number(meanAlternatives.toFixed(3)), peakRelevantAlternatives: peakAlternatives, normalizedCapacity: normalizedAlternativeCapacity },
-    interpretation: "Mean unresolved candidates in categories used by productive deductions, divided by a template-size capacity. Solver memory use is not used.",
+    interpretation: "Mean unresolved candidates across clue categories and inherited prerequisite categories, divided by a template-size capacity. Solver memory use is not used.",
   };
 
   const crossCount = trace.crossCategorySteps;
