@@ -76,9 +76,7 @@ test("distance wording pairing ignores other clue kinds and reports paired metri
   assert.equal(summary.placesApartBetter, 1);
   assert.equal(summary.betweenCountBetter, 0);
   assert.equal(summary.tied, 1);
-  assert.ok(summary.confidenceInterval95);
-  assert.ok(summary.confidenceInterval95.lower <= -0.1);
-  assert.ok(summary.confidenceInterval95.upper >= -0.1);
+  assert.equal(summary.confidenceInterval95, null);
 });
 
 test("paired distance wording summaries provide stable cluster-bootstrap uncertainty", () => {
@@ -128,6 +126,7 @@ test("distance wording markdown describes variants without assuming which is cur
   });
 
   assert.match(markdown, /between-count and places-apart variants/);
+  assert.match(markdown, /Intervals are n\/a when fewer than two puzzle-seed clusters contribute\./);
   assert.match(markdown, /## By template/);
   assert.match(markdown, /### test-template/);
   assert.doesNotMatch(markdown, /current intervening-competitor|previously shipped places-apart|older wording/);

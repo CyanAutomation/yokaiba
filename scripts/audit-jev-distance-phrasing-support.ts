@@ -98,6 +98,7 @@ function clusterBootstrapMeanInterval(
     clusters.set(clusterKey, values);
   }
   const clusterValues = [...clusters.values()];
+  if (clusterValues.length < 2) return null;
   const random = seededRandom(stableHash(seedKey));
   const means: number[] = [];
   for (let sample = 0; sample < DISTANCE_BOOTSTRAP_RESAMPLES; sample += 1) {
@@ -203,6 +204,7 @@ export function renderDistanceComparisonMarkdown(report: DistanceComparisonMarkd
     "",
     "The same saved v5 semantics were evaluated with the between-count and places-apart variants. Variant labels describe the tested text and do not imply which wording is current in the product.",
     `Uncertainty uses a deterministic 95% cluster bootstrap over puzzle seeds (${DISTANCE_BOOTSTRAP_RESAMPLES} resamples); clues from the same puzzle are sampled together.`,
+    "Intervals are n/a when fewer than two puzzle-seed clusters contribute.",
     "",
     "## Overall",
     "",
