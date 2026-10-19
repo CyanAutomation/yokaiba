@@ -54,6 +54,22 @@ jobs:
             exit 1
           fi
 
+      - name: Configure optional feedback database binding
+        env:
+          PUZZLE_FEEDBACK_DATABASE_ID: ${{ secrets.CLOUDFLARE_PUZZLE_FEEDBACK_DATABASE_ID }}
+        run: |
+          if [ -n "$PUZZLE_FEEDBACK_DATABASE_ID" ]; then
+            sed -i "s/REPLACE_WITH_D1_DATABASE_ID/$PUZZLE_FEEDBACK_DATABASE_ID/" wrangler.toml
+          else
+            awk '
+              BEGIN { skip = 0 }
+              /^\[\[d1_databases\]\]$/ { skip = 1; next }
+              skip && /^$/ { skip = 0; next }
+              !skip { print }
+            ' wrangler.toml > wrangler.toml.tmp
+            mv wrangler.toml.tmp wrangler.toml
+          fi
+
       - name: Deploy Worker
         id: deploy
         env:
