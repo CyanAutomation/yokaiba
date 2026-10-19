@@ -59,7 +59,38 @@ jobs:
           PUZZLE_FEEDBACK_DATABASE_ID: ${{ secrets.CLOUDFLARE_PUZZLE_FEEDBACK_DATABASE_ID }}
         run: |
           if [ -n "$PUZZLE_FEEDBACK_DATABASE_ID" ]; then
-            sed -i "s/REPLACE_WITH_D1_DATABASE_ID/$PUZZLE_FEEDBACK_DATABASE_ID/g" wrangler.toml
+            awk -v database_id="$PUZZLE_FEEDBACK_DATABASE_ID" '
+              function flush_block() {
+                if (in_d1) printf "%s", block
+                block = ""
+                in_d1 = 0
+                is_feedback = 0
+              }
+              /^\[\[d1_databases\]\]$/ {
+                flush_block()
+                in_d1 = 1
+                block = $0 ORS
+                next
+              }
+              (/^\[[[:alnum:]_.-]+\]$/ || /^\[\[[[:alnum:]_.-]+\]\]$/) && $0 !~ /^\[\[d1_databases\]\]$/ {
+                flush_block()
+                print
+                next
+              }
+              {
+                if (in_d1) {
+                  line = $0
+                  if (line ~ /^[[:space:]]*binding[[:space:]]*=[[:space:]]*"PUZZLE_FEEDBACK"$/) is_feedback = 1
+                  if (is_feedback && line ~ /^[[:space:]]*database_id[[:space:]]*=[[:space:]]*"REPLACE_WITH_D1_DATABASE_ID"[[:space:]]*$/) {
+                    sub(/"REPLACE_WITH_D1_DATABASE_ID"/, "\"" database_id "\"", line)
+                  }
+                  block = block line ORS
+                } else {
+                  print
+                }
+              }
+              END { flush_block() }
+            ' wrangler.toml > wrangler.toml.tmp && mv wrangler.toml.tmp wrangler.toml
           else
             awk '
               function flush_block() {
