@@ -58,11 +58,25 @@ jobs:
         env:
           PUZZLE_FEEDBACK_DATABASE_ID: ${{ secrets.CLOUDFLARE_PUZZLE_FEEDBACK_DATABASE_ID }}
         run: |
+          if [ ! -f wrangler.toml ]; then
+            echo "wrangler.toml is required for deployment."
+            exit 1
+          fi
           if [ -n "$PUZZLE_FEEDBACK_DATABASE_ID" ]; then
             awk -v database_id="$PUZZLE_FEEDBACK_DATABASE_ID" '
+              function replace_placeholder(text, replacement,    needle, offset, out, position) {
+                needle = "\"REPLACE_WITH_D1_DATABASE_ID\""
+                out = ""
+                offset = 1
+                while ((position = index(substr(text, offset), needle)) > 0) {
+                  out = out substr(text, offset, position - 1) "\"" replacement "\""
+                  offset += position + length(needle) - 1
+                }
+                return out substr(text, offset)
+              }
               function flush_block() {
                 if (in_d1) {
-                  if (is_feedback) gsub(/"REPLACE_WITH_D1_DATABASE_ID"/, "\"" database_id "\"", block)
+                  if (is_feedback) block = replace_placeholder(block, database_id)
                   printf "%s", block
                 }
                 block = ""
