@@ -61,7 +61,10 @@ jobs:
           if [ -n "$PUZZLE_FEEDBACK_DATABASE_ID" ]; then
             awk -v database_id="$PUZZLE_FEEDBACK_DATABASE_ID" '
               function flush_block() {
-                if (in_d1) printf "%s", block
+                if (in_d1) {
+                  if (is_feedback) gsub(/"REPLACE_WITH_D1_DATABASE_ID"/, "\"" database_id "\"", block)
+                  printf "%s", block
+                }
                 block = ""
                 in_d1 = 0
                 is_feedback = 0
@@ -81,9 +84,6 @@ jobs:
                 if (in_d1) {
                   line = $0
                   if (line ~ /^[[:space:]]*binding[[:space:]]*=[[:space:]]*"PUZZLE_FEEDBACK"$/) is_feedback = 1
-                  if (is_feedback && line ~ /^[[:space:]]*database_id[[:space:]]*=[[:space:]]*"REPLACE_WITH_D1_DATABASE_ID"[[:space:]]*$/) {
-                    sub(/"REPLACE_WITH_D1_DATABASE_ID"/, "\"" database_id "\"", line)
-                  }
                   block = block line ORS
                 } else {
                   print
