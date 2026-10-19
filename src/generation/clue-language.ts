@@ -82,8 +82,21 @@ function renderAdjacent(template: PuzzleTemplate, constraint: Extract<ClueConstr
     : `${capitalise(relation)} in the ${orderedContext(template).toLowerCase()}.`;
 }
 
-function renderDistance(template: PuzzleTemplate, constraint: Extract<ClueConstraint, { kind: "distance" }>, index: number): string {
+export function renderDistanceConstraintText(
+  template: PuzzleTemplate,
+  constraint: Extract<ClueConstraint, { kind: "distance" }>,
+  index: number,
+  wording: "between-count" | "places-apart" = "between-count",
+): string {
   const { left, right } = orderedTerms(constraint);
+  if (wording === "places-apart") {
+    const positionWords = ["zero", "one", "two", "three", "four"];
+    const distance = positionWords[constraint.distance] ?? String(constraint.distance);
+    const place = constraint.distance === 1 ? "place" : "places";
+    return index === 0
+      ? `In the ${orderedContext(template).toLowerCase()}, ${left} and ${right} were exactly ${distance} ${place} apart.`
+      : `${left} and ${right} were exactly ${distance} ${place} apart in the ${orderedContext(template).toLowerCase()}.`;
+  }
   const betweenCount = constraint.distance - 1;
   const quantityWords = ["no", "one", "two", "three", "four"];
   const betweenCountText = quantityWords[betweenCount] ?? String(betweenCount);
@@ -102,6 +115,6 @@ export function renderConstraintText(template: PuzzleTemplate, constraint: ClueC
     case "sameRow": return renderSameRow(constraint, index);
     case "before": return renderBefore(template, constraint, index);
     case "adjacent": return renderAdjacent(template, constraint, index);
-    case "distance": return renderDistance(template, constraint, index);
+    case "distance": return renderDistanceConstraintText(template, constraint, index);
   }
 }

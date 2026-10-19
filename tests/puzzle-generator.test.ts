@@ -19,7 +19,9 @@ import {
   generatePuzzle,
   generateProgressivePuzzle,
   generatePuzzleAtDifficulty,
+  generatePuzzleAtDifficultyV5,
   generatePuzzleAtDifficultyWithFallback,
+  generatePuzzleForRequest,
 } from "../src/generation/generator.js";
 import { championshipBridgeTemplate } from "../src/templates/championship-bridge.js";
 import { championshipCircuitTemplate } from "../src/templates/championship-circuit.js";
@@ -101,6 +103,50 @@ test("targeted beginner puzzles complete under the bounded no-guess deduction mo
     assert.equal(puzzle.difficulty.level, level);
     assert.equal(puzzle.difficulty.evidence.humanSolve.solved, true);
   }
+});
+
+test("dense v5 target search uses a deterministic expanded strategy budget and preserves exact solvable output", () => {
+  const first = generatePuzzleAtDifficultyV5(championshipCircuitTemplate, "expert-relational", 9);
+  const second = generatePuzzleAtDifficultyV5(championshipCircuitTemplate, "expert-relational", 9);
+
+  assert.equal(first.requestedDifficultyLevel, 9);
+  assert.equal(first.difficultyProfile!.logical.level, 9);
+  assert.equal(first.difficultyProfile!.logical.status, "complete");
+  assert.equal(first.difficultyProfile!.logical.trace.usedGuessing, false);
+  assert.equal(countSolutions(first.spec, first.clues, 2), 1);
+  assert.equal(first.selectionDiagnostics?.strategyBudget, 12);
+  assert.deepEqual(first, second);
+});
+
+test("v5 expert clues can connect ordered positions across tournament categories", () => {
+  const v5 = generatePuzzle(championshipCircuitTemplate, "circuit-cross-order-v5", undefined, {
+    difficultyLevel: 11,
+    difficultyModel: "v5",
+    strategy: 0,
+  });
+  const legacy = generatePuzzle(championshipCircuitTemplate, "circuit-cross-order-v4");
+  const hasCrossCategoryOrder = (puzzle: typeof v5) => puzzle.clues.some(clue => {
+    if (clue.constraint.kind !== "before" && clue.constraint.kind !== "adjacent") return false;
+    const { left, right } = clue.constraint;
+    return left.category !== championshipCircuitTemplate.baseCategory
+      && right.category !== championshipCircuitTemplate.baseCategory
+      && left.category !== right.category;
+  });
+
+  assert.equal(hasCrossCategoryOrder(v5), true);
+  assert.equal(hasCrossCategoryOrder(legacy), false);
+});
+
+test("v5 request fallback preserves the requested level and returns a unique no-guess puzzle", () => {
+  const first = generatePuzzleForRequest(openDivisionTemplate, "target-v5-fallback-course", 5, true, undefined, "v5");
+  const second = generatePuzzleForRequest(openDivisionTemplate, "target-v5-fallback-course", 5, true, undefined, "v5");
+
+  assert.equal(first.requestedDifficultyLevel, 5);
+  assert.equal(first.difficulty.level, 5);
+  assert.equal(first.difficultyProfile!.logical.status, "complete");
+  assert.equal(first.difficultyProfile!.logical.trace.usedGuessing, false);
+  assert.equal(countSolutions(first.spec, first.clues, 2), 1);
+  assert.deepEqual(first, second);
 });
 
 test("the versioned beginner course also protects untargeted generation from guess-only traces", () => {
@@ -192,7 +238,7 @@ test("rendered clue metadata satisfies the language catalogue contract", () => {
   ];
 
   const rendered = renderClues(tournamentOrderTemplate, "metadata-contract", clues);
-  assert.ok(rendered.every(clue => clue.languageVersion === "yokaiba-clue-prose-v7"));
+  assert.ok(rendered.every(clue => clue.languageVersion === "yokaiba-clue-prose-v8"));
   assert.ok(rendered.every(clue => typeof clue.phraseVariant === "string" && clue.phraseVariant.length > 0));
 });
 
