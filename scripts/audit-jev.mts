@@ -32,6 +32,8 @@ import {
   removeCompletedAuditCheckpoint,
   rebuildPuzzleReviewCorpus,
   requestJevDecisionBatch,
+  summarizeResolvedModels,
+  JEV_REQUESTED_MODEL,
   writeAuditCheckpoint,
   SEMANTIC_ASSESSMENT_SCHEMA_VERSION,
   JEV_AUDIT_GENERATION_MODEL_VERSION,
@@ -45,7 +47,6 @@ import {
 } from "./audit-jev-support.js";
 
 const ENDPOINT = "https://openrouter.ai/api/alpha/decisions";
-const MODEL = "~typesafe/jev-latest";
 const templates = [tournamentOrderTemplate, tournamentOrderV2Template, openDivisionTemplate, championshipBridgeTemplate, championshipCircuitTemplate];
 const targetedTemplates = [tournamentOrderV2Template, openDivisionTemplate, championshipBridgeTemplate, championshipCircuitTemplate];
 const apiKey = process.env.OPENROUTER_API_KEY;
@@ -85,6 +86,10 @@ function initialClue(
       uniqueWithoutClue: contribution.uniqueWithout,
       humanTraceCompleteWithoutClue: contribution.humanTraceCompleteWithout,
       logicalContribution: contribution.logicalContribution,
+      deductionStepsUsingClue: contribution.deductionStepsUsingClue,
+      traceStepCountWithoutClue: contribution.traceStepCountWithoutClue,
+      traceStepDelta: contribution.traceStepDelta,
+      redundantWithClueIds: contribution.redundantWithClueIds,
     }),
     evaluationStatus: "pending",
     missingAnswers: [],
@@ -131,6 +136,7 @@ if (sourceReport) {
   const { resolvedModel: _resolvedModel, ...sourceConfiguration } = sourceReport.configuration;
   configuration = {
     ...sourceConfiguration,
+    requestedModel: JEV_REQUESTED_MODEL,
     generationModelVersion: sourceConfiguration.generationModelVersion
       ?? sourceReport.clueAudit.clues[0]?.difficultyModelVersion
       ?? JEV_AUDIT_GENERATION_MODEL_VERSION,
@@ -143,7 +149,7 @@ if (sourceReport) {
     clueSamples: args.clueSamples,
     batchSize: args.batchSize,
     endpoint: ENDPOINT,
-    requestedModel: MODEL,
+    requestedModel: JEV_REQUESTED_MODEL,
     semanticAssessmentSchemaVersion: SEMANTIC_ASSESSMENT_SCHEMA_VERSION,
     generationModelVersion: JEV_AUDIT_GENERATION_MODEL_VERSION,
     puzzleReview: args.puzzleReview,
@@ -165,7 +171,7 @@ if (args.resume) {
   console.error(`Resuming checkpoint: ${checkpoint.difficultyAudit.length} raw and ${checkpoint.productionDifficultyAudit.length} progressive templates, ${checkpoint.targetedDifficultyAudit.reduce((sum, row) => sum + row.levels.length, 0)} targeted levels, ${checkpoint.clues.filter(clue => clue.evaluationStatus !== "pending").length}/${checkpoint.clues.length} clues processed.`);
 } else if (sourceReport) {
   checkpoint = {
-    version: 3,
+    version: 4,
     startedAt: sourceReport.startedAt,
     configuration,
     difficultyAudit: sourceReport.difficultyAudit,
@@ -175,6 +181,12 @@ if (args.resume) {
     puzzles: rebuildPuzzleReviewCorpus(sourceReport, Object.fromEntries(templates.map(template => [template.id, template.title]))),
     totalCost: sourceReport.clueAudit.totalCost,
     resolvedModel: sourceReport.configuration.resolvedModel ?? sourceReport.clueAudit.model,
+    resolvedModelsByPhase: {
+      clue: { models: sourceReport.clueAudit.models, attribution: sourceReport.clueAudit.modelAttribution },
+      puzzle: sourceReport.puzzleAudit.enabled
+        ? { models: sourceReport.puzzleAudit.models, attribution: sourceReport.puzzleAudit.modelAttribution }
+        : { models: [], attribution: "phase-specific" },
+    },
     totalInputTokens: sourceReport.clueAudit.totalInputTokens,
     totalOutputTokens: sourceReport.clueAudit.totalOutputTokens,
   };
@@ -182,7 +194,7 @@ if (args.resume) {
   console.error(`Prepared ${checkpoint.puzzles.length} puzzle reviews from ${checkpoint.clues.length} saved clues.`);
 } else {
   checkpoint = {
-    version: 3,
+    version: 4,
     startedAt: invocationStartedAt,
     configuration,
     difficultyAudit: [],
@@ -192,6 +204,10 @@ if (args.resume) {
     puzzles: [],
     totalCost: 0,
     resolvedModel: null,
+    resolvedModelsByPhase: {
+      clue: { models: [], attribution: "phase-specific" },
+      puzzle: { models: [], attribution: "phase-specific" },
+    },
     totalInputTokens: 0,
     totalOutputTokens: 0,
   };
@@ -262,8 +278,8 @@ try {
     const batch = checkpoint.clues.slice(offset, offset + configuration.batchSize);
     const pending = batch.filter(clue => clue.evaluationStatus === "pending");
     if (pending.length === 0) continue;
-    const response = await requestSemanticBatch(buildClueDecisionPayload(MODEL, pending));
-    accumulateResponseUsage(checkpoint, response);
+    const response = await requestSemanticBatch(buildClueDecisionPayload(JEV_REQUESTED_MODEL, pending));
+    accumulateResponseUsage(checkpoint, response, "clue");
     for (const [index, clue] of pending.entries()) {
       checkpoint.clues[offset + batch.indexOf(clue)] = applyJevAnswers(clue, response.answers, index);
     }
@@ -276,8 +292,8 @@ try {
       const batch = checkpoint.puzzles.slice(offset, offset + configuration.batchSize);
       const pending = batch.filter(puzzle => puzzle.evaluationStatus === "pending");
       if (pending.length === 0) continue;
-      const response = await requestSemanticBatch(buildPuzzleDecisionPayload(MODEL, pending));
-      accumulateResponseUsage(checkpoint, response);
+      const response = await requestSemanticBatch(buildPuzzleDecisionPayload(JEV_REQUESTED_MODEL, pending));
+      accumulateResponseUsage(checkpoint, response, "puzzle");
       for (const [index, puzzle] of pending.entries()) {
         checkpoint.puzzles[offset + batch.indexOf(puzzle)] = applyJevPuzzleAnswers(puzzle, response.answers, index);
       }
@@ -307,16 +323,28 @@ const clueAuditStatus = completeClueCount === checkpoint.clues.length
   : completeClueCount === 0 && unavailableClues.length === checkpoint.clues.length
     ? "unavailable"
     : "partial";
+const clueModelAttribution = summarizeResolvedModels(
+  checkpoint.resolvedModelsByPhase.clue.models,
+  checkpoint.resolvedModelsByPhase.clue.attribution,
+);
+const puzzleModelAttribution = summarizeResolvedModels(
+  checkpoint.resolvedModelsByPhase.puzzle.models,
+  checkpoint.resolvedModelsByPhase.puzzle.attribution,
+);
+const overallModelAttribution = summarizeResolvedModels([
+  ...clueModelAttribution.models,
+  ...puzzleModelAttribution.models,
+]);
 const report: JevAuditReport = {
   startedAt: checkpoint.startedAt,
   generatedAt: new Date().toISOString(),
-  configuration: { ...configuration, resolvedModel: checkpoint.resolvedModel },
+  configuration: { ...configuration, resolvedModel: overallModelAttribution.model },
   difficultyAudit: checkpoint.difficultyAudit,
   productionDifficultyAudit: checkpoint.productionDifficultyAudit,
   targetedDifficultyAudit: checkpoint.targetedDifficultyAudit,
   semanticCalibrationEvidence: aggregateSemanticCalibrationEvidence(checkpoint.clues, checkpoint.puzzles),
   clueAudit: {
-    model: checkpoint.resolvedModel,
+    ...clueModelAttribution,
     sampledClues: checkpoint.clues.length,
     totalCost: checkpoint.totalCost,
     totalInputTokens: checkpoint.totalInputTokens,
@@ -328,6 +356,7 @@ const report: JevAuditReport = {
     clues: checkpoint.clues,
   },
   puzzleAudit: {
+    ...puzzleModelAttribution,
     enabled: configuration.puzzleReview,
     sampledPuzzles: configuration.puzzleReview ? checkpoint.puzzles.length : 0,
     completePuzzles: completePuzzles.length,

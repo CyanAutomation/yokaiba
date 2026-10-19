@@ -23,6 +23,7 @@ import {
   buildPuzzleDecisionPayload,
   describeConstraint,
   JEV_REVIEW_THRESHOLDS,
+  JEV_REQUESTED_MODEL,
   markClueUnavailable,
   puzzleReviewFlagReasons,
   rebuildPuzzleReviewCorpus,
@@ -89,15 +90,37 @@ test("JEV clue samples use the API's latest default difficulty model", () => {
   assert.equal(generated.difficulty.modelVersion, JEV_AUDIT_GENERATION_MODEL_VERSION);
 });
 
+test("every JEV audit phase uses the stable latest alias", () => {
+  assert.equal(JEV_REQUESTED_MODEL, "~typesafe/jev-latest");
+});
+
 test("audit usage aggregation adds provider totals and preserves missing values", () => {
-  const checkpoint = { resolvedModel: "previous-model", totalCost: 1, totalInputTokens: 2, totalOutputTokens: 3 };
+  const checkpoint = {
+    resolvedModel: "previous-model",
+    resolvedModelsByPhase: {
+      clue: { models: ["clue-model"], attribution: "phase-specific" as const },
+      puzzle: { models: [], attribution: "phase-specific" as const },
+    },
+    totalCost: 1,
+    totalInputTokens: 2,
+    totalOutputTokens: 3,
+  };
   accumulateResponseUsage(checkpoint, {
-    model: "resolved-model",
+    model: "puzzle-model",
     answers: {},
     usage: { cost: 0.5, inputTokens: 4, outputTokens: 6 },
+  }, "puzzle");
+  accumulateResponseUsage(checkpoint, { model: "clue-model", answers: {}, usage: {} }, "clue");
+  assert.deepEqual(checkpoint, {
+    resolvedModel: "clue-model",
+    resolvedModelsByPhase: {
+      clue: { models: ["clue-model"], attribution: "phase-specific" },
+      puzzle: { models: ["puzzle-model"], attribution: "phase-specific" },
+    },
+    totalCost: 1.5,
+    totalInputTokens: 6,
+    totalOutputTokens: 9,
   });
-  accumulateResponseUsage(checkpoint, { answers: {}, usage: {} });
-  assert.deepEqual(checkpoint, { resolvedModel: "resolved-model", totalCost: 1.5, totalInputTokens: 6, totalOutputTokens: 9 });
 });
 
 const configuration: JevRunConfiguration = {
@@ -290,7 +313,7 @@ test("audit Markdown reports targeted delivery, fallbacks, confidence, and incom
       }],
     }],
     clueAudit: {
-      model: "test-model", sampledClues: 1, totalCost: 0.01,
+      model: "test-model", models: ["test-model"], modelAttribution: "phase-specific", sampledClues: 1, totalCost: 0.01,
       totalInputTokens: 10, totalOutputTokens: 20, status: "partial",
       flaggedClues: [partial], incompleteClues: [partial], unavailableClues: [], clues: [partial],
     },
@@ -298,11 +321,13 @@ test("audit Markdown reports targeted delivery, fallbacks, confidence, and incom
       templateId: "test-template", seed: "seed-1", logicalDifficultyLevel: 3, difficultyModelVersion: "yokaiba-difficulty-v4",
       semanticAssessment: { readability: 1.8, ambiguity: 0.1, linguisticComplexity: 0.4, relationshipExplicitness: 1.9, evaluatedClues: 1, totalClues: 1 },
     }],
-    puzzleAudit: { enabled: false, sampledPuzzles: 0, completePuzzles: 0, incompletePuzzles: 0, unavailablePuzzles: 0, flaggedPuzzles: [], puzzles: [] },
+    puzzleAudit: { model: null, models: [], modelAttribution: "phase-specific", enabled: false, sampledPuzzles: 0, completePuzzles: 0, incompletePuzzles: 0, unavailablePuzzles: 0, flaggedPuzzles: [], puzzles: [] },
   };
 
   const markdown = buildAuditMarkdown(report);
   assert.match(markdown, /Targeted difficulty audit/);
+  assert.match(markdown, /JEV clue-review model: test-model/);
+  assert.match(markdown, /JEV puzzle-review model: not returned/);
   assert.match(markdown, /Puzzle generation model: yokaiba-difficulty-v5/);
   assert.match(markdown, /Logical clue contribution by removal/);
   assert.match(markdown, /Ablation was measured for 1\/1 sampled clues/);
@@ -334,7 +359,7 @@ test("audit checkpoints round-trip, migrate older versions, and remove completed
   const directory = await mkdtemp(join(tmpdir(), "jev-audit-test-"));
   const checkpointPath = join(directory, "audit.checkpoint.json");
   const checkpoint: AuditCheckpoint = {
-    version: 3,
+    version: 4,
     startedAt: "2026-09-29T00:00:00.000Z",
     configuration,
     difficultyAudit: [],
@@ -351,6 +376,10 @@ test("audit checkpoints round-trip, migrate older versions, and remove completed
     puzzles: [{ ...puzzle(), difficultyModelVersion: JEV_AUDIT_GENERATION_MODEL_VERSION }],
     totalCost: 0,
     resolvedModel: "test-model",
+    resolvedModelsByPhase: {
+      clue: { models: ["test-model"], attribution: "phase-specific" },
+      puzzle: { models: [], attribution: "phase-specific" },
+    },
     totalInputTokens: 0,
     totalOutputTokens: 0,
   };
@@ -363,14 +392,18 @@ test("audit checkpoints round-trip, migrate older versions, and remove completed
 
     const priorV5Checkpoint = JSON.parse(JSON.stringify(checkpoint)) as Record<string, unknown>;
     delete (priorV5Checkpoint.configuration as Record<string, unknown>).generationModelVersion;
+    delete priorV5Checkpoint.resolvedModelsByPhase;
     priorV5Checkpoint.version = 2;
     await writeFile(checkpointPath, `${JSON.stringify(priorV5Checkpoint)}\n`);
     const resumedPriorV5 = await readAuditCheckpoint(checkpointPath);
     assert.equal(resumedPriorV5?.configuration.generationModelVersion, JEV_AUDIT_GENERATION_MODEL_VERSION);
+    assert.equal(resumedPriorV5?.resolvedModelsByPhase.clue.attribution, "legacy-aggregate");
+    assert.deepEqual(resumedPriorV5?.resolvedModelsByPhase.clue.models, ["test-model"]);
     assert.doesNotThrow(() => assertCheckpointConfiguration(resumedPriorV5!.configuration, configuration));
 
     const legacyCheckpoint = JSON.parse(JSON.stringify(checkpoint)) as Record<string, unknown>;
     delete legacyCheckpoint.productionDifficultyAudit;
+    delete legacyCheckpoint.resolvedModelsByPhase;
     legacyCheckpoint.version = 2;
     delete (legacyCheckpoint.configuration as Record<string, unknown>).generationModelVersion;
     legacyCheckpoint.clues = [{ ...clue(), difficultyModelVersion: "yokaiba-difficulty-v4" }];
@@ -393,7 +426,8 @@ test("audit checkpoints round-trip, migrate older versions, and remove completed
     }
     await writeFile(checkpointPath, `${JSON.stringify(legacyCheckpoint)}\n`);
     const migrated = await readAuditCheckpoint(checkpointPath);
-    assert.equal(migrated?.version, 3);
+    assert.equal(migrated?.version, 4);
+    assert.equal(migrated?.resolvedModelsByPhase.clue.attribution, "legacy-aggregate");
     assert.deepEqual(migrated?.productionDifficultyAudit, []);
     assert.deepEqual(migrated?.difficultyAudit, [{
       templateId: "legacy-template",
@@ -405,6 +439,16 @@ test("audit checkpoints round-trip, migrate older versions, and remove completed
     }]);
     assert.equal(migrated?.configuration.generationModelVersion, "yokaiba-difficulty-v4");
     assert.throws(() => assertCheckpointConfiguration(migrated!.configuration, configuration), /checkpoint yokaiba-difficulty-v4, current yokaiba-difficulty-v5; use a new output path/);
+
+    const legacyPuzzleReviewCheckpoint = JSON.parse(JSON.stringify(checkpoint)) as Record<string, unknown>;
+    delete legacyPuzzleReviewCheckpoint.resolvedModelsByPhase;
+    (legacyPuzzleReviewCheckpoint.configuration as Record<string, unknown>).puzzleReview = true;
+    (legacyPuzzleReviewCheckpoint.puzzles as Array<Record<string, unknown>>)[0]!.evaluationStatus = "complete";
+    await writeFile(checkpointPath, `${JSON.stringify(legacyPuzzleReviewCheckpoint)}\n`);
+    const migratedPuzzleReview = await readAuditCheckpoint(checkpointPath);
+    assert.equal(migratedPuzzleReview?.resolvedModelsByPhase.clue.attribution, "legacy-aggregate");
+    assert.equal(migratedPuzzleReview?.resolvedModelsByPhase.puzzle.attribution, "legacy-aggregate");
+    assert.deepEqual(migratedPuzzleReview?.resolvedModelsByPhase.puzzle.models, ["test-model"]);
 
     await removeCompletedAuditCheckpoint(checkpointPath);
     await assert.rejects(readFile(checkpointPath), { code: "ENOENT" });
@@ -418,7 +462,7 @@ test("targeted difficulty checkpoint resumes at the first unfinished level", asy
   const directory = await mkdtemp(join(tmpdir(), "jev-level-checkpoint-test-"));
   const checkpointPath = join(directory, "audit.checkpoint.json");
   const checkpoint: AuditCheckpoint = {
-    version: 3,
+    version: 4,
     startedAt: "2026-09-29T00:00:00.000Z",
     configuration,
     difficultyAudit: [],
@@ -428,6 +472,10 @@ test("targeted difficulty checkpoint resumes at the first unfinished level", asy
     puzzles: [],
     totalCost: 0,
     resolvedModel: "test-model",
+    resolvedModelsByPhase: {
+      clue: { models: [], attribution: "phase-specific" },
+      puzzle: { models: [], attribution: "phase-specific" },
+    },
     totalInputTokens: 0,
     totalOutputTokens: 0,
   };
@@ -485,6 +533,10 @@ test("older JEV reports can be loaded for follow-up puzzle review", async () => 
     const report = await readJevAuditReport(reportPath);
     assert.deepEqual(report.productionDifficultyAudit, []);
     assert.deepEqual(report.clueAudit.clues, []);
+    assert.deepEqual(report.clueAudit.models, ["test-model"]);
+    assert.equal(report.clueAudit.modelAttribution, "legacy-aggregate");
+    assert.deepEqual(report.puzzleAudit.models, []);
+    assert.match(buildAuditMarkdown(report), /legacy aggregate attribution/);
   } finally {
     await rm(directory, { recursive: true, force: true });
   }
@@ -564,10 +616,10 @@ test("puzzle review rebuilds sampled puzzle clue sets from an earlier report", (
       semanticAssessment: { evaluatedClues: 1, totalClues: 1 },
     }],
     clueAudit: {
-      model: "test-model", sampledClues: 1, totalCost: 0, totalInputTokens: 0, totalOutputTokens: 0,
+      model: "test-model", models: ["test-model"], modelAttribution: "phase-specific", sampledClues: 1, totalCost: 0, totalInputTokens: 0, totalOutputTokens: 0,
       status: "complete", flaggedClues: [], incompleteClues: [], unavailableClues: [], clues: [sourceClue],
     },
-    puzzleAudit: { enabled: false, sampledPuzzles: 0, completePuzzles: 0, incompletePuzzles: 0, unavailablePuzzles: 0, flaggedPuzzles: [], puzzles: [] },
+    puzzleAudit: { model: null, models: [], modelAttribution: "phase-specific", enabled: false, sampledPuzzles: 0, completePuzzles: 0, incompletePuzzles: 0, unavailablePuzzles: 0, flaggedPuzzles: [], puzzles: [] },
   };
 
   const [rebuilt] = rebuildPuzzleReviewCorpus(report, { "test-template": "Test Order" });

@@ -8,6 +8,8 @@ export { parseAuditArguments } from "./audit-jev-arguments.js";
 export { buildAuditMarkdown } from "./audit-jev-markdown.js";
 
 export const SEMANTIC_ASSESSMENT_SCHEMA_VERSION = "yokaiba-jev-semantic-v2";
+/** Stable provider alias used for every semantic audit phase. */
+export const JEV_REQUESTED_MODEL = "~typesafe/jev-latest";
 export const JEV_AUDIT_GENERATION_MODEL_VERSION = DEFAULT_DIFFICULTY_MODEL_VERSION;
 
 /** Generate from the current API default so the semantic sample matches public output. */
@@ -55,11 +57,47 @@ function withFallback<T>(value: T | undefined, fallback: T): T {
   return value === undefined ? fallback : value;
 }
 
+export function summarizeResolvedModels(
+  models: readonly string[],
+  modelAttribution: "phase-specific" | "legacy-aggregate" = "phase-specific",
+) {
+  const uniqueModels = [...new Set(models.filter((model): model is string => typeof model === "string" && model.length > 0))];
+  return {
+    model: uniqueModels.length === 1 ? uniqueModels[0]! : null,
+    models: uniqueModels,
+    modelAttribution,
+  };
+}
+
+function normalizedModelPhase(
+  value: unknown,
+  fallbackModel: string | null,
+): { models: string[]; attribution: "phase-specific" | "legacy-aggregate" } {
+  if (value !== null && typeof value === "object" && !Array.isArray(value)) {
+    const phase = value as { models?: unknown; attribution?: unknown };
+    if (Array.isArray(phase.models)) {
+      return {
+        models: [...new Set(phase.models.filter((model): model is string => typeof model === "string" && model.length > 0))],
+        attribution: phase.attribution === "phase-specific" ? "phase-specific" : "legacy-aggregate",
+      };
+    }
+  }
+  return {
+    models: fallbackModel ? [fallbackModel] : [],
+    attribution: "legacy-aggregate",
+  };
+}
+
 export function accumulateResponseUsage(
-  checkpoint: Pick<AuditCheckpoint, "resolvedModel" | "totalCost" | "totalInputTokens" | "totalOutputTokens">,
+  checkpoint: Pick<AuditCheckpoint, "resolvedModel" | "resolvedModelsByPhase" | "totalCost" | "totalInputTokens" | "totalOutputTokens">,
   response: JevDecisionResponse,
+  phase: "clue" | "puzzle",
 ): void {
-  if (response.model) checkpoint.resolvedModel = response.model;
+  if (response.model) {
+    checkpoint.resolvedModel = response.model;
+    const phaseModels = checkpoint.resolvedModelsByPhase[phase].models;
+    if (!phaseModels.includes(response.model)) phaseModels.push(response.model);
+  }
   checkpoint.totalCost += withFallback(response.usage.cost, 0);
   checkpoint.totalInputTokens += withFallback(response.usage.inputTokens, 0);
   checkpoint.totalOutputTokens += withFallback(response.usage.outputTokens, 0);
@@ -136,6 +174,10 @@ export interface AuditedClue {
   uniqueWithoutClue?: boolean;
   humanTraceCompleteWithoutClue?: boolean;
   logicalContribution?: "uniqueness-critical" | "no-guess-critical" | "not-essential";
+  deductionStepsUsingClue?: number;
+  traceStepCountWithoutClue?: number;
+  traceStepDelta?: number;
+  redundantWithClueIds?: string[];
   faithful?: number;
   faithfulConfidence?: number;
   ambiguous?: number;
@@ -230,7 +272,7 @@ export interface AuditArguments {
 }
 
 export interface AuditCheckpoint {
-  version: 3;
+  version: 4;
   startedAt: string;
   configuration: JevRunConfiguration;
   difficultyAudit: DifficultyCorpusAudit[];
@@ -240,6 +282,10 @@ export interface AuditCheckpoint {
   puzzles: AuditedPuzzle[];
   totalCost: number;
   resolvedModel: string | null;
+  resolvedModelsByPhase: {
+    clue: { models: string[]; attribution: "phase-specific" | "legacy-aggregate" };
+    puzzle: { models: string[]; attribution: "phase-specific" | "legacy-aggregate" };
+  };
   totalInputTokens: number;
   totalOutputTokens: number;
 }
@@ -254,6 +300,8 @@ export interface JevAuditReport {
   semanticCalibrationEvidence: SemanticPuzzleEvidence[];
   clueAudit: {
     model: string | null;
+    models: string[];
+    modelAttribution: "phase-specific" | "legacy-aggregate";
     sampledClues: number;
     totalCost: number;
     totalInputTokens: number;
@@ -265,6 +313,9 @@ export interface JevAuditReport {
     clues: AuditedClue[];
   };
   puzzleAudit: {
+    model: string | null;
+    models: string[];
+    modelAttribution: "phase-specific" | "legacy-aggregate";
     enabled: boolean;
     sampledPuzzles: number;
     completePuzzles: number;
@@ -727,15 +778,31 @@ export async function readAuditCheckpoint(path: string): Promise<AuditCheckpoint
     difficultyAudit?: unknown;
     productionDifficultyAudit?: unknown;
     targetedDifficultyAudit?: unknown;
+    resolvedModel?: unknown;
+    resolvedModelsByPhase?: unknown;
     [key: string]: unknown;
   };
-  if (!checkpoint || (checkpoint.version !== 2 && checkpoint.version !== 3) || !Array.isArray(checkpoint.clues) || !Array.isArray(checkpoint.puzzles) || !Array.isArray(checkpoint.difficultyAudit) || !Array.isArray(checkpoint.targetedDifficultyAudit)) {
+  if (!checkpoint || (checkpoint.version !== 2 && checkpoint.version !== 3 && checkpoint.version !== 4) || !Array.isArray(checkpoint.clues) || !Array.isArray(checkpoint.puzzles) || !Array.isArray(checkpoint.difficultyAudit) || !Array.isArray(checkpoint.targetedDifficultyAudit)) {
     throw new Error(`invalid audit checkpoint: ${path}`);
   }
   const parsedCheckpoint = checkpoint as unknown as AuditCheckpoint;
+  const legacyResolvedModel = typeof checkpoint.resolvedModel === "string" ? checkpoint.resolvedModel : null;
+  const priorModels = checkpoint.resolvedModelsByPhase !== null && typeof checkpoint.resolvedModelsByPhase === "object"
+    ? checkpoint.resolvedModelsByPhase as Record<string, unknown>
+    : {};
+  const priorConfiguration = checkpoint.configuration !== null && typeof checkpoint.configuration === "object"
+    ? checkpoint.configuration as Record<string, unknown>
+    : {};
+  const legacyPuzzlePhaseAttempted = priorConfiguration.puzzleReview === true
+    && checkpoint.puzzles.some(puzzle => puzzle !== null && typeof puzzle === "object"
+      && (puzzle as Record<string, unknown>).evaluationStatus !== "pending");
   return {
     ...parsedCheckpoint,
-    version: 3,
+    version: 4,
+    resolvedModelsByPhase: {
+      clue: normalizedModelPhase(priorModels.clue, legacyResolvedModel),
+      puzzle: normalizedModelPhase(priorModels.puzzle, legacyPuzzlePhaseAttempted ? legacyResolvedModel : null),
+    },
     configuration: {
       ...parsedCheckpoint.configuration,
       generationModelVersion: checkpointGenerationModelVersion(checkpoint),
@@ -753,8 +820,27 @@ export async function readJevAuditReport(path: string): Promise<JevAuditReport> 
     || !report.clueAudit || !Array.isArray(report.clueAudit.clues) || !report.puzzleAudit) {
     throw new Error(`invalid JEV audit report: ${path}`);
   }
+  const legacyResolvedModel = typeof report.configuration.resolvedModel === "string" ? report.configuration.resolvedModel : null;
+  const rawClueAudit = report.clueAudit as JevAuditReport["clueAudit"];
+  const rawPuzzleAudit = report.puzzleAudit as JevAuditReport["puzzleAudit"];
+  const clueModels = Array.isArray(rawClueAudit.models)
+    ? rawClueAudit.models
+    : (rawClueAudit.model ?? legacyResolvedModel) ? [rawClueAudit.model ?? legacyResolvedModel!] : [];
+  const puzzleModels = Array.isArray(rawPuzzleAudit.models)
+    ? rawPuzzleAudit.models
+    : rawPuzzleAudit.enabled && legacyResolvedModel ? [legacyResolvedModel] : [];
+  const clueModelAttribution = summarizeResolvedModels(
+    clueModels,
+    rawClueAudit.modelAttribution === "phase-specific" ? "phase-specific" : "legacy-aggregate",
+  );
+  const puzzleModelAttribution = summarizeResolvedModels(
+    puzzleModels,
+    rawPuzzleAudit.modelAttribution === "phase-specific" ? "phase-specific" : "legacy-aggregate",
+  );
   return {
     ...report,
+    clueAudit: { ...rawClueAudit, ...clueModelAttribution },
+    puzzleAudit: { ...rawPuzzleAudit, ...puzzleModelAttribution },
     difficultyAudit: normalizeDifficultyAuditRows(report.difficultyAudit),
     productionDifficultyAudit: normalizeDifficultyAuditRows(report.productionDifficultyAudit),
   } as JevAuditReport;
