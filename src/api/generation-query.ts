@@ -19,11 +19,12 @@ export function parseGenerationQuery(url: URL): GenerationParameters {
   }
   const rawDifficulty = url.searchParams.get("difficultyLevel");
   const rawFallback = url.searchParams.get("allowSeedFallback");
+  const rawDifficultyModel = url.searchParams.get("difficultyModel");
   return normalizeGenerationParameters({
     templateId: url.searchParams.get("templateId"),
     seed: url.searchParams.get("seed"),
     ...(rawDifficulty === null ? {} : { difficultyLevel: Number(rawDifficulty) }),
     ...(rawFallback === null ? {} : { allowSeedFallback: queryBoolean(rawFallback) }),
-    ...(url.searchParams.get("difficultyModel") === null ? {} : { difficultyModel: url.searchParams.get("difficultyModel") }),
+    ...(rawDifficultyModel === null ? {} : { difficultyModel: rawDifficultyModel }),
   });
 }

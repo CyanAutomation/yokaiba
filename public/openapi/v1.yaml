@@ -729,7 +729,7 @@ components:
           properties: { code: { type: string }, message: { type: string } }
     DifficultyUnavailableError:
       type: object
-      required: [error, templateId, requestedDifficultyLevel, availableDifficultyLevels]
+      required: [error, templateId, availableDifficultyLevels]
       properties:
         error:
           type: object
@@ -738,10 +738,14 @@ components:
             code: { type: string, const: difficulty_unavailable }
             message: { type: string }
         templateId: { type: string }
-        requestedDifficultyLevel: { type: integer, minimum: 1, maximum: 12 }
+        requestedDifficultyLevel:
+          type: integer
+          minimum: 1
+          maximum: 12
+          description: Present only when a target difficulty was requested.
         availableDifficultyLevels:
           type: array
-          description: Alternative levels observed while trying all deterministic strategies for the requested level.
+          description: Levels observed while trying deterministic v5 generation strategies.
           items: { type: integer, minimum: 1, maximum: 12 }
           uniqueItems: true
         selectionDiagnostics: { type: object, additionalProperties: true }

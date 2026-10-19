@@ -4,7 +4,7 @@ import { solveWithTelemetry } from "../src/constraints/solver.js";
 import { evaluateHumanDeductionTraceV5 } from "../src/generation/human-deduction-v5.js";
 import { assessPuzzleDifficultyV5 } from "../src/generation/difficulty-assessment.js";
 import { DIFFICULTY_BANDS_V5, DIFFICULTY_MODEL_V5 } from "../src/generation/difficulty-profile.js";
-import { DifficultyUnavailableError, generatePuzzle, generatePuzzleAtDifficultyV5 } from "../src/generation/generator.js";
+import { DifficultyUnavailableError, generatePuzzle, generatePuzzleAtDifficultyV5, generatePuzzleForRequest } from "../src/generation/generator.js";
 import type { Clue, PuzzleTemplate } from "../src/domain/types.js";
 import { tournamentOrderV2Template } from "../src/templates/tournament-order-v2.js";
 import { championshipCircuitTemplate } from "../src/templates/championship-circuit.js";
@@ -129,6 +129,24 @@ test("comparison mode assesses the same v4 clue set and leaves the default respo
   assert.equal(optedIn.difficulty.modelVersion, DIFFICULTY_MODEL_V5);
   assert.equal(optedIn.difficultyProfile?.logical.status, "complete");
   assert.equal(optedIn.id.includes(DIFFICULTY_MODEL_V5), true);
+});
+
+test("progressive v5 unavailability does not report a requested difficulty level", () => {
+  const alwaysUniqueSolver = { version: "always-unique", solve: () => [], countSolutions: () => 1 };
+
+  assert.throws(() => generatePuzzleForRequest(
+    championshipCircuitTemplate,
+    "progressive-error-0",
+    undefined,
+    false,
+    alwaysUniqueSolver,
+    "v5",
+  ), error => {
+    assert.ok(error instanceof DifficultyUnavailableError);
+    assert.equal(error.requestedDifficultyLevel, undefined);
+    assert.match(error.message, /no complete difficulty v5 puzzle is available/);
+    return true;
+  });
 });
 
 test("v5 target selection reports in-band candidates and measured score gaps", () => {

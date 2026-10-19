@@ -170,7 +170,7 @@ export class DifficultyUnavailableError extends Error {
    */
   readonly availableDifficultyLevels: readonly DifficultyLevel[];
   readonly templateId: string;
-  readonly requestedDifficultyLevel: DifficultyLevel;
+  readonly requestedDifficultyLevel?: DifficultyLevel;
   readonly diagnostics?: {
     modelVersion: string;
     strategiesAttempted: number;
@@ -183,14 +183,16 @@ export class DifficultyUnavailableError extends Error {
   constructor(
     templateId: string,
     seed: string,
-    level: number,
+    level: number | undefined,
     availableDifficultyLevels: readonly DifficultyLevel[] = [],
     diagnostics?: DifficultyUnavailableError["diagnostics"],
   ) {
-    super(`difficulty level ${level} is unavailable for template ${templateId} and seed ${seed}`);
+    super(level === undefined
+      ? `no complete difficulty v5 puzzle is available for template ${templateId} and seed ${seed}`
+      : `difficulty level ${level} is unavailable for template ${templateId} and seed ${seed}`);
     this.name = "DifficultyUnavailableError";
     this.templateId = templateId;
-    this.requestedDifficultyLevel = level as DifficultyLevel;
+    if (level !== undefined) this.requestedDifficultyLevel = level as DifficultyLevel;
     this.availableDifficultyLevels = availableDifficultyLevels;
     this.diagnostics = diagnostics;
   }
@@ -263,9 +265,9 @@ function v5ClueWeight(clue: Clue, level: DifficultyLevel, strategy: number, rowC
     [5, 4, 2, 3, 0, 1],
     [3, 2, 1, 3, 0, 4],
     [4, 3, 2, 3, 0, 1],
-    [5, 4, 2, 3, 0, 1],  // Level 9: same-row and distance relations lead.
+    [5, 4, 2, 3, 1, 0],  // Level 9: exact-distance and same-row relations lead.
     [4, 5, 2, 3, 1, 0],  // Level 10: distance and same-row relations lead.
-    [5, 4, 2, 3, 0, 1],  // Level 11: cross-category row links precede direct facts.
+    [5, 4, 1, 3, 2, 0],  // Level 11: exact-distance clues lead, then ordering.
     [5, 4, 3, 2, 1, 0],  // Level 12: lead with exact-distance and cross-category row links.
   ];
   const rank = preferences[level - 1]![family]!;
@@ -485,7 +487,7 @@ function generateV5Progressive(template: PuzzleTemplate, seed: string, solver: P
       selectedScore: best.difficultyProfile!.logical.score,
     },
   };
-  throw new DifficultyUnavailableError(template.id, seed, 1, [...observed].sort((left, right) => left - right), {
+  throw new DifficultyUnavailableError(template.id, seed, undefined, [...observed].sort((left, right) => left - right), {
     modelVersion: DIFFICULTY_MODEL_V5, strategiesAttempted: strategyLimit, eligibleCandidates: 0, reason: "no_candidate_in_band",
   });
 }

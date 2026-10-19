@@ -211,85 +211,85 @@ export function evaluateHumanDeductionTraceV5(spec: PuzzleSpec, clues: readonly 
     rounds += 1;
     changed = false;
     for (const clue of orderedClues) {
-    const constraint = clue.constraint;
-    if (constraint.kind === "matches" || constraint.kind === "notMatches") {
-      const row = baseValues.indexOf(constraint.subject);
-      const cells = possible.get(constraint.category);
-      if (row < 0 || !cells?.[row]) continue;
-      const before = cells[row]!;
-      const categories = [baseCategory, constraint.category];
-      const workingMemoryDemand = relevantPossibilities([constraint.category]);
-      const removed = constraint.kind === "matches"
-        ? [...before].filter(value => value !== constraint.value)
-        : before.has(constraint.value) ? [constraint.value] : [];
-      if (removed.length === 0) continue;
-      const parentIds = constraint.kind === "notMatches" && before.size === removed.length + 1
-        ? [...before].filter(value => value !== constraint.value)
-          .map(value => reasonByElimination.get(termKey(constraint.category, row, value))?.deductionId)
-          .filter((id): id is string => id !== undefined)
-        : [];
-      for (const value of removed) before.delete(value);
-      const placements = constraint.kind === "matches" && before.has(constraint.value)
-        ? [{ category: constraint.category, row, value: constraint.value }]
-        : before.size === 1
-          ? [{ category: constraint.category, row, value: [...before][0]! }]
+      const constraint = clue.constraint;
+      if (constraint.kind === "matches" || constraint.kind === "notMatches") {
+        const row = baseValues.indexOf(constraint.subject);
+        const cells = possible.get(constraint.category);
+        if (row < 0 || !cells?.[row]) continue;
+        const before = cells[row]!;
+        const categories = [baseCategory, constraint.category];
+        const workingMemoryDemand = relevantPossibilities([constraint.category]);
+        const removed = constraint.kind === "matches"
+          ? [...before].filter(value => value !== constraint.value)
+          : before.has(constraint.value) ? [constraint.value] : [];
+        if (removed.length === 0) continue;
+        const parentIds = constraint.kind === "notMatches" && before.size === removed.length + 1
+          ? [...before].filter(value => value !== constraint.value)
+            .map(value => reasonByElimination.get(termKey(constraint.category, row, value))?.deductionId)
+            .filter((id): id is string => id !== undefined)
           : [];
-      record({
-        rule: constraint.kind === "matches" ? "direct-fact" : "simple-elimination",
-        clueIds: [clue.id], categories, dependsOn: parentIds,
-        eliminatedPossibilities: removed.map(value => ({ category: constraint.category, row, value })),
-        placements, workingMemoryDemand,
-      });
-      changed = true;
-      continue;
-    }
+        for (const value of removed) before.delete(value);
+        const placements = constraint.kind === "matches" && before.has(constraint.value)
+          ? [{ category: constraint.category, row, value: constraint.value }]
+          : before.size === 1
+            ? [{ category: constraint.category, row, value: [...before][0]! }]
+            : [];
+        record({
+          rule: constraint.kind === "matches" ? "direct-fact" : "simple-elimination",
+          clueIds: [clue.id], categories, dependsOn: parentIds,
+          eliminatedPossibilities: removed.map(value => ({ category: constraint.category, row, value })),
+          placements, workingMemoryDemand,
+        });
+        changed = true;
+        continue;
+      }
 
-    const categories = [...new Set([constraint.left.category, constraint.right.category])].sort();
-    const workingMemoryCategories = nonBaseCategories(constraint, baseCategory);
-    const workingMemoryDemand = relevantPossibilities(workingMemoryCategories);
-    const leftRows = termRows(constraint.left, baseCategory, baseValues, possible);
-    const rightRows = termRows(constraint.right, baseCategory, baseValues, possible);
-    const relation = constraint as Exclude<ClueConstraint, { kind: "matches" | "notMatches" }>;
-    const eliminations: DeductionPossibilityV5[] = [];
-    const parents = new Set<string>();
-    const beforeSingletons = new Set<string>();
-    for (const category of categories) for (const [row, cell] of (possible.get(category) ?? []).entries()) {
-      if (cell.size === 1) beforeSingletons.add(termKey(category, row, [...cell][0]!));
-    }
-    for (const row of leftRows) {
-      if (!rightRows.some(other => relationHolds(relation, row, other))) {
-        const reasonParents = requiredParentsForRelation(relation, "left", row, baseCategory, baseValues, possible, reasonByElimination);
-        reasonParents.forEach(parent => parents.add(parent));
-        if (constraint.left.category !== baseCategory) {
-          const cell = possible.get(constraint.left.category)?.[row];
-          if (cell?.delete(constraint.left.value)) eliminations.push({ category: constraint.left.category, row, value: constraint.left.value });
+      const categories = [...new Set([constraint.left.category, constraint.right.category])].sort();
+      const workingMemoryCategories = nonBaseCategories(constraint, baseCategory);
+      const workingMemoryDemand = relevantPossibilities(workingMemoryCategories);
+      const leftRows = termRows(constraint.left, baseCategory, baseValues, possible);
+      const rightRows = termRows(constraint.right, baseCategory, baseValues, possible);
+      const relation = constraint as Exclude<ClueConstraint, { kind: "matches" | "notMatches" }>;
+      const eliminations: DeductionPossibilityV5[] = [];
+      const parents = new Set<string>();
+      const beforeSingletons = new Set<string>();
+      for (const category of categories) for (const [row, cell] of (possible.get(category) ?? []).entries()) {
+        if (cell.size === 1) beforeSingletons.add(termKey(category, row, [...cell][0]!));
+      }
+      for (const row of leftRows) {
+        if (!rightRows.some(other => relationHolds(relation, row, other))) {
+          const reasonParents = requiredParentsForRelation(relation, "left", row, baseCategory, baseValues, possible, reasonByElimination);
+          reasonParents.forEach(parent => parents.add(parent));
+          if (constraint.left.category !== baseCategory) {
+            const cell = possible.get(constraint.left.category)?.[row];
+            if (cell?.delete(constraint.left.value)) eliminations.push({ category: constraint.left.category, row, value: constraint.left.value });
+          }
         }
       }
-    }
-    for (const row of rightRows) {
-      if (!leftRows.some(other => relationHolds(relation, other, row))) {
-        const reasonParents = requiredParentsForRelation(relation, "right", row, baseCategory, baseValues, possible, reasonByElimination);
-        reasonParents.forEach(parent => parents.add(parent));
-        if (constraint.right.category !== baseCategory) {
-          const cell = possible.get(constraint.right.category)?.[row];
-          if (cell?.delete(constraint.right.value)) eliminations.push({ category: constraint.right.category, row, value: constraint.right.value });
+      for (const row of rightRows) {
+        if (!leftRows.some(other => relationHolds(relation, other, row))) {
+          const reasonParents = requiredParentsForRelation(relation, "right", row, baseCategory, baseValues, possible, reasonByElimination);
+          reasonParents.forEach(parent => parents.add(parent));
+          if (constraint.right.category !== baseCategory) {
+            const cell = possible.get(constraint.right.category)?.[row];
+            if (cell?.delete(constraint.right.value)) eliminations.push({ category: constraint.right.category, row, value: constraint.right.value });
+          }
         }
       }
+      if (eliminations.length > 0) {
+        const placements = eliminations.flatMap(eliminated => {
+          const cell = possible.get(eliminated.category)?.[eliminated.row];
+          if (cell?.size !== 1) return [];
+          const placement = { category: eliminated.category, row: eliminated.row, value: [...cell][0]! };
+          return beforeSingletons.has(termKey(placement.category, placement.row, placement.value)) ? [] : [placement];
+        });
+        record({
+          rule: "constraint-propagation", clueIds: [clue.id], categories,
+          dependsOn: [...parents], eliminatedPossibilities: eliminations, placements, workingMemoryDemand,
+        });
+        changed = true;
+      }
     }
-    if (eliminations.length > 0) {
-      const placements = eliminations.flatMap(eliminated => {
-        const cell = possible.get(eliminated.category)?.[eliminated.row];
-        if (cell?.size !== 1) return [];
-        const placement = { category: eliminated.category, row: eliminated.row, value: [...cell][0]! };
-        return beforeSingletons.has(termKey(placement.category, placement.row, placement.value)) ? [] : [placement];
-      });
-      record({
-        rule: "constraint-propagation", clueIds: [clue.id], categories,
-        dependsOn: [...parents], eliminatedPossibilities: eliminations, placements, workingMemoryDemand,
-      });
-      changed = true;
-    }
-  }
 
     for (const [category, cells] of possible) {
       for (const [row, cell] of cells.entries()) {
