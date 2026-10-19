@@ -77,7 +77,7 @@ export function createPuzzleFeedbackSink(database: D1DatabaseLike): FeedbackSink
       ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
       ON CONFLICT(idempotency_key) DO NOTHING
     `).bind(...databaseValues(feedback)).run();
-    if (result.meta?.changes !== 0) return "inserted";
+    if (result.meta?.changes === 1) return "inserted";
 
     const existing = await database.prepare(`
       SELECT puzzle_fingerprint, template_id, requested_level, assessed_level,

@@ -71,7 +71,7 @@ function boundedInteger(value: unknown, name: string, minimum: number, maximum: 
 function parseSubmission(value: unknown): ParsedSubmission {
   const body = record(value);
   const unexpected = Object.keys(body).find(key => !FEEDBACK_FIELDS.has(key));
-  if (unexpected) throw new TypeError(`unknown field ${unexpected}`);
+  if (unexpected) throw new TypeError("request body contains an unknown field");
   if (typeof body.puzzleToken !== "string" || body.puzzleToken.trim().length === 0 || body.puzzleToken.length > MAX_PUZZLE_TOKEN_LENGTH) {
     throw new TypeError("puzzleToken must be a bounded non-empty string");
   }
