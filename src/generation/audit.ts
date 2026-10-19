@@ -280,5 +280,5 @@ export function auditTargetedDifficultyCorpus(template: PuzzleTemplate, options:
   ));
   const modelVersion = results[0]?.modelVersion ?? DEFAULT_DIFFICULTY_MODEL_VERSION;
   const levels = results.map(result => result.level);
-  return { templateId: template.id, modelVersion: modelVersion!, sampleSize, seedPrefix, levels };
+  return { templateId: template.id, modelVersion, sampleSize, seedPrefix, levels };
 }

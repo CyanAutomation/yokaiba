@@ -340,15 +340,15 @@ test("audit checkpoints round-trip, migrate older versions, and remove completed
     difficultyAudit: [],
     productionDifficultyAudit: [],
     targetedDifficultyAudit: [{
-      templateId: "test-template", modelVersion: "difficulty-v1", sampleSize: 1, seedPrefix: "seed",
+      templateId: "test-template", modelVersion: JEV_AUDIT_GENERATION_MODEL_VERSION, sampleSize: 1, seedPrefix: "seed",
       levels: [{
         requestedDifficultyLevel: 1, generated: 1, assessedLevelCounts: [1, ...Array<number>(11).fill(0)],
         humanTrace: { complete: 1, incomplete: 0 }, fallback: { used: 0, maximumAttempt: 0, attempts: { p50: 0, p95: 0 } },
         clues: { average: 4, minimum: 4, maximum: 4 },
       }],
     }],
-    clues: [clue()],
-    puzzles: [puzzle()],
+    clues: [{ ...clue(), difficultyModelVersion: JEV_AUDIT_GENERATION_MODEL_VERSION }],
+    puzzles: [{ ...puzzle(), difficultyModelVersion: JEV_AUDIT_GENERATION_MODEL_VERSION }],
     totalCost: 0,
     resolvedModel: "test-model",
     totalInputTokens: 0,
@@ -361,12 +361,25 @@ test("audit checkpoints round-trip, migrate older versions, and remove completed
     assert.throws(() => assertCheckpointConfiguration(checkpoint.configuration, { ...configuration, clueSamples: 4 }), /does not match/);
     assert.throws(() => assertCheckpointConfiguration(checkpoint.configuration, { ...configuration, generationModelVersion: "yokaiba-difficulty-v4" }), /does not match/);
 
+    const priorV5Checkpoint = JSON.parse(JSON.stringify(checkpoint)) as Record<string, unknown>;
+    delete (priorV5Checkpoint.configuration as Record<string, unknown>).generationModelVersion;
+    priorV5Checkpoint.version = 2;
+    await writeFile(checkpointPath, `${JSON.stringify(priorV5Checkpoint)}\n`);
+    const resumedPriorV5 = await readAuditCheckpoint(checkpointPath);
+    assert.equal(resumedPriorV5?.configuration.generationModelVersion, JEV_AUDIT_GENERATION_MODEL_VERSION);
+    assert.doesNotThrow(() => assertCheckpointConfiguration(resumedPriorV5!.configuration, configuration));
+
     const legacyCheckpoint = JSON.parse(JSON.stringify(checkpoint)) as Record<string, unknown>;
     delete legacyCheckpoint.productionDifficultyAudit;
     legacyCheckpoint.version = 2;
+    delete (legacyCheckpoint.configuration as Record<string, unknown>).generationModelVersion;
+    legacyCheckpoint.clues = [{ ...clue(), difficultyModelVersion: "yokaiba-difficulty-v4" }];
+    legacyCheckpoint.puzzles = [{ ...puzzle(), difficultyModelVersion: "yokaiba-difficulty-v4" }];
+    legacyCheckpoint.targetedDifficultyAudit = (legacyCheckpoint.targetedDifficultyAudit as Array<Record<string, unknown>>)
+      .map(target => ({ ...target, modelVersion: "yokaiba-difficulty-v4" }));
     legacyCheckpoint.difficultyAudit = [{
       templateId: "legacy-template",
-      modelVersion: "difficulty-v1",
+      modelVersion: "yokaiba-difficulty-v4",
       sampleSize: 1,
       seedPrefix: "legacy-seed",
     }];
@@ -384,12 +397,14 @@ test("audit checkpoints round-trip, migrate older versions, and remove completed
     assert.deepEqual(migrated?.productionDifficultyAudit, []);
     assert.deepEqual(migrated?.difficultyAudit, [{
       templateId: "legacy-template",
-      modelVersion: "difficulty-v1",
+      modelVersion: "yokaiba-difficulty-v4",
       sampleSize: 1,
       generated: 1,
       unavailable: 0,
       seedPrefix: "legacy-seed",
     }]);
+    assert.equal(migrated?.configuration.generationModelVersion, "yokaiba-difficulty-v4");
+    assert.throws(() => assertCheckpointConfiguration(migrated!.configuration, configuration), /checkpoint yokaiba-difficulty-v4, current yokaiba-difficulty-v5; use a new output path/);
 
     await removeCompletedAuditCheckpoint(checkpointPath);
     await assert.rejects(readFile(checkpointPath), { code: "ENOENT" });
