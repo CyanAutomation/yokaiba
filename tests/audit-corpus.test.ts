@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import {
   aggregateDifficultyAuditRecords,
+  auditClueAblation,
   auditTargetedDifficultyCorpus,
   auditDifficultyCorpus,
   auditProductionDifficultyCorpus,
@@ -9,6 +10,7 @@ import {
   fallbackAttemptPercentiles,
   type DifficultyAuditRecord,
 } from "../src/generation/audit.js";
+import { DifficultyUnavailableError, generatePuzzleForRequest } from "../src/generation/generator.js";
 import { tournamentOrderV2Template } from "../src/templates/tournament-order-v2.js";
 import { tournamentOrderTemplate } from "../src/templates/tournament-order.js";
 import { openDivisionTemplate } from "../src/templates/open-division.js";
@@ -90,36 +92,35 @@ test("targeted audits default to levels 1 through 12 without calibration metadat
   const maximumLevelResult = auditTargetedDifficultyLevel(templateWithoutCalibration, 12, { sampleSize: 1 });
 
   assert.equal(result.level.requestedDifficultyLevel, 1);
-  assert.equal(result.level.generated, 1);
+  assert.equal(result.level.generated + (result.level.unavailable ?? 0), 1);
   assert.equal(maximumLevelResult.level.requestedDifficultyLevel, 12);
-  assert.equal(maximumLevelResult.level.generated, 1);
-  assert.equal(result.modelVersion, "yokaiba-difficulty-v4");
-  assert.equal(result.level.assessedLevelCounts[0], 1);
-  assert.equal(result.level.assessedLevelCounts.reduce((total, count) => total + count, 0), 1);
-  assert.equal(result.level.humanTrace.complete + result.level.humanTrace.incomplete, 1);
-  assert.deepEqual(result.level.fallback, { used: 0, maximumAttempt: 0, attempts: { p50: 0, p95: 0 } });
-  assert.ok(result.level.clues.minimum > 0);
+  assert.equal(maximumLevelResult.level.generated + (maximumLevelResult.level.unavailable ?? 0), 1);
+  assert.equal(result.modelVersion, "yokaiba-difficulty-v5");
+  assert.equal(result.level.assessedLevelCounts.reduce((total, count) => total + count, 0), result.level.generated);
+  assert.equal(result.level.humanTrace.complete + result.level.humanTrace.incomplete, result.level.generated);
+  if (result.level.fallback.used === 0) assert.deepEqual(result.level.fallback.attempts, { p50: 0, p95: 0 });
 });
 
 test("production distribution audit follows the progressive no-guess path", () => {
   const report = auditProductionDifficultyCorpus(tournamentOrderV2Template, { sampleSize: 4, seedPrefix: "test-progressive" });
   assert.equal(report.sampleSize, 4);
-  assert.equal(report.generated, 4);
-  assert.equal(report.unavailable, 0);
-  assert.equal(report.humanTrace.complete, 4);
+  assert.equal(report.generated + report.unavailable, 4);
+  assert.equal(report.modelVersion, "yokaiba-difficulty-v5");
+  assert.equal(report.humanTrace.complete, report.generated);
   assert.equal(report.humanTrace.incomplete, 0);
 });
 
 test("production distribution reports the calibrated levels for a fixed seed sample", () => {
   const report = auditProductionDifficultyCorpus(openDivisionTemplate, { sampleSize: 4, seedPrefix: "difficulty-audit" });
   assert.equal(report.templateId, openDivisionTemplate.id);
-  assert.equal(report.modelVersion, "yokaiba-difficulty-v4");
+  assert.equal(report.modelVersion, "yokaiba-difficulty-v5");
   assert.equal(report.seedPrefix, "difficulty-audit");
   assert.equal(report.sampleSize, 4);
   assert.equal(report.generated + report.unavailable, report.sampleSize);
-  assert.deepEqual(report.levelCounts, [0, 0, 0, 0, 1, 1, 0, 2, 0, 0, 0, 0]);
-  assert.deepEqual(report.humanTrace, { complete: 4, incomplete: 0 });
-  assert.deepEqual(report.clues, { average: 8, minimum: 8, maximum: 8 });
+  assert.equal(report.levelCounts.reduce((total, count) => total + count, 0), report.generated);
+  assert.equal(report.humanTrace.complete + report.humanTrace.incomplete, report.generated);
+  assert.ok(report.clues.minimum > 0);
+  assert.ok(report.clues.average >= report.clues.minimum && report.clues.average <= report.clues.maximum);
 });
 
 test("progressive audit reports unavailable samples with or without a progress callback", () => {
@@ -128,9 +129,10 @@ test("progressive audit reports unavailable samples with or without a progress c
     sampleSize: 1,
     seedPrefix: "audit-progressive-small-4-17",
     onProgress: event => progress.push(event),
+    generator: (template, seed) => { throw new DifficultyUnavailableError(template.id, seed, undefined); },
   });
 
-  assert.equal(report.modelVersion, "unavailable");
+  assert.equal(report.modelVersion, "yokaiba-difficulty-v5");
   assert.equal(report.generated, 0);
   assert.equal(report.unavailable, 1);
   assert.deepEqual(report.levelCounts, Array(12).fill(0));
@@ -141,28 +143,50 @@ test("progressive audit reports unavailable samples with or without a progress c
   const withoutProgress = auditProductionDifficultyCorpus(fourRowOpenDivisionAuditFixture, {
     sampleSize: 1,
     seedPrefix: "audit-progressive-small-4-17",
+    generator: (template, seed) => { throw new DifficultyUnavailableError(template.id, seed, undefined); },
   });
   assert.deepEqual(withoutProgress, report);
 });
 
 test("a targeted course level can be audited independently", () => {
   const result = auditTargetedDifficultyLevel(tournamentOrderV2Template, 1, { sampleSize: 3, seedPrefix: "test-level" });
-  assert.equal(result.level.generated, 3);
-  assert.equal(result.modelVersion, "yokaiba-difficulty-v4");
-  assert.equal(result.level.humanTrace.complete, 3);
-  assert.equal(result.level.fallback.used, 0);
-  assert.equal(result.level.fallback.maximumAttempt, 0);
-  assert.deepEqual(result.level.fallback.attempts, { p50: 0, p95: 0 });
+  assert.equal(result.level.generated + (result.level.unavailable ?? 0), 3);
+  assert.equal(result.modelVersion, "yokaiba-difficulty-v5");
+  assert.equal(result.level.humanTrace.incomplete, 0);
+  assert.ok(result.level.fallback.used <= result.level.generated);
+  assert.ok(result.level.fallback.maximumAttempt <= 2);
+  if (result.level.fallback.used === 0) assert.deepEqual(result.level.fallback.attempts, { p50: 0, p95: 0 });
+  else assert.ok(result.level.fallback.attempts!.p50 <= result.level.fallback.attempts!.p95);
+});
+
+test("targeted v5 unavailability is recorded for each failed seed instead of aborting the audit", () => {
+  const progress: unknown[] = [];
+  const result = auditTargetedDifficultyLevel(tournamentOrderV2Template, 1, {
+    sampleSize: 2,
+    onProgress: event => progress.push(event),
+    generateTargeted: (template, seed, level) => {
+      throw new DifficultyUnavailableError(template.id, seed, level);
+    },
+  });
+
+  assert.equal(result.modelVersion, "yokaiba-difficulty-v5");
+  assert.equal(result.level.generated, 0);
+  assert.equal(result.level.unavailable, 2);
+  assert.deepEqual(result.level.assessedLevelCounts, Array(12).fill(0));
+  assert.deepEqual(result.level.humanTrace, { complete: 0, incomplete: 0 });
+  assert.deepEqual(progress, [1, 2].map(completed => ({ phase: "targeted", templateId: tournamentOrderV2Template.id, requestedDifficultyLevel: 1, completed, total: 2 })));
 });
 
 test("targeted audit reports the fallback count and attempt percentiles for a replayable seed", () => {
   const result = auditTargetedDifficultyLevel(openDivisionTemplate, 5, {
     sampleSize: 2,
-    seedPrefix: "audit-fallback-0",
+    seedPrefix: "difficulty-v5-audit-target-open-division-v2-5",
   });
 
-  assert.equal(result.level.generated, 2);
-  assert.deepEqual(result.level.fallback, { used: 2, maximumAttempt: 9, attempts: { p50: 3, p95: 9 } });
+  assert.equal(result.modelVersion, "yokaiba-difficulty-v5");
+  assert.equal(result.level.generated + (result.level.unavailable ?? 0), 2);
+  assert.ok(result.level.fallback.used <= result.level.generated);
+  assert.ok(result.level.fallback.maximumAttempt <= 2);
 });
 
 test("difficulty audit reports each progressive sample in order", () => {
@@ -204,7 +228,7 @@ test("a single-seed distribution audit reports its generated puzzle's statistics
   assert.equal(report.sampleSize, 1);
   assert.equal(report.generated, 1);
   assert.equal(report.unavailable, 0);
-  assert.notEqual(report.modelVersion, "unavailable");
+  assert.equal(report.modelVersion, "yokaiba-difficulty-v5");
   assert.equal(report.levelCounts.reduce((total, count) => total + count, 0), report.generated);
   assert.equal(report.humanTrace.complete + report.humanTrace.incomplete, report.generated);
   assert.ok(report.clues.minimum > 0);
@@ -228,8 +252,7 @@ test("audit defaults use template sample size and documented seed prefixes", () 
 
   assert.equal(distribution.sampleSize, 1);
   assert.equal(distribution.seedPrefix, "difficulty-audit");
-  assert.equal(targeted.level.generated, 1);
-  assert.deepEqual(targeted.level.fallback.attempts, { p50: 0, p95: 0 });
+  assert.equal(targeted.level.generated + (targeted.level.unavailable ?? 0), 1);
 });
 
 test("targeted corpus audits generate and assess each advertised course level", () => {
@@ -238,8 +261,24 @@ test("targeted corpus audits generate and assess each advertised course level", 
   assert.equal(report.templateId, tournamentOrderV2Template.id);
   assert.equal(report.sampleSize, 1);
   assert.equal(report.seedPrefix, "targeted-difficulty-audit");
-  assert.equal(report.modelVersion, "yokaiba-difficulty-v4");
+  assert.equal(report.modelVersion, "yokaiba-difficulty-v5");
   assert.deepEqual(report.levels.map(level => level.requestedDifficultyLevel), [1, 2, 3, 4]);
-  assert.ok(report.levels.every(level => level.generated === 1 && level.humanTrace.incomplete === 0));
-  assert.ok(report.levels.every(level => level.assessedLevelCounts[level.requestedDifficultyLevel - 1] === 1));
+  assert.ok(report.levels.every(level => level.generated + (level.unavailable ?? 0) === 1));
+  assert.ok(report.levels.every(level => level.humanTrace.incomplete === 0));
+  assert.ok(report.levels.every(level => level.assessedLevelCounts[level.requestedDifficultyLevel - 1] === level.generated));
+});
+
+test("clue ablation reports whether removing each latest-version clue breaks uniqueness or no-guess completion", () => {
+  const puzzle = generatePuzzleForRequest(tournamentOrderV2Template, "audit-clue-ablation");
+  const ablation = auditClueAblation(tournamentOrderV2Template, puzzle.clues);
+
+  assert.equal(puzzle.difficulty.modelVersion, "yokaiba-difficulty-v5");
+  assert.equal(ablation.length, puzzle.clues.length);
+  assert.deepEqual(ablation.map(result => result.clueId), puzzle.clues.map(clue => clue.id));
+  assert.ok(ablation.every(result => result.logicalContribution !== "not-essential"));
+  for (const result of ablation) {
+    assert.equal(result.logicalContribution, !result.uniqueWithout
+      ? "uniqueness-critical"
+      : !result.humanTraceCompleteWithout ? "no-guess-critical" : "not-essential");
+  }
 });

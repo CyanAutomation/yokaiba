@@ -1,5 +1,32 @@
-import type { Difficulty, PuzzleTemplate } from "../domain/types.js";
-import { DifficultyUnavailableError, generateProgressivePuzzle, generatePuzzle, generatePuzzleAtDifficultyWithFallback } from "./generator.js";
+import type { Clue, Difficulty, GeneratedPuzzle, PuzzleTemplate } from "../domain/types.js";
+import type { PuzzleSolver } from "../domain/puzzle-solver.js";
+import { exhaustivePuzzleSolver } from "../constraints/solver.js";
+import { DEFAULT_DIFFICULTY_MODEL, DEFAULT_DIFFICULTY_MODEL_VERSION, DifficultyUnavailableError, generatePuzzle, generatePuzzleForRequest } from "./generator.js";
+import { evaluateHumanDeductionTraceV5 } from "./human-deduction-v5.js";
+
+export type ClueLogicalContribution = "uniqueness-critical" | "no-guess-critical" | "not-essential";
+
+export interface ClueAblationResult {
+  clueId: string;
+  uniqueWithout: boolean;
+  humanTraceCompleteWithout: boolean;
+  logicalContribution: ClueLogicalContribution;
+}
+
+/** Measure each clue's independent effect on uniqueness and v5 no-guess solvability. */
+export function auditClueAblation(template: PuzzleTemplate, clues: readonly Clue[], solver: PuzzleSolver = exhaustivePuzzleSolver): ClueAblationResult[] {
+  return clues.map((clue, removedIndex) => {
+    const remaining = clues.filter((_candidate, index) => index !== removedIndex);
+    const uniqueWithout = solver.countSolutions(template, remaining, 2) === 1;
+    const humanTraceCompleteWithout = evaluateHumanDeductionTraceV5(template, remaining).solved;
+    return {
+      clueId: clue.id,
+      uniqueWithout,
+      humanTraceCompleteWithout,
+      logicalContribution: !uniqueWithout ? "uniqueness-critical" : !humanTraceCompleteWithout ? "no-guess-critical" : "not-essential",
+    };
+  });
+}
 
 export interface DifficultyCorpusAudit {
   templateId: string;
@@ -25,6 +52,7 @@ export interface TargetedDifficultyCorpusAudit {
 export interface TargetedDifficultyLevelAudit {
   requestedDifficultyLevel: Difficulty["level"];
   generated: number;
+  unavailable?: number;
   assessedLevelCounts: number[];
   humanTrace: { complete: number; incomplete: number };
   fallback: { used: number; maximumAttempt: number; attempts?: { p50: number; p95: number } };
@@ -86,12 +114,13 @@ export function aggregateDifficultyAuditRecords(records: readonly DifficultyAudi
  * checks. It deliberately reports the bounded no-guess trace separately from
  * player outcomes: this is an engineering diagnostic, not human validation.
  */
-type DifficultyAuditOptions = { sampleSize?: number; seedPrefix?: string; onProgress?: DifficultyAuditProgressCallback };
+type AuditPuzzleGenerator = (template: PuzzleTemplate, seed: string) => GeneratedPuzzle;
+type DifficultyAuditOptions = { sampleSize?: number; seedPrefix?: string; onProgress?: DifficultyAuditProgressCallback; generator?: AuditPuzzleGenerator };
 
 function auditFromOptions(
   template: PuzzleTemplate,
   options: DifficultyAuditOptions,
-  generator: typeof generatePuzzle,
+  generator: AuditPuzzleGenerator,
 ): DifficultyCorpusAudit {
   const sampleSize = options.sampleSize ?? template.metadata?.difficultyCalibration.corpus.sampleSize ?? 1_000;
   const seedPrefix = options.seedPrefix ?? "difficulty-audit";
@@ -100,19 +129,19 @@ function auditFromOptions(
 }
 
 export function auditDifficultyCorpus(template: PuzzleTemplate, options: DifficultyAuditOptions = {}): DifficultyCorpusAudit {
-  return auditFromOptions(template, options, generatePuzzle);
+  return auditFromOptions(template, options, options.generator ?? ((candidateTemplate, seed) => generatePuzzle(candidateTemplate, seed, undefined, { difficultyModel: DEFAULT_DIFFICULTY_MODEL })));
 }
 
-/** Report the no-target generation distribution returned by the API's progressive path. */
+/** Report the no-target distribution returned by the latest API generation path (v5 by default). */
 export function auditProductionDifficultyCorpus(template: PuzzleTemplate, options: DifficultyAuditOptions = {}): DifficultyCorpusAudit {
-  return auditFromOptions(template, options, generateProgressivePuzzle);
+  return auditFromOptions(template, options, options.generator ?? ((candidateTemplate, seed) => generatePuzzleForRequest(candidateTemplate, seed)));
 }
 
 function auditCorpusWithGenerator(
   template: PuzzleTemplate,
   sampleSize: number,
   seedPrefix: string,
-  generator: typeof generatePuzzle,
+  generator: AuditPuzzleGenerator,
   onProgress?: DifficultyAuditProgressCallback,
 ): DifficultyCorpusAudit {
 
@@ -142,7 +171,7 @@ function auditCorpusWithGenerator(
     : { levelCounts: Array<number>(12).fill(0), humanTrace: { complete: 0, incomplete: 0 }, clues: { average: 0, minimum: 0, maximum: 0 } };
   return {
     templateId: template.id,
-    modelVersion: modelVersion ?? "unavailable",
+    modelVersion: modelVersion ?? DEFAULT_DIFFICULTY_MODEL_VERSION,
     sampleSize,
     generated: records.length,
     unavailable,
@@ -158,24 +187,33 @@ function collectTargetedDifficultySamples(
   sampleSize: number,
   seedPrefix: string,
   onProgress?: DifficultyAuditProgressCallback,
-): { records: DifficultyAuditRecord[]; fallbackAttempts: number[]; modelVersion: string } {
+  generateTargeted: TargetedPuzzleGenerator = (candidateTemplate, seed, level) => generatePuzzleForRequest(candidateTemplate, seed, level, true),
+): { records: DifficultyAuditRecord[]; fallbackAttempts: number[]; unavailable: number; modelVersion: string } {
   const records: DifficultyAuditRecord[] = [];
   const fallbackAttempts: number[] = [];
+  let unavailable = 0;
   let modelVersion: string | undefined;
   for (let index = 0; index < sampleSize; index += 1) {
-    const puzzle = generatePuzzleAtDifficultyWithFallback(template, `${seedPrefix}-${requestedDifficultyLevel}-${index}`, requestedDifficultyLevel);
-    modelVersion ??= puzzle.difficulty.modelVersion;
-    records.push({ level: puzzle.difficulty.level, humanTraceComplete: puzzle.difficulty.evidence.humanSolve.solved, clueCount: puzzle.clues.length });
+    try {
+      const puzzle = generateTargeted(template, `${seedPrefix}-${requestedDifficultyLevel}-${index}`, requestedDifficultyLevel);
+      modelVersion ??= puzzle.difficulty.modelVersion;
+      records.push({ level: puzzle.difficulty.level, humanTraceComplete: puzzle.difficulty.evidence.humanSolve.solved, clueCount: puzzle.clues.length });
+      if (puzzle.seedFallbackAttempt !== undefined) fallbackAttempts.push(puzzle.seedFallbackAttempt);
+    } catch (error) {
+      if (!(error instanceof DifficultyUnavailableError)) throw error;
+      unavailable += 1;
+    }
     onProgress?.({ phase: "targeted", templateId: template.id, requestedDifficultyLevel, completed: index + 1, total: sampleSize });
-    if (puzzle.seedFallbackAttempt !== undefined) fallbackAttempts.push(puzzle.seedFallbackAttempt);
   }
-  return { records, fallbackAttempts, modelVersion: modelVersion! };
+  return { records, fallbackAttempts, unavailable, modelVersion: modelVersion ?? DEFAULT_DIFFICULTY_MODEL_VERSION };
 }
+
+export type TargetedPuzzleGenerator = (template: PuzzleTemplate, seed: string, level: Difficulty["level"]) => GeneratedPuzzle;
 
 export function auditTargetedDifficultyLevel(
   template: PuzzleTemplate,
   requestedDifficultyLevel: Difficulty["level"],
-  options: { sampleSize?: number; seedPrefix?: string; onProgress?: DifficultyAuditProgressCallback } = {},
+  options: { sampleSize?: number; seedPrefix?: string; onProgress?: DifficultyAuditProgressCallback; generateTargeted?: TargetedPuzzleGenerator } = {},
 ): TargetedDifficultyLevelResult {
   const sampleSize = options.sampleSize ?? template.metadata?.difficultyCalibration.corpus.sampleSize ?? 1_000;
   const seedPrefix = options.seedPrefix ?? "targeted-difficulty-audit";
@@ -185,19 +223,23 @@ export function auditTargetedDifficultyLevel(
     throw new RangeError(`${template.id} does not advertise difficulty level ${requestedDifficultyLevel}`);
   }
 
-  const { records, fallbackAttempts, modelVersion } = collectTargetedDifficultySamples(
+  const { records, fallbackAttempts, unavailable, modelVersion } = collectTargetedDifficultySamples(
     template,
     requestedDifficultyLevel,
     sampleSize,
     seedPrefix,
     options.onProgress,
+    options.generateTargeted ?? ((candidateTemplate, seed, level) => generatePuzzleForRequest(candidateTemplate, seed, level, true)),
   );
-  const statistics = aggregateDifficultyAuditRecords(records);
+  const statistics = records.length > 0
+    ? aggregateDifficultyAuditRecords(records)
+    : { levelCounts: Array<number>(12).fill(0), humanTrace: { complete: 0, incomplete: 0 }, clues: { average: 0, minimum: 0, maximum: 0 } };
   return {
     modelVersion,
     level: {
       requestedDifficultyLevel,
-      generated: sampleSize,
+      generated: records.length,
+      unavailable,
       assessedLevelCounts: statistics.levelCounts,
       humanTrace: statistics.humanTrace,
       fallback: {
@@ -236,7 +278,7 @@ export function auditTargetedDifficultyCorpus(template: PuzzleTemplate, options:
     (minimumLevel + offset) as Difficulty["level"],
     { sampleSize, seedPrefix, onProgress: options.onProgress },
   ));
-  const modelVersion = results[0]?.modelVersion;
+  const modelVersion = results[0]?.modelVersion ?? DEFAULT_DIFFICULTY_MODEL_VERSION;
   const levels = results.map(result => result.level);
-  return { templateId: template.id, modelVersion: modelVersion!, sampleSize, seedPrefix, levels };
+  return { templateId: template.id, modelVersion, sampleSize, seedPrefix, levels };
 }

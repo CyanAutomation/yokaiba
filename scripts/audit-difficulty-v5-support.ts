@@ -84,7 +84,7 @@ function positiveInteger(value: string | undefined, option: string): number {
 
 export function parseDifficultyV5AuditArguments(args: readonly string[]): DifficultyV5AuditArguments {
   let samples = 25;
-  let targetSamples = 3;
+  let targetSamples = 25;
   let outputBase: string | undefined;
   const seen = new Set<string>();
   for (let index = 0; index < args.length; index += 1) {

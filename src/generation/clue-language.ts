@@ -76,20 +76,23 @@ function renderBefore(template: PuzzleTemplate, constraint: Extract<ClueConstrai
 
 function renderAdjacent(template: PuzzleTemplate, constraint: Extract<ClueConstraint, { kind: "adjacent" }>, index: number): string {
   const { left, right } = orderedTerms(constraint);
-  const relation = index === 0
-    ? `${left} and ${right} occupied consecutive positions`
-    : `${left} was immediately next to ${right}`;
-  return `In the ${orderedContext(template).toLowerCase()}, ${relation}.`;
+  const relation = `no competitor finished between ${left} and ${right}`;
+  return index === 0
+    ? `In the ${orderedContext(template).toLowerCase()}, ${relation}.`
+    : `${capitalise(relation)} in the ${orderedContext(template).toLowerCase()}.`;
 }
 
 function renderDistance(template: PuzzleTemplate, constraint: Extract<ClueConstraint, { kind: "distance" }>, index: number): string {
   const { left, right } = orderedTerms(constraint);
-  const positionWords = ["zero", "one", "two", "three", "four"];
-  const distance = positionWords[constraint.distance] ?? String(constraint.distance);
-  const place = constraint.distance === 1 ? "place" : "places";
+  const betweenCount = constraint.distance - 1;
+  const quantityWords = ["no", "one", "two", "three", "four"];
+  const betweenCountText = quantityWords[betweenCount] ?? String(betweenCount);
+  const relation = betweenCount === 0
+    ? `no competitor finished between ${left} and ${right}`
+    : `exactly ${betweenCountText} competitor${betweenCount === 1 ? "" : "s"} finished between ${left} and ${right}`;
   return index === 0
-    ? `In the ${orderedContext(template).toLowerCase()}, ${left} and ${right} were exactly ${distance} ${place} apart.`
-    : `${left} and ${right} were exactly ${distance} ${place} apart in the ${orderedContext(template).toLowerCase()}.`;
+    ? `In the ${orderedContext(template).toLowerCase()}, ${relation}.`
+    : `${capitalise(relation)} in the ${orderedContext(template).toLowerCase()}.`;
 }
 
 export function renderConstraintText(template: PuzzleTemplate, constraint: ClueConstraint, index: number): string {
