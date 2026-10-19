@@ -161,12 +161,11 @@ export interface GenerationOptions {
   strategy?: number;
 }
 
-/** A requested difficulty cannot be met for this seed using any allowed clue order. */
+/** No suitable puzzle was found within the deterministic generation strategy budget. */
 export class DifficultyUnavailableError extends Error {
   /**
-   * Levels actually observed while trying every deterministic strategy for the
-   * requested band. They are useful alternatives, but intentionally are not
-   * advertised as an exhaustive seed-wide search across every target band.
+   * Levels observed across the deterministic strategies. For targeted requests,
+   * they are alternatives rather than an exhaustive seed-wide search of every band.
    */
   readonly availableDifficultyLevels: readonly DifficultyLevel[];
   readonly templateId: string;
