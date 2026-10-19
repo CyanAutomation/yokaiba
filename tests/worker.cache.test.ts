@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { createRateLimiter, type RateLimitDecision } from "../worker/rate-limit.js";
+import { createRateLimiter, restRateLimitConfiguration, type RateLimitDecision } from "../worker/rate-limit.js";
 import { GeneratedPuzzleCache, generatedPuzzleCacheKey, cachedGeneratedPuzzle, cacheGeneratedPuzzle, cachePublicGet } from "../worker/cache.js";
 
 test("createRateLimiter enforces small limits and reports remaining/reset", () => {
@@ -31,6 +31,11 @@ test("createRateLimiter enforces small limits and reports remaining/reset", () =
   now = 1_060_000;
   const atReset = limiter(req, "2", "scope") as RateLimitDecision;
   assert.deepEqual(atReset, { limited: false, remaining: 1, resetAt: 1_120 });
+});
+
+test("feedback has its own bounded fallback quota", () => {
+  assert.deepEqual(restRateLimitConfiguration("/v1/feedback", {}), { limit: "10", scope: "feedback" });
+  assert.deepEqual(restRateLimitConfiguration("/v1/feedback", { FEEDBACK_RATE_LIMIT: "3" }), { limit: "3", scope: "feedback" });
 });
 
 test("generated puzzle cache stores an immutable response snapshot through its TTL", async () => {

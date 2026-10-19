@@ -5,7 +5,7 @@ import { generatePuzzle } from "../src/generation/generator.js";
 import { generatePuzzleForRequest } from "../src/generation/generator.js";
 import { puzzleFromToken } from "../src/api/puzzle-from-token.js";
 import { tournamentOrderTemplate } from "../src/templates/tournament-order.js";
-import { issuePuzzleToken, verifyPuzzleToken, type PuzzleTokenPayload } from "../src/api/puzzle-token.js";
+import { issuePuzzleToken, verifyPuzzleToken } from "../src/api/puzzle-token.js";
 
 const secret = "test-token-secret";
 const encoder = new TextEncoder();
@@ -69,15 +69,18 @@ test("issued puzzle tokens round-trip the stable generation inputs", async () =>
   const puzzle = generatePuzzle(tournamentOrderTemplate, "token-round-trip");
   const token = await issuePuzzleToken(puzzle, secret, { now: 1_000, ttlSeconds: 300 });
 
-  assert.deepEqual(await verifyPuzzleToken(token, secret, 1_000), {
-    version: 3,
-    templateId: puzzle.templateId,
-    seed: puzzle.seed,
-    generatorVersion: puzzle.generatorVersion,
-    solverVersion: puzzle.solverVersion,
-    issuedAt: 1_000,
-    expiresAt: 1_300,
-  } satisfies PuzzleTokenPayload);
+  const payload = await verifyPuzzleToken(token, secret, 1_000);
+  if (!payload || payload.version !== 4) assert.fail("expected v4 puzzle token");
+  assert.equal(payload.templateId, puzzle.templateId);
+  assert.equal(payload.seed, puzzle.seed);
+  assert.equal(payload.requestedSeed, puzzle.requestedSeed);
+  assert.equal(payload.generatorVersion, puzzle.generatorVersion);
+  assert.equal(payload.solverVersion, puzzle.solverVersion);
+  assert.equal(payload.assessedDifficultyLevel, puzzle.difficulty.level);
+  assert.equal(payload.difficultyModelVersion, puzzle.difficulty.modelVersion);
+  assert.equal(payload.issuedAt, 1_000);
+  assert.equal(payload.expiresAt, 1_300);
+  assert.match(payload.puzzleFingerprint, /^[a-f0-9]{64}$/);
 });
 
 test("v5 puzzle tokens preserve their model selection when verification replays them", async () => {
@@ -87,7 +90,7 @@ test("v5 puzzle tokens preserve their model selection when verification replays 
   const payload = await verifyPuzzleToken(token, secret, now);
   const replayed = await puzzleFromToken(token, new Map([[tournamentOrderTemplate.id, tournamentOrderTemplate]]), secret);
 
-  assert.equal(payload?.version, 3);
+  assert.equal(payload?.version, 4);
   assert.equal(payload?.difficultyModel, "v5");
   assert.equal(replayed.difficultyModel, "v5");
   assert.equal(replayed.difficulty.modelVersion, "yokaiba-difficulty-v5");
@@ -120,8 +123,8 @@ test("issued puzzle tokens expire and can be verified with a previous rotation k
   const token = await issuePuzzleToken(puzzle, "old-secret", { now: 10_000, ttlSeconds: 60 });
 
   const verified = await verifyPuzzleToken(token, ["new-secret", "old-secret"], 10_059);
-  assert.equal(verified?.version, 3);
-  assert.equal(verified?.version === 3 ? verified.expiresAt : undefined, 10_060);
+  assert.equal(verified?.version, 4);
+  assert.equal(verified?.version === 4 ? verified.expiresAt : undefined, 10_060);
   assert.equal(await verifyPuzzleToken(token, ["new-secret", "old-secret"], 10_060), undefined);
   assert.equal(await verifyPuzzleToken(token, "new-secret", 10_059), undefined);
 });

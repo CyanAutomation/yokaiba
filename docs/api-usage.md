@@ -13,6 +13,7 @@ The API root redirects to the [API documentation page](https://yokaiba.scheimann
 - `POST /v1/puzzles/verify`
 - `POST /v1/puzzles/hint`
 - `POST /v1/events`
+- `POST /v1/feedback`
 
 ### 60-second browser quick start
 
@@ -68,3 +69,15 @@ curl -X POST http://localhost:8787/v1/puzzles/generate \
 `templateId` and `seed` must be non-empty strings of at most 128 characters. Every response includes `X-Request-Id`, which is also included in Worker logs.
 
 Generated puzzles include `difficulty` (`level` 1–12, label, model identifier, and deterministic evidence). Tournament Order is calibrated to levels 1–4, Open Division to 5–8, and Championship Circuit to 9–12. Each template publishes its locale metadata and its own 1,000-seed calibration strategy. Difficulty combines the deduction trace, relational/cross-category clue structure, and deterministic solver telemetry; retain `modelVersion` and `evidence` when recording scores. The no-guess trace is an engineering diagnostic, not a substitute for player research.
+
+## Anonymous puzzle difficulty feedback
+
+Puzzle applications can send a three-choice rating after solving or while a puzzle is in progress. Submit `too_easy`, `just_right`, or `too_hard`; only `too_hard` may include one of `difficult_to_start`, `confusing_clues`, `too_many_deductions`, `took_too_long`, or `other`. Include a UUID v4 `idempotencyKey` and retry the same payload with that key after a transient failure. A repeated matching key returns `200` without another insert; reusing it for changed feedback returns `409`.
+
+```sh
+curl -X POST https://yokaiba.scheimann.workers.dev/v1/feedback \
+  -H 'content-type: application/json' \
+  -d '{"puzzleToken":"SIGNED_TOKEN","rating":"too_hard","reason":"confusing_clues","outcome":"in_progress","hintsUsed":1,"mistakes":0,"smartMarkingEnabled":false,"idempotencyKey":"123e4567-e89b-42d3-a456-426614174000"}'
+```
+
+The API accepts only the signed puzzle token as puzzle identity. It derives the fingerprint, template, seeds, difficulty/model versions, and generation policy from the verified token. The `outcome` and gameplay measurements are self-reported, not proof of completion. Ratings are stored in D1 and are separate from `/v1/events` telemetry. Configure the `PUZZLE_FEEDBACK` D1 binding and apply `migrations/0001_puzzle_feedback.sql` before enabling submissions; see [operations and deployment](operations-and-deployment.md#anonymous-puzzle-difficulty-feedback).

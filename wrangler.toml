@@ -7,6 +7,13 @@ directory = "./public"
 binding = "ASSETS"
 run_worker_first = ["/docs", "/docs/", "/openapi/*"]
 
+[[d1_databases]]
+binding = "PUZZLE_FEEDBACK"
+database_name = "yokaiba-puzzle-feedback"
+# Replace this placeholder with the ID returned by `npx wrangler d1 create yokaiba-puzzle-feedback`.
+database_id = "REPLACE_WITH_D1_DATABASE_ID"
+migrations_dir = "migrations"
+
 # Set these as Worker secrets before deployment:
 #   npx wrangler secret put API_KEY
 #   npx wrangler secret put MCP_API_KEYS # optional JSON map for per-client keys
@@ -27,6 +34,7 @@ run_worker_first = ["/docs", "/docs/", "/openapi/*"]
 # PUZZLE_TOKEN_TTL_SECONDS controls newly issued token lifetime (default seven days, maximum 30 days).
 # REST_GENERATE_RATE_LIMIT is the local fallback for REST generation (default 10/minute).
 # VERIFY_RATE_LIMIT is the local fallback for verification attempts per minute (default 10).
+# FEEDBACK_RATE_LIMIT is the local fallback for puzzle feedback (default 10/minute).
 # MCP_PUZZLE_ACTION_RATE_LIMIT is the local fallback for MCP hints and verification (default 10).
 
 [[ratelimits]]

@@ -13,8 +13,20 @@ interface PuzzleTokenFields {
   difficultyModel?: "v4" | "v5" | "compare";
 }
 
-export interface PuzzleTokenPayload extends PuzzleTokenFields {
+export interface LegacyPuzzleTokenPayloadV3 extends PuzzleTokenFields {
   version: 3;
+  issuedAt: number;
+  expiresAt: number;
+}
+
+export interface PuzzleTokenPayload extends PuzzleTokenFields {
+  version: 4;
+  requestedSeed: string;
+  puzzleFingerprint: string;
+  assessedDifficultyLevel: DifficultyLevel;
+  difficultyModelVersion: string;
+  generationStrategy?: number;
+  seedFallbackAttempt?: number;
   issuedAt: number;
   expiresAt: number;
 }
@@ -24,7 +36,7 @@ export interface LegacyPuzzleTokenPayload extends PuzzleTokenFields {
   version: 2;
 }
 
-export type VerifiedPuzzleTokenPayload = PuzzleTokenPayload | LegacyPuzzleTokenPayload;
+export type VerifiedPuzzleTokenPayload = PuzzleTokenPayload | LegacyPuzzleTokenPayloadV3 | LegacyPuzzleTokenPayload;
 
 const decoder = new TextDecoder();
 
@@ -49,7 +61,20 @@ function isPuzzleTokenPayload(value: unknown): value is VerifiedPuzzleTokenPaylo
   if (!hasTokenTextFields(payload) || !hasValidDifficulty(payload.requestedDifficultyLevel)
     || !(payload.difficultyModel === undefined || payload.difficultyModel === "v4" || payload.difficultyModel === "v5" || payload.difficultyModel === "compare")) return false;
   if (payload.version === 2) return true;
-  return payload.version === 3
+  if (payload.version === 3) return Number.isSafeInteger(payload.issuedAt)
+    && Number.isSafeInteger(payload.expiresAt)
+    && (payload.expiresAt as number) > (payload.issuedAt as number)
+    && (payload.expiresAt as number) - (payload.issuedAt as number) <= MAX_PUZZLE_TOKEN_TTL_SECONDS;
+  return payload.version === 4
+    && typeof payload.requestedSeed === "string"
+    && payload.requestedSeed.trim().length > 0
+    && typeof payload.puzzleFingerprint === "string"
+    && /^[a-f0-9]{64}$/.test(payload.puzzleFingerprint)
+    && typeof payload.assessedDifficultyLevel === "number"
+    && hasValidDifficulty(payload.assessedDifficultyLevel)
+    && nonEmptyString(payload.difficultyModelVersion)
+    && (payload.generationStrategy === undefined || (Number.isSafeInteger(payload.generationStrategy) && (payload.generationStrategy as number) >= 0))
+    && (payload.seedFallbackAttempt === undefined || (Number.isSafeInteger(payload.seedFallbackAttempt) && (payload.seedFallbackAttempt as number) >= 0))
     && Number.isSafeInteger(payload.issuedAt)
     && Number.isSafeInteger(payload.expiresAt)
     && (payload.expiresAt as number) > (payload.issuedAt as number)

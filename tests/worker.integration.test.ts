@@ -299,6 +299,56 @@ test("worker exhausts the REST rate limit", async () => {
   assert.equal((await isolatedWorker.fetch(makeRequest(), env, {} as ExecutionContext)).status, 429);
 });
 
+test("worker enforces the feedback-specific fallback rate limit before token work", async () => {
+  const isolatedWorker = createWorker();
+  const makeRequest = () => new Request("https://yokaiba.test/v1/feedback", {
+    method: "POST",
+    headers: { "content-type": "application/json", "cf-connecting-ip": "192.0.2.191" },
+    body: "{}",
+  });
+  const env = { FEEDBACK_RATE_LIMIT: "1" };
+
+  assert.equal((await isolatedWorker.fetch(makeRequest(), env, {} as ExecutionContext)).status, 503);
+  const limited = await isolatedWorker.fetch(makeRequest(), env, {} as ExecutionContext);
+  assert.equal(limited.status, 429);
+  assert.equal(limited.headers.get("ratelimit-limit"), "1");
+});
+
+test("worker routes signed feedback into the configured D1 binding", async () => {
+  const isolatedWorker = createWorker({ rateLimiter: () => false });
+  const statements: string[] = [];
+  const database = {
+    prepare(query: string) {
+      statements.push(query);
+      return {
+        bind() { return this; },
+        async run() { return { meta: { changes: 1 } }; },
+        async first() { return null; },
+      };
+    },
+  };
+  const env = { PUZZLE_TOKEN_SECRET: "worker-feedback-test-secret", PUZZLE_FEEDBACK: database };
+  const puzzleResponse = await isolatedWorker.fetch(new Request("https://yokaiba.test/v1/puzzles/generate?templateId=tournament-order-v1&seed=worker-feedback"), env, {} as ExecutionContext);
+  assert.equal(puzzleResponse.status, 200);
+  const puzzle = await puzzleResponse.json() as { puzzleToken: string };
+  const response = await isolatedWorker.fetch(new Request("https://yokaiba.test/v1/feedback", {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({
+      puzzleToken: puzzle.puzzleToken,
+      rating: "just_right",
+      outcome: "completed",
+      hintsUsed: 0,
+      mistakes: 0,
+      idempotencyKey: "123e4567-e89b-42d3-a456-426614174000",
+    }),
+  }), env, {} as ExecutionContext);
+
+  assert.equal(response.status, 202);
+  assert.deepEqual(await response.json(), { accepted: true, duplicate: false });
+  assert.match(statements[0] ?? "", /INSERT INTO puzzle_feedback/);
+});
+
 test("worker returns an ETag and honors conditional public GETs", async () => {
   const env = { REST_ALLOWED_ORIGINS: "https://game.example", PUZZLE_TOKEN_SECRET: "test-token-secret" };
   const url = "https://yokaiba.test/v1/puzzles/generate?templateId=tournament-order-v1&seed=etag-seed";

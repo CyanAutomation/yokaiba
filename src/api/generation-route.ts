@@ -1,5 +1,5 @@
 import { DifficultyUnavailableError, generatePuzzleForRequest } from "../generation/generator.js";
-import { DEFAULT_PUZZLE_TOKEN_TTL_SECONDS, issuePuzzleToken } from "./puzzle-token.js";
+import { DEFAULT_PUZZLE_TOKEN_TTL_SECONDS, issuePuzzleTokenWithIdentity } from "./puzzle-token.js";
 import { json } from "./json-response.js";
 import type { GeneratedPuzzle, PuzzleTemplate } from "../domain/types.js";
 import { normalizeGenerationParameters } from "./generation-parameters.js";
@@ -11,14 +11,15 @@ const GENERATED_PUZZLE_CACHE_CONTROL = "public, max-age=300, s-maxage=300, must-
 
 async function publicPuzzle(puzzle: GeneratedPuzzle, options: RestRouterOptions) {
   const { solution: _solution, spec, ...rest } = puzzle;
+  const issuedToken = options.puzzleTokenSecret
+    ? await issuePuzzleTokenWithIdentity(puzzle, options.puzzleTokenSecret, {
+      ttlSeconds: options.puzzleTokenTtlSeconds ?? DEFAULT_PUZZLE_TOKEN_TTL_SECONDS,
+    })
+    : undefined;
   return {
     ...rest,
     spec,
-    ...(options.puzzleTokenSecret ? {
-      puzzleToken: await issuePuzzleToken(puzzle, options.puzzleTokenSecret, {
-        ttlSeconds: options.puzzleTokenTtlSeconds ?? DEFAULT_PUZZLE_TOKEN_TTL_SECONDS,
-      }),
-    } : {}),
+    ...(issuedToken ? { puzzleToken: issuedToken.token, puzzleFingerprint: issuedToken.puzzleFingerprint } : {}),
   };
 }
 

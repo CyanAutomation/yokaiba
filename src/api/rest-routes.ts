@@ -3,6 +3,7 @@ import { GENERATOR_VERSION, SOLVER_VERSION } from "../generation/generator.js";
 import { scenarioSummary } from "../catalogue.js";
 import { generationRoute } from "./generation-route.js";
 import { outcomeRoute } from "./outcome-route.js";
+import { feedbackRoute } from "./feedback-route.js";
 import { hintRoute, verificationRoute } from "./puzzle-action-routes.js";
 import type { RestRouterOptions } from "./router-options.js";
 import { json } from "./json-response.js";
@@ -11,7 +12,7 @@ import type { RouteHandler } from "./route-resolution.js";
 export const SCENARIOS_CACHE_CONTROL = "public, max-age=300, s-maxage=300, must-revalidate";
 export const VERSION_CACHE_CONTROL = "no-cache";
 
-function publicCapabilities(templates: readonly PuzzleTemplate[], puzzleTokenSecret?: string, hasOutcomeSink = false) {
+function publicCapabilities(templates: readonly PuzzleTemplate[], puzzleTokenSecret?: string, hasOutcomeSink = false, hasFeedbackSink = false) {
   const locales = new Set<string>();
   const scenarios = templates.map(template => {
     for (const locale of template.metadata?.locales.supported ?? []) locales.add(locale);
@@ -20,7 +21,7 @@ function publicCapabilities(templates: readonly PuzzleTemplate[], puzzleTokenSec
   });
   return {
     apiVersion: "v1",
-    features: { answerVerification: Boolean(puzzleTokenSecret), conditionalGet: true, difficultySelection: true, difficultyModelSelection: true, hints: Boolean(puzzleTokenSecret), outcomeTelemetry: hasOutcomeSink, seedFallback: true },
+    features: { answerVerification: Boolean(puzzleTokenSecret), conditionalGet: true, difficultySelection: true, difficultyModelSelection: true, feedback: Boolean(puzzleTokenSecret && hasFeedbackSink), hints: Boolean(puzzleTokenSecret), outcomeTelemetry: hasOutcomeSink, seedFallback: true },
     difficultyModels: {
       default: "yokaiba-difficulty-v5",
       supported: ["yokaiba-difficulty-v4", "yokaiba-difficulty-v5"],
@@ -39,10 +40,11 @@ export function createRestRoutes(templates: readonly PuzzleTemplate[], options: 
   return new Map<string, RouteHandler>([
     ["GET /v1/scenarios", async () => json({ scenarios: templates.map(scenarioSummary) }, 200, { "cache-control": SCENARIOS_CACHE_CONTROL })],
     ["GET /v1/capabilities", async () => json({
-      ...publicCapabilities(templates, options.puzzleTokenSecret, Boolean(options.recordOutcome)),
+      ...publicCapabilities(templates, options.puzzleTokenSecret, Boolean(options.recordOutcome), Boolean(options.recordFeedback)),
     }, 200, { "cache-control": SCENARIOS_CACHE_CONTROL })],
     ["GET /v1/version", async () => json({ serviceVersion: options.serviceVersion ?? "0.1.0", buildSha: options.buildSha ?? "local", generatorVersion: GENERATOR_VERSION, solverVersion: SOLVER_VERSION }, 200, { "cache-control": VERSION_CACHE_CONTROL })],
     ["POST /v1/events", request => outcomeRoute(request, byId, options.recordOutcome)],
+    ["POST /v1/feedback", request => feedbackRoute(request, byId, protectedSecrets, options.recordFeedback)],
     ["POST /v1/puzzles/hint", request => hintRoute(request, byId, protectedSecrets)],
     ["POST /v1/puzzles/verify", request => verificationRoute(request, byId, protectedSecrets)],
     ["GET /v1/puzzles/generate", (request, url) => generationRoute(request, url, byId, options)],
