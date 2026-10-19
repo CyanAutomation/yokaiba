@@ -1,6 +1,6 @@
 {
   "reportVersion": 1,
-  "generatedAt": "2026-10-19T06:58:50.493Z",
+  "generatedAt": "2026-10-19T07:21:58.955Z",
   "configuration": {
     "samples": 25,
     "targetSamples": 3,
@@ -160,11 +160,11 @@
       },
       "pairedGenerationMs": {
         "count": 25,
-        "minimum": 1.327,
-        "p50": 2.554,
-        "p95": 4.595,
-        "maximum": 19.152,
-        "mean": 3.208
+        "minimum": 1.702,
+        "p50": 3.047,
+        "p95": 6.043,
+        "maximum": 22.82,
+        "mean": 4.043
       },
       "targeted": [
         {
@@ -182,11 +182,11 @@
           },
           "generationMs": {
             "count": 3,
-            "minimum": 11.411,
-            "p50": 14.033,
-            "p95": 14.256,
-            "maximum": 14.256,
-            "mean": 13.233
+            "minimum": 13.529,
+            "p50": 16.855,
+            "p95": 21.273,
+            "maximum": 21.273,
+            "mean": 17.219
           },
           "candidatesTried": {
             "count": 3,
@@ -200,7 +200,7 @@
             {
               "seed": "difficulty-v5-audit-target-tournament-order-v1-1-0",
               "status": "selected",
-              "elapsedMs": 14.256,
+              "elapsedMs": 21.273,
               "score": 15,
               "level": 1,
               "traceStatus": "complete",
@@ -282,7 +282,7 @@
             {
               "seed": "difficulty-v5-audit-target-tournament-order-v1-1-1",
               "status": "selected",
-              "elapsedMs": 11.411,
+              "elapsedMs": 16.855,
               "score": 15,
               "level": 1,
               "traceStatus": "complete",
@@ -364,7 +364,7 @@
             {
               "seed": "difficulty-v5-audit-target-tournament-order-v1-1-2",
               "status": "selected",
-              "elapsedMs": 14.033,
+              "elapsedMs": 13.529,
               "score": 15,
               "level": 1,
               "traceStatus": "complete",
@@ -460,11 +460,11 @@
           },
           "generationMs": {
             "count": 3,
-            "minimum": 32.537,
-            "p50": 33.272,
-            "p95": 40.236,
-            "maximum": 40.236,
-            "mean": 35.348
+            "minimum": 40.869,
+            "p50": 57.32,
+            "p95": 61.618,
+            "maximum": 61.618,
+            "mean": 53.269
           },
           "candidatesTried": {
             "count": 3,
@@ -478,7 +478,7 @@
             {
               "seed": "difficulty-v5-audit-target-tournament-order-v1-2-0",
               "status": "selected",
-              "elapsedMs": 33.272,
+              "elapsedMs": 40.869,
               "score": 17,
               "level": 2,
               "traceStatus": "complete",
@@ -560,7 +560,7 @@
             {
               "seed": "difficulty-v5-audit-target-tournament-order-v1-2-1",
               "status": "selected",
-              "elapsedMs": 32.537,
+              "elapsedMs": 57.32,
               "score": 16,
               "level": 2,
               "traceStatus": "complete",
@@ -642,7 +642,7 @@
             {
               "seed": "difficulty-v5-audit-target-tournament-order-v1-2-2",
               "status": "selected",
-              "elapsedMs": 40.236,
+              "elapsedMs": 61.618,
               "score": 16,
               "level": 2,
               "traceStatus": "complete",
@@ -738,11 +738,11 @@
           },
           "generationMs": {
             "count": 3,
-            "minimum": 46.141,
-            "p50": 46.183,
-            "p95": 78.277,
-            "maximum": 78.277,
-            "mean": 56.867
+            "minimum": 47.216,
+            "p50": 55.414,
+            "p95": 57.98,
+            "maximum": 57.98,
+            "mean": 53.537
           },
           "candidatesTried": {
             "count": 3,
@@ -756,7 +756,7 @@
             {
               "seed": "difficulty-v5-audit-target-tournament-order-v1-3-0",
               "status": "selected",
-              "elapsedMs": 78.277,
+              "elapsedMs": 57.98,
               "score": 42,
               "level": 3,
               "traceStatus": "complete",
@@ -827,7 +827,7 @@
             {
               "seed": "difficulty-v5-audit-target-tournament-order-v1-3-1",
               "status": "selected",
-              "elapsedMs": 46.141,
+              "elapsedMs": 47.216,
               "score": 42,
               "level": 3,
               "traceStatus": "complete",
@@ -905,7 +905,7 @@
             {
               "seed": "difficulty-v5-audit-target-tournament-order-v1-3-2",
               "status": "selected",
-              "elapsedMs": 46.183,
+              "elapsedMs": 55.414,
               "score": 41,
               "level": 3,
               "traceStatus": "complete",
@@ -996,11 +996,11 @@
           },
           "generationMs": {
             "count": 3,
-            "minimum": 37.261,
-            "p50": 37.641,
-            "p95": 41.997,
-            "maximum": 41.997,
-            "mean": 38.966
+            "minimum": 36.683,
+            "p50": 40.157,
+            "p95": 52.178,
+            "maximum": 52.178,
+            "mean": 43.006
           },
           "candidatesTried": {
             "count": 3,
@@ -1014,7 +1014,7 @@
             {
               "seed": "difficulty-v5-audit-target-tournament-order-v1-4-0",
               "status": "selected",
-              "elapsedMs": 37.261,
+              "elapsedMs": 36.683,
               "score": 48,
               "level": 4,
               "traceStatus": "complete",
@@ -1093,7 +1093,7 @@
             {
               "seed": "difficulty-v5-audit-target-tournament-order-v1-4-1",
               "status": "selected",
-              "elapsedMs": 41.997,
+              "elapsedMs": 40.157,
               "score": 48,
               "level": 4,
               "traceStatus": "complete",
@@ -1164,7 +1164,7 @@
             {
               "seed": "difficulty-v5-audit-target-tournament-order-v1-4-2",
               "status": "selected",
-              "elapsedMs": 37.641,
+              "elapsedMs": 52.178,
               "score": 48,
               "level": 4,
               "traceStatus": "complete",
@@ -1326,11 +1326,11 @@
       },
       "pairedGenerationMs": {
         "count": 25,
-        "minimum": 1.014,
-        "p50": 1.905,
-        "p95": 3.104,
-        "maximum": 3.152,
-        "mean": 1.901
+        "minimum": 1.144,
+        "p50": 2.059,
+        "p95": 3.477,
+        "maximum": 4.836,
+        "mean": 2.11
       },
       "targeted": [
         {
@@ -1348,11 +1348,11 @@
           },
           "generationMs": {
             "count": 3,
-            "minimum": 10.62,
-            "p50": 11.706,
-            "p95": 11.76,
-            "maximum": 11.76,
-            "mean": 11.362
+            "minimum": 9.035,
+            "p50": 9.81,
+            "p95": 11.526,
+            "maximum": 11.526,
+            "mean": 10.124
           },
           "candidatesTried": {
             "count": 3,
@@ -1366,7 +1366,7 @@
             {
               "seed": "difficulty-v5-audit-target-tournament-order-v2-1-0",
               "status": "selected",
-              "elapsedMs": 10.62,
+              "elapsedMs": 11.526,
               "score": 15,
               "level": 1,
               "traceStatus": "complete",
@@ -1448,7 +1448,7 @@
             {
               "seed": "difficulty-v5-audit-target-tournament-order-v2-1-1",
               "status": "selected",
-              "elapsedMs": 11.76,
+              "elapsedMs": 9.035,
               "score": 15,
               "level": 1,
               "traceStatus": "complete",
@@ -1530,7 +1530,7 @@
             {
               "seed": "difficulty-v5-audit-target-tournament-order-v2-1-2",
               "status": "selected",
-              "elapsedMs": 11.706,
+              "elapsedMs": 9.81,
               "score": 15,
               "level": 1,
               "traceStatus": "complete",
@@ -1626,11 +1626,11 @@
           },
           "generationMs": {
             "count": 3,
-            "minimum": 32.206,
-            "p50": 33.557,
-            "p95": 45.773,
-            "maximum": 45.773,
-            "mean": 37.179
+            "minimum": 33.076,
+            "p50": 35.757,
+            "p95": 40.187,
+            "maximum": 40.187,
+            "mean": 36.34
           },
           "candidatesTried": {
             "count": 3,
@@ -1644,7 +1644,7 @@
             {
               "seed": "difficulty-v5-audit-target-tournament-order-v2-2-0",
               "status": "selected",
-              "elapsedMs": 32.206,
+              "elapsedMs": 33.076,
               "score": 16,
               "level": 2,
               "traceStatus": "complete",
@@ -1726,7 +1726,7 @@
             {
               "seed": "difficulty-v5-audit-target-tournament-order-v2-2-1",
               "status": "selected",
-              "elapsedMs": 33.557,
+              "elapsedMs": 35.757,
               "score": 16,
               "level": 2,
               "traceStatus": "complete",
@@ -1808,7 +1808,7 @@
             {
               "seed": "difficulty-v5-audit-target-tournament-order-v2-2-2",
               "status": "selected",
-              "elapsedMs": 45.773,
+              "elapsedMs": 40.187,
               "score": 17,
               "level": 2,
               "traceStatus": "complete",
@@ -1904,11 +1904,11 @@
           },
           "generationMs": {
             "count": 3,
-            "minimum": 40.343,
-            "p50": 46.23,
-            "p95": 75.364,
-            "maximum": 75.364,
-            "mean": 53.979
+            "minimum": 41.599,
+            "p50": 41.939,
+            "p95": 51.24,
+            "maximum": 51.24,
+            "mean": 44.926
           },
           "candidatesTried": {
             "count": 3,
@@ -1922,7 +1922,7 @@
             {
               "seed": "difficulty-v5-audit-target-tournament-order-v2-3-0",
               "status": "selected",
-              "elapsedMs": 75.364,
+              "elapsedMs": 51.24,
               "score": 43,
               "level": 3,
               "traceStatus": "complete",
@@ -2007,7 +2007,7 @@
             {
               "seed": "difficulty-v5-audit-target-tournament-order-v2-3-1",
               "status": "selected",
-              "elapsedMs": 40.343,
+              "elapsedMs": 41.599,
               "score": 42,
               "level": 3,
               "traceStatus": "complete",
@@ -2092,7 +2092,7 @@
             {
               "seed": "difficulty-v5-audit-target-tournament-order-v2-3-2",
               "status": "selected",
-              "elapsedMs": 46.23,
+              "elapsedMs": 41.939,
               "score": 42,
               "level": 3,
               "traceStatus": "complete",
@@ -2192,11 +2192,11 @@
           },
           "generationMs": {
             "count": 3,
-            "minimum": 26.69,
-            "p50": 29.595,
-            "p95": 35.495,
-            "maximum": 35.495,
-            "mean": 30.593
+            "minimum": 24.833,
+            "p50": 28.88,
+            "p95": 43.517,
+            "maximum": 43.517,
+            "mean": 32.41
           },
           "candidatesTried": {
             "count": 3,
@@ -2210,7 +2210,7 @@
             {
               "seed": "difficulty-v5-audit-target-tournament-order-v2-4-0",
               "status": "selected",
-              "elapsedMs": 29.595,
+              "elapsedMs": 24.833,
               "score": 48,
               "level": 4,
               "traceStatus": "complete",
@@ -2281,7 +2281,7 @@
             {
               "seed": "difficulty-v5-audit-target-tournament-order-v2-4-1",
               "status": "selected",
-              "elapsedMs": 35.495,
+              "elapsedMs": 43.517,
               "score": 48,
               "level": 4,
               "traceStatus": "complete",
@@ -2359,7 +2359,7 @@
             {
               "seed": "difficulty-v5-audit-target-tournament-order-v2-4-2",
               "status": "selected",
-              "elapsedMs": 26.69,
+              "elapsedMs": 28.88,
               "score": 48,
               "level": 4,
               "traceStatus": "complete",
@@ -2519,11 +2519,11 @@
       },
       "pairedGenerationMs": {
         "count": 25,
-        "minimum": 1.75,
-        "p50": 3.031,
-        "p95": 5.14,
-        "maximum": 9.949,
-        "mean": 3.404
+        "minimum": 1.612,
+        "p50": 3.34,
+        "p95": 8.418,
+        "maximum": 11.481,
+        "mean": 3.757
       },
       "targeted": [
         {
@@ -2541,11 +2541,11 @@
           },
           "generationMs": {
             "count": 3,
-            "minimum": 30.663,
-            "p50": 33.541,
-            "p95": 35.766,
-            "maximum": 35.766,
-            "mean": 33.323
+            "minimum": 31.813,
+            "p50": 34.398,
+            "p95": 50.026,
+            "maximum": 50.026,
+            "mean": 38.746
           },
           "candidatesTried": {
             "count": 3,
@@ -2559,7 +2559,7 @@
             {
               "seed": "difficulty-v5-audit-target-open-division-v2-5-0",
               "status": "selected",
-              "elapsedMs": 35.766,
+              "elapsedMs": 31.813,
               "score": 60,
               "level": 5,
               "traceStatus": "complete",
@@ -2632,7 +2632,7 @@
             {
               "seed": "difficulty-v5-audit-target-open-division-v2-5-1",
               "status": "selected",
-              "elapsedMs": 30.663,
+              "elapsedMs": 34.398,
               "score": 55,
               "level": 5,
               "traceStatus": "complete",
@@ -2705,7 +2705,7 @@
             {
               "seed": "difficulty-v5-audit-target-open-division-v2-5-2",
               "status": "selected",
-              "elapsedMs": 33.541,
+              "elapsedMs": 50.026,
               "score": 53,
               "level": 5,
               "traceStatus": "complete",
@@ -2784,11 +2784,11 @@
           },
           "generationMs": {
             "count": 3,
-            "minimum": 87.006,
-            "p50": 119.142,
-            "p95": 127.231,
-            "maximum": 127.231,
-            "mean": 111.126
+            "minimum": 91.587,
+            "p50": 127.348,
+            "p95": 130.02,
+            "maximum": 130.02,
+            "mean": 116.318
           },
           "candidatesTried": {
             "count": 3,
@@ -2802,7 +2802,7 @@
             {
               "seed": "difficulty-v5-audit-target-open-division-v2-6-0",
               "status": "unavailable",
-              "elapsedMs": 119.142,
+              "elapsedMs": 127.348,
               "candidateAttempts": 4,
               "eligibleCandidates": 0,
               "candidateScoreRange": {
@@ -2819,7 +2819,7 @@
             {
               "seed": "difficulty-v5-audit-target-open-division-v2-6-1",
               "status": "selected",
-              "elapsedMs": 87.006,
+              "elapsedMs": 91.587,
               "score": 62,
               "level": 6,
               "traceStatus": "complete",
@@ -2901,7 +2901,7 @@
             {
               "seed": "difficulty-v5-audit-target-open-division-v2-6-2",
               "status": "selected",
-              "elapsedMs": 127.231,
+              "elapsedMs": 130.02,
               "score": 61,
               "level": 6,
               "traceStatus": "complete",
@@ -2989,11 +2989,11 @@
           },
           "generationMs": {
             "count": 3,
-            "minimum": 27.588,
-            "p50": 28.626,
-            "p95": 29.802,
-            "maximum": 29.802,
-            "mean": 28.672
+            "minimum": 27.793,
+            "p50": 33.229,
+            "p95": 39.171,
+            "maximum": 39.171,
+            "mean": 33.398
           },
           "candidatesTried": {
             "count": 3,
@@ -3007,7 +3007,7 @@
             {
               "seed": "difficulty-v5-audit-target-open-division-v2-7-0",
               "status": "unavailable",
-              "elapsedMs": 28.626,
+              "elapsedMs": 27.793,
               "candidateAttempts": 4,
               "eligibleCandidates": 0,
               "candidateScoreRange": {
@@ -3024,7 +3024,7 @@
             {
               "seed": "difficulty-v5-audit-target-open-division-v2-7-1",
               "status": "unavailable",
-              "elapsedMs": 27.588,
+              "elapsedMs": 33.229,
               "candidateAttempts": 4,
               "eligibleCandidates": 0,
               "candidateScoreRange": {
@@ -3042,7 +3042,7 @@
             {
               "seed": "difficulty-v5-audit-target-open-division-v2-7-2",
               "status": "selected",
-              "elapsedMs": 29.802,
+              "elapsedMs": 39.171,
               "score": 69,
               "level": 7,
               "traceStatus": "complete",
@@ -3127,11 +3127,11 @@
           },
           "generationMs": {
             "count": 3,
-            "minimum": 110.695,
-            "p50": 116.735,
-            "p95": 132.538,
-            "maximum": 132.538,
-            "mean": 119.989
+            "minimum": 112.392,
+            "p50": 129.009,
+            "p95": 134.382,
+            "maximum": 134.382,
+            "mean": 125.261
           },
           "candidatesTried": {
             "count": 3,
@@ -3145,7 +3145,7 @@
             {
               "seed": "difficulty-v5-audit-target-open-division-v2-8-0",
               "status": "selected",
-              "elapsedMs": 132.538,
+              "elapsedMs": 134.382,
               "score": 71,
               "level": 8,
               "traceStatus": "complete",
@@ -3227,7 +3227,7 @@
             {
               "seed": "difficulty-v5-audit-target-open-division-v2-8-1",
               "status": "selected",
-              "elapsedMs": 116.735,
+              "elapsedMs": 129.009,
               "score": 70,
               "level": 8,
               "traceStatus": "complete",
@@ -3309,7 +3309,7 @@
             {
               "seed": "difficulty-v5-audit-target-open-division-v2-8-2",
               "status": "unavailable",
-              "elapsedMs": 110.695,
+              "elapsedMs": 112.392,
               "candidateAttempts": 4,
               "eligibleCandidates": 0,
               "candidateScoreRange": {
@@ -3416,11 +3416,11 @@
       },
       "pairedGenerationMs": {
         "count": 25,
-        "minimum": 2.608,
-        "p50": 10.562,
-        "p95": 28.753,
-        "maximum": 30.16,
-        "mean": 12.886
+        "minimum": 2.415,
+        "p50": 11.077,
+        "p95": 26.044,
+        "maximum": 27.383,
+        "mean": 12.884
       },
       "targeted": [
         {
@@ -3438,11 +3438,11 @@
           },
           "generationMs": {
             "count": 3,
-            "minimum": 464.256,
-            "p50": 509.833,
-            "p95": 515.834,
-            "maximum": 515.834,
-            "mean": 496.641
+            "minimum": 409.553,
+            "p50": 479.342,
+            "p95": 515.73,
+            "maximum": 515.73,
+            "mean": 468.208
           },
           "candidatesTried": {
             "count": 3,
@@ -3456,7 +3456,7 @@
             {
               "seed": "difficulty-v5-audit-target-championship-bridge-v1-8-0",
               "status": "unavailable",
-              "elapsedMs": 515.834,
+              "elapsedMs": 479.342,
               "candidateAttempts": 4,
               "eligibleCandidates": 0,
               "candidateScoreRange": {
@@ -3473,7 +3473,7 @@
             {
               "seed": "difficulty-v5-audit-target-championship-bridge-v1-8-1",
               "status": "selected",
-              "elapsedMs": 509.833,
+              "elapsedMs": 515.73,
               "score": 70,
               "level": 8,
               "traceStatus": "complete",
@@ -3595,7 +3595,7 @@
             {
               "seed": "difficulty-v5-audit-target-championship-bridge-v1-8-2",
               "status": "selected",
-              "elapsedMs": 464.256,
+              "elapsedMs": 409.553,
               "score": 71,
               "level": 8,
               "traceStatus": "complete",
@@ -3709,17 +3709,17 @@
             "count": 2,
             "minimum": 73,
             "p50": 73,
-            "p95": 75,
-            "maximum": 75,
-            "mean": 74
+            "p95": 74,
+            "maximum": 74,
+            "mean": 73.5
           },
           "generationMs": {
             "count": 3,
-            "minimum": 496.133,
-            "p50": 501.908,
-            "p95": 524.359,
-            "maximum": 524.359,
-            "mean": 507.467
+            "minimum": 506.26,
+            "p50": 532.574,
+            "p95": 536.425,
+            "maximum": 536.425,
+            "mean": 525.086
           },
           "candidatesTried": {
             "count": 3,
@@ -3732,87 +3732,62 @@
           "samples": [
             {
               "seed": "difficulty-v5-audit-target-championship-bridge-v1-9-0",
+              "status": "unavailable",
+              "elapsedMs": 506.26,
+              "candidateAttempts": 4,
+              "eligibleCandidates": 0,
+              "candidateScoreRange": {
+                "minimum": 62,
+                "maximum": 77,
+                "complete": 4,
+                "incomplete": 0
+              },
+              "observedLevels": [],
+              "error": "difficulty level 9 is unavailable for template championship-bridge-v1 and seed difficulty-v5-audit-target-championship-bridge-v1-9-0"
+            },
+            {
+              "seed": "difficulty-v5-audit-target-championship-bridge-v1-9-1",
               "status": "selected",
-              "elapsedMs": 501.908,
+              "elapsedMs": 536.425,
               "score": 73,
               "level": 9,
               "traceStatus": "complete",
               "candidateAttempts": 4,
-              "eligibleCandidates": 2,
+              "eligibleCandidates": 1,
               "selectedRankDistance": 0.75,
               "candidateScoreRange": {
-                "minimum": 68,
+                "minimum": 66,
                 "maximum": 77,
                 "complete": 4,
                 "incomplete": 0
               },
               "clueMetadata": [
                 {
-                  "clueId": "same-row-tatami-result-4",
-                  "kind": "sameRow",
-                  "categories": [
-                    "result",
-                    "tatami"
-                  ]
-                },
-                {
-                  "clueId": "same-row-tatami-result-0",
-                  "kind": "sameRow",
-                  "categories": [
-                    "result",
-                    "tatami"
-                  ]
-                },
-                {
-                  "clueId": "same-row-weight-result-4",
-                  "kind": "sameRow",
-                  "categories": [
-                    "result",
-                    "weight"
-                  ]
-                },
-                {
-                  "clueId": "same-row-weight-result-2",
-                  "kind": "sameRow",
-                  "categories": [
-                    "result",
-                    "weight"
-                  ]
-                },
-                {
-                  "clueId": "same-row-tatami-result-3",
-                  "kind": "sameRow",
-                  "categories": [
-                    "result",
-                    "tatami"
-                  ]
-                },
-                {
-                  "clueId": "same-row-weight-tatami-1",
-                  "kind": "sameRow",
+                  "clueId": "distance-weight-tatami-0-3",
+                  "kind": "distance",
                   "categories": [
                     "tatami",
                     "weight"
                   ]
                 },
                 {
-                  "clueId": "same-row-weight-result-3",
-                  "kind": "sameRow",
+                  "clueId": "distance-weight-tatami-1-3",
+                  "kind": "distance",
                   "categories": [
-                    "result",
+                    "tatami",
                     "weight"
                   ]
                 },
                 {
-                  "clueId": "distance-tatami-result-1-4",
+                  "clueId": "distance-weight-tatami-0-2",
                   "kind": "distance",
                   "categories": [
-                    "result",
-                    "tatami"
+                    "tatami",
+                    "weight"
                   ]
                 },
                 {
-                  "clueId": "distance-weight-result-2-4",
+                  "clueId": "distance-weight-result-1-4",
                   "kind": "distance",
                   "categories": [
                     "result",
@@ -3820,98 +3795,16 @@
                   ]
                 },
                 {
-                  "clueId": "distance-tatami-result-0-4",
+                  "clueId": "distance-weight-result-0-1",
                   "kind": "distance",
                   "categories": [
                     "result",
-                    "tatami"
-                  ]
-                },
-                {
-                  "clueId": "before-result-1-2",
-                  "kind": "before",
-                  "categories": [
-                    "result"
-                  ]
-                }
-              ]
-            },
-            {
-              "seed": "difficulty-v5-audit-target-championship-bridge-v1-9-1",
-              "status": "selected",
-              "elapsedMs": 496.133,
-              "score": 75,
-              "level": 9,
-              "traceStatus": "complete",
-              "candidateAttempts": 4,
-              "eligibleCandidates": 1,
-              "selectedRankDistance": -0.25,
-              "candidateScoreRange": {
-                "minimum": 67,
-                "maximum": 79,
-                "complete": 4,
-                "incomplete": 0
-              },
-              "clueMetadata": [
-                {
-                  "clueId": "same-row-weight-tatami-4",
-                  "kind": "sameRow",
-                  "categories": [
-                    "tatami",
                     "weight"
                   ]
                 },
                 {
-                  "clueId": "same-row-tatami-result-3",
-                  "kind": "sameRow",
-                  "categories": [
-                    "result",
-                    "tatami"
-                  ]
-                },
-                {
-                  "clueId": "same-row-weight-result-3",
-                  "kind": "sameRow",
-                  "categories": [
-                    "result",
-                    "weight"
-                  ]
-                },
-                {
-                  "clueId": "same-row-weight-tatami-1",
-                  "kind": "sameRow",
-                  "categories": [
-                    "tatami",
-                    "weight"
-                  ]
-                },
-                {
-                  "clueId": "same-row-tatami-result-1",
-                  "kind": "sameRow",
-                  "categories": [
-                    "result",
-                    "tatami"
-                  ]
-                },
-                {
-                  "clueId": "same-row-weight-result-4",
-                  "kind": "sameRow",
-                  "categories": [
-                    "result",
-                    "weight"
-                  ]
-                },
-                {
-                  "clueId": "same-row-weight-tatami-2",
-                  "kind": "sameRow",
-                  "categories": [
-                    "tatami",
-                    "weight"
-                  ]
-                },
-                {
-                  "clueId": "same-row-tatami-result-2",
-                  "kind": "sameRow",
+                  "clueId": "distance-tatami-result-1-3",
+                  "kind": "distance",
                   "categories": [
                     "result",
                     "tatami"
@@ -3926,11 +3819,53 @@
                   ]
                 },
                 {
-                  "clueId": "distance-tatami-result-1-3",
+                  "clueId": "distance-weight-result-0-2",
                   "kind": "distance",
                   "categories": [
                     "result",
+                    "weight"
+                  ]
+                },
+                {
+                  "clueId": "distance-weight-result-2-4",
+                  "kind": "distance",
+                  "categories": [
+                    "result",
+                    "weight"
+                  ]
+                },
+                {
+                  "clueId": "before-tatami-3-4",
+                  "kind": "before",
+                  "categories": [
                     "tatami"
+                  ]
+                }
+              ]
+            },
+            {
+              "seed": "difficulty-v5-audit-target-championship-bridge-v1-9-2",
+              "status": "selected",
+              "elapsedMs": 532.574,
+              "score": 74,
+              "level": 9,
+              "traceStatus": "complete",
+              "candidateAttempts": 4,
+              "eligibleCandidates": 3,
+              "selectedRankDistance": -0.25,
+              "candidateScoreRange": {
+                "minimum": 69,
+                "maximum": 74,
+                "complete": 4,
+                "incomplete": 0
+              },
+              "clueMetadata": [
+                {
+                  "clueId": "distance-weight-result-2-3",
+                  "kind": "distance",
+                  "categories": [
+                    "result",
+                    "weight"
                   ]
                 },
                 {
@@ -3942,30 +3877,85 @@
                   ]
                 },
                 {
-                  "clueId": "before-tatami-0-3",
+                  "clueId": "distance-weight-tatami-2-4",
+                  "kind": "distance",
+                  "categories": [
+                    "tatami",
+                    "weight"
+                  ]
+                },
+                {
+                  "clueId": "distance-tatami-result-0-2",
+                  "kind": "distance",
+                  "categories": [
+                    "result",
+                    "tatami"
+                  ]
+                },
+                {
+                  "clueId": "distance-tatami-result-0-4",
+                  "kind": "distance",
+                  "categories": [
+                    "result",
+                    "tatami"
+                  ]
+                },
+                {
+                  "clueId": "distance-tatami-result-2-3",
+                  "kind": "distance",
+                  "categories": [
+                    "result",
+                    "tatami"
+                  ]
+                },
+                {
+                  "clueId": "distance-weight-tatami-0-3",
+                  "kind": "distance",
+                  "categories": [
+                    "tatami",
+                    "weight"
+                  ]
+                },
+                {
+                  "clueId": "distance-weight-tatami-2-3",
+                  "kind": "distance",
+                  "categories": [
+                    "tatami",
+                    "weight"
+                  ]
+                },
+                {
+                  "clueId": "distance-weight-result-0-1",
+                  "kind": "distance",
+                  "categories": [
+                    "result",
+                    "weight"
+                  ]
+                },
+                {
+                  "clueId": "distance-weight-tatami-1-4",
+                  "kind": "distance",
+                  "categories": [
+                    "tatami",
+                    "weight"
+                  ]
+                },
+                {
+                  "clueId": "distance-weight-tatami-3-4",
+                  "kind": "distance",
+                  "categories": [
+                    "tatami",
+                    "weight"
+                  ]
+                },
+                {
+                  "clueId": "before-result-1-3",
                   "kind": "before",
                   "categories": [
-                    "tatami"
+                    "result"
                   ]
                 }
               ]
-            },
-            {
-              "seed": "difficulty-v5-audit-target-championship-bridge-v1-9-2",
-              "status": "unavailable",
-              "elapsedMs": 524.359,
-              "candidateAttempts": 4,
-              "eligibleCandidates": 0,
-              "candidateScoreRange": {
-                "minimum": 55,
-                "maximum": 77,
-                "complete": 4,
-                "incomplete": 0
-              },
-              "observedLevels": [
-                8
-              ],
-              "error": "difficulty level 9 is unavailable for template championship-bridge-v1 and seed difficulty-v5-audit-target-championship-bridge-v1-9-2"
             }
           ]
         }
@@ -4059,11 +4049,11 @@
       },
       "pairedGenerationMs": {
         "count": 25,
-        "minimum": 3.738,
-        "p50": 11.027,
-        "p95": 25.6,
-        "maximum": 30.719,
-        "mean": 13.155
+        "minimum": 3.468,
+        "p50": 10.328,
+        "p95": 25.997,
+        "maximum": 31.037,
+        "mean": 13.012
       },
       "targeted": [
         {
@@ -4073,19 +4063,19 @@
           "availabilityRate": 1,
           "score": {
             "count": 3,
-            "minimum": 75,
+            "minimum": 73,
             "p50": 75,
-            "p95": 75,
-            "maximum": 75,
-            "mean": 75
+            "p95": 76,
+            "maximum": 76,
+            "mean": 74.667
           },
           "generationMs": {
             "count": 3,
-            "minimum": 433.44,
-            "p50": 503.365,
-            "p95": 651.088,
-            "maximum": 651.088,
-            "mean": 529.298
+            "minimum": 456.973,
+            "p50": 517.228,
+            "p95": 749.497,
+            "maximum": 749.497,
+            "mean": 574.566
           },
           "candidatesTried": {
             "count": 3,
@@ -4099,184 +4089,70 @@
             {
               "seed": "difficulty-v5-audit-target-championship-circuit-v2-9-0",
               "status": "selected",
-              "elapsedMs": 651.088,
-              "score": 75,
-              "level": 9,
-              "traceStatus": "complete",
-              "candidateAttempts": 4,
-              "eligibleCandidates": 2,
-              "selectedRankDistance": -0.25,
-              "candidateScoreRange": {
-                "minimum": 69,
-                "maximum": 79,
-                "complete": 4,
-                "incomplete": 0
-              },
-              "clueMetadata": [
-                {
-                  "clueId": "same-row-weight-tatami-3",
-                  "kind": "sameRow",
-                  "categories": [
-                    "tatami",
-                    "weight"
-                  ]
-                },
-                {
-                  "clueId": "same-row-weight-tatami-4",
-                  "kind": "sameRow",
-                  "categories": [
-                    "tatami",
-                    "weight"
-                  ]
-                },
-                {
-                  "clueId": "same-row-weight-tatami-1",
-                  "kind": "sameRow",
-                  "categories": [
-                    "tatami",
-                    "weight"
-                  ]
-                },
-                {
-                  "clueId": "same-row-weight-medal-0",
-                  "kind": "sameRow",
-                  "categories": [
-                    "medal",
-                    "weight"
-                  ]
-                },
-                {
-                  "clueId": "same-row-weight-medal-2",
-                  "kind": "sameRow",
-                  "categories": [
-                    "medal",
-                    "weight"
-                  ]
-                },
-                {
-                  "clueId": "same-row-tatami-medal-1",
-                  "kind": "sameRow",
-                  "categories": [
-                    "medal",
-                    "tatami"
-                  ]
-                },
-                {
-                  "clueId": "same-row-weight-tatami-0",
-                  "kind": "sameRow",
-                  "categories": [
-                    "tatami",
-                    "weight"
-                  ]
-                },
-                {
-                  "clueId": "same-row-weight-medal-3",
-                  "kind": "sameRow",
-                  "categories": [
-                    "medal",
-                    "weight"
-                  ]
-                },
-                {
-                  "clueId": "distance-weight-tatami-0-3",
-                  "kind": "distance",
-                  "categories": [
-                    "tatami",
-                    "weight"
-                  ]
-                },
-                {
-                  "clueId": "distance-weight-medal-1-3",
-                  "kind": "distance",
-                  "categories": [
-                    "medal",
-                    "weight"
-                  ]
-                },
-                {
-                  "clueId": "distance-tatami-medal-0-4",
-                  "kind": "distance",
-                  "categories": [
-                    "medal",
-                    "tatami"
-                  ]
-                },
-                {
-                  "clueId": "before-medal-1-2",
-                  "kind": "before",
-                  "categories": [
-                    "medal"
-                  ]
-                }
-              ]
-            },
-            {
-              "seed": "difficulty-v5-audit-target-championship-circuit-v2-9-1",
-              "status": "selected",
-              "elapsedMs": 433.44,
-              "score": 75,
+              "elapsedMs": 749.497,
+              "score": 73,
               "level": 9,
               "traceStatus": "complete",
               "candidateAttempts": 4,
               "eligibleCandidates": 1,
-              "selectedRankDistance": 0.95,
+              "selectedRankDistance": 0.75,
               "candidateScoreRange": {
-                "minimum": 62,
-                "maximum": 78,
+                "minimum": 56,
+                "maximum": 73,
                 "complete": 4,
                 "incomplete": 0
               },
               "clueMetadata": [
                 {
-                  "clueId": "same-row-weight-medal-2",
-                  "kind": "sameRow",
-                  "categories": [
-                    "medal",
-                    "weight"
-                  ]
-                },
-                {
-                  "clueId": "same-row-weight-medal-3",
-                  "kind": "sameRow",
-                  "categories": [
-                    "medal",
-                    "weight"
-                  ]
-                },
-                {
-                  "clueId": "same-row-weight-tatami-2",
-                  "kind": "sameRow",
+                  "clueId": "distance-weight-tatami-3-4",
+                  "kind": "distance",
                   "categories": [
                     "tatami",
                     "weight"
                   ]
                 },
                 {
-                  "clueId": "same-row-weight-tatami-0",
-                  "kind": "sameRow",
+                  "clueId": "distance-weight-medal-0-2",
+                  "kind": "distance",
+                  "categories": [
+                    "medal",
+                    "weight"
+                  ]
+                },
+                {
+                  "clueId": "distance-weight-tatami-2-3",
+                  "kind": "distance",
                   "categories": [
                     "tatami",
                     "weight"
                   ]
                 },
                 {
-                  "clueId": "same-row-tatami-medal-1",
-                  "kind": "sameRow",
+                  "clueId": "distance-tatami-medal-2-4",
+                  "kind": "distance",
                   "categories": [
                     "medal",
                     "tatami"
                   ]
                 },
                 {
-                  "clueId": "same-row-tatami-medal-4",
-                  "kind": "sameRow",
+                  "clueId": "distance-weight-tatami-0-1",
+                  "kind": "distance",
+                  "categories": [
+                    "tatami",
+                    "weight"
+                  ]
+                },
+                {
+                  "clueId": "distance-tatami-medal-1-3",
+                  "kind": "distance",
                   "categories": [
                     "medal",
                     "tatami"
                   ]
                 },
                 {
-                  "clueId": "distance-weight-medal-1-4",
+                  "clueId": "distance-weight-medal-0-1",
                   "kind": "distance",
                   "categories": [
                     "medal",
@@ -4292,6 +4168,14 @@
                   ]
                 },
                 {
+                  "clueId": "distance-weight-medal-1-4",
+                  "kind": "distance",
+                  "categories": [
+                    "medal",
+                    "weight"
+                  ]
+                },
+                {
                   "clueId": "distance-weight-tatami-0-4",
                   "kind": "distance",
                   "categories": [
@@ -4300,82 +4184,74 @@
                   ]
                 },
                 {
-                  "clueId": "before-tatami-3-4",
+                  "clueId": "before-medal-0-2",
                   "kind": "before",
                   "categories": [
-                    "tatami"
+                    "medal"
                   ]
                 }
               ]
             },
             {
-              "seed": "difficulty-v5-audit-target-championship-circuit-v2-9-2",
+              "seed": "difficulty-v5-audit-target-championship-circuit-v2-9-1",
               "status": "selected",
-              "elapsedMs": 503.365,
-              "score": 75,
+              "elapsedMs": 456.973,
+              "score": 76,
               "level": 9,
               "traceStatus": "complete",
               "candidateAttempts": 4,
               "eligibleCandidates": 1,
-              "selectedRankDistance": -0.25,
+              "selectedRankDistance": 0.75,
               "candidateScoreRange": {
-                "minimum": 61,
-                "maximum": 78,
+                "minimum": 65,
+                "maximum": 77,
                 "complete": 4,
                 "incomplete": 0
               },
               "clueMetadata": [
                 {
-                  "clueId": "same-row-weight-medal-0",
-                  "kind": "sameRow",
-                  "categories": [
-                    "medal",
-                    "weight"
-                  ]
-                },
-                {
-                  "clueId": "same-row-weight-medal-4",
-                  "kind": "sameRow",
-                  "categories": [
-                    "medal",
-                    "weight"
-                  ]
-                },
-                {
-                  "clueId": "same-row-weight-tatami-3",
-                  "kind": "sameRow",
-                  "categories": [
-                    "tatami",
-                    "weight"
-                  ]
-                },
-                {
-                  "clueId": "same-row-weight-tatami-0",
-                  "kind": "sameRow",
-                  "categories": [
-                    "tatami",
-                    "weight"
-                  ]
-                },
-                {
-                  "clueId": "same-row-tatami-medal-1",
-                  "kind": "sameRow",
+                  "clueId": "distance-tatami-medal-3-4",
+                  "kind": "distance",
                   "categories": [
                     "medal",
                     "tatami"
                   ]
                 },
                 {
-                  "clueId": "same-row-weight-medal-2",
-                  "kind": "sameRow",
+                  "clueId": "distance-weight-medal-3-4",
+                  "kind": "distance",
                   "categories": [
                     "medal",
                     "weight"
                   ]
                 },
                 {
-                  "clueId": "same-row-tatami-medal-4",
-                  "kind": "sameRow",
+                  "clueId": "distance-weight-tatami-3-4",
+                  "kind": "distance",
+                  "categories": [
+                    "tatami",
+                    "weight"
+                  ]
+                },
+                {
+                  "clueId": "distance-weight-tatami-0-3",
+                  "kind": "distance",
+                  "categories": [
+                    "tatami",
+                    "weight"
+                  ]
+                },
+                {
+                  "clueId": "distance-weight-medal-2-4",
+                  "kind": "distance",
+                  "categories": [
+                    "medal",
+                    "weight"
+                  ]
+                },
+                {
+                  "clueId": "distance-tatami-medal-1-3",
+                  "kind": "distance",
                   "categories": [
                     "medal",
                     "tatami"
@@ -4390,6 +4266,14 @@
                   ]
                 },
                 {
+                  "clueId": "distance-weight-tatami-1-2",
+                  "kind": "distance",
+                  "categories": [
+                    "tatami",
+                    "weight"
+                  ]
+                },
+                {
                   "clueId": "distance-weight-medal-0-2",
                   "kind": "distance",
                   "categories": [
@@ -4398,7 +4282,65 @@
                   ]
                 },
                 {
-                  "clueId": "distance-tatami-medal-1-4",
+                  "clueId": "distance-weight-medal-0-3",
+                  "kind": "distance",
+                  "categories": [
+                    "medal",
+                    "weight"
+                  ]
+                },
+                {
+                  "clueId": "distance-weight-tatami-2-3",
+                  "kind": "distance",
+                  "categories": [
+                    "tatami",
+                    "weight"
+                  ]
+                },
+                {
+                  "clueId": "distance-tatami-medal-2-3",
+                  "kind": "distance",
+                  "categories": [
+                    "medal",
+                    "tatami"
+                  ]
+                },
+                {
+                  "clueId": "before-medal-2-3",
+                  "kind": "before",
+                  "categories": [
+                    "medal"
+                  ]
+                }
+              ]
+            },
+            {
+              "seed": "difficulty-v5-audit-target-championship-circuit-v2-9-2",
+              "status": "selected",
+              "elapsedMs": 517.228,
+              "score": 75,
+              "level": 9,
+              "traceStatus": "complete",
+              "candidateAttempts": 4,
+              "eligibleCandidates": 1,
+              "selectedRankDistance": -0.25,
+              "candidateScoreRange": {
+                "minimum": 51,
+                "maximum": 77,
+                "complete": 4,
+                "incomplete": 0
+              },
+              "clueMetadata": [
+                {
+                  "clueId": "distance-weight-medal-0-4",
+                  "kind": "distance",
+                  "categories": [
+                    "medal",
+                    "weight"
+                  ]
+                },
+                {
+                  "clueId": "distance-tatami-medal-3-4",
                   "kind": "distance",
                   "categories": [
                     "medal",
@@ -4414,7 +4356,55 @@
                   ]
                 },
                 {
-                  "clueId": "before-medal-1-3",
+                  "clueId": "distance-weight-tatami-0-1",
+                  "kind": "distance",
+                  "categories": [
+                    "tatami",
+                    "weight"
+                  ]
+                },
+                {
+                  "clueId": "distance-weight-medal-3-4",
+                  "kind": "distance",
+                  "categories": [
+                    "medal",
+                    "weight"
+                  ]
+                },
+                {
+                  "clueId": "distance-weight-tatami-2-4",
+                  "kind": "distance",
+                  "categories": [
+                    "tatami",
+                    "weight"
+                  ]
+                },
+                {
+                  "clueId": "distance-tatami-medal-0-1",
+                  "kind": "distance",
+                  "categories": [
+                    "medal",
+                    "tatami"
+                  ]
+                },
+                {
+                  "clueId": "distance-tatami-medal-0-2",
+                  "kind": "distance",
+                  "categories": [
+                    "medal",
+                    "tatami"
+                  ]
+                },
+                {
+                  "clueId": "distance-weight-tatami-1-4",
+                  "kind": "distance",
+                  "categories": [
+                    "tatami",
+                    "weight"
+                  ]
+                },
+                {
+                  "clueId": "before-medal-2-3",
                   "kind": "before",
                   "categories": [
                     "medal"
@@ -4439,11 +4429,11 @@
           },
           "generationMs": {
             "count": 3,
-            "minimum": 565.092,
-            "p50": 583.123,
-            "p95": 645.153,
-            "maximum": 645.153,
-            "mean": 597.789
+            "minimum": 581.791,
+            "p50": 605.058,
+            "p95": 610.243,
+            "maximum": 610.243,
+            "mean": 599.031
           },
           "candidatesTried": {
             "count": 3,
@@ -4457,7 +4447,7 @@
             {
               "seed": "difficulty-v5-audit-target-championship-circuit-v2-10-0",
               "status": "unavailable",
-              "elapsedMs": 583.123,
+              "elapsedMs": 581.791,
               "candidateAttempts": 4,
               "eligibleCandidates": 0,
               "candidateScoreRange": {
@@ -4474,7 +4464,7 @@
             {
               "seed": "difficulty-v5-audit-target-championship-circuit-v2-10-1",
               "status": "selected",
-              "elapsedMs": 645.153,
+              "elapsedMs": 610.243,
               "score": 79,
               "level": 10,
               "traceStatus": "complete",
@@ -4580,7 +4570,7 @@
             {
               "seed": "difficulty-v5-audit-target-championship-circuit-v2-10-2",
               "status": "unavailable",
-              "elapsedMs": 565.092,
+              "elapsedMs": 605.058,
               "candidateAttempts": 4,
               "eligibleCandidates": 0,
               "candidateScoreRange": {
@@ -4611,11 +4601,11 @@
           },
           "generationMs": {
             "count": 3,
-            "minimum": 407.819,
-            "p50": 414.037,
-            "p95": 429.695,
-            "maximum": 429.695,
-            "mean": 417.184
+            "minimum": 238.124,
+            "p50": 274.991,
+            "p95": 337.405,
+            "maximum": 337.405,
+            "mean": 283.507
           },
           "candidatesTried": {
             "count": 3,
@@ -4629,12 +4619,12 @@
             {
               "seed": "difficulty-v5-audit-target-championship-circuit-v2-11-0",
               "status": "unavailable",
-              "elapsedMs": 414.037,
+              "elapsedMs": 337.405,
               "candidateAttempts": 4,
               "eligibleCandidates": 0,
               "candidateScoreRange": {
-                "minimum": 58,
-                "maximum": 75,
+                "minimum": 65,
+                "maximum": 73,
                 "complete": 4,
                 "incomplete": 0
               },
@@ -4646,36 +4636,34 @@
             {
               "seed": "difficulty-v5-audit-target-championship-circuit-v2-11-1",
               "status": "unavailable",
-              "elapsedMs": 407.819,
+              "elapsedMs": 238.124,
               "candidateAttempts": 4,
               "eligibleCandidates": 0,
               "candidateScoreRange": {
-                "minimum": 71,
-                "maximum": 78,
+                "minimum": 72,
+                "maximum": 73,
                 "complete": 4,
                 "incomplete": 0
               },
               "observedLevels": [
-                9,
-                10
+                9
               ],
               "error": "difficulty level 11 is unavailable for template championship-circuit-v2 and seed difficulty-v5-audit-target-championship-circuit-v2-11-1"
             },
             {
               "seed": "difficulty-v5-audit-target-championship-circuit-v2-11-2",
               "status": "unavailable",
-              "elapsedMs": 429.695,
+              "elapsedMs": 274.991,
               "candidateAttempts": 4,
               "eligibleCandidates": 0,
               "candidateScoreRange": {
-                "minimum": 60,
-                "maximum": 78,
+                "minimum": 62,
+                "maximum": 76,
                 "complete": 4,
                 "incomplete": 0
               },
               "observedLevels": [
-                9,
-                10
+                9
               ],
               "error": "difficulty level 11 is unavailable for template championship-circuit-v2 and seed difficulty-v5-audit-target-championship-circuit-v2-11-2"
             }
@@ -4696,11 +4684,11 @@
           },
           "generationMs": {
             "count": 3,
-            "minimum": 485.353,
-            "p50": 511.375,
-            "p95": 598.192,
-            "maximum": 598.192,
-            "mean": 531.64
+            "minimum": 535.896,
+            "p50": 567.466,
+            "p95": 655.691,
+            "maximum": 655.691,
+            "mean": 586.351
           },
           "candidatesTried": {
             "count": 3,
@@ -4714,7 +4702,7 @@
             {
               "seed": "difficulty-v5-audit-target-championship-circuit-v2-12-0",
               "status": "unavailable",
-              "elapsedMs": 511.375,
+              "elapsedMs": 567.466,
               "candidateAttempts": 4,
               "eligibleCandidates": 0,
               "candidateScoreRange": {
@@ -4731,7 +4719,7 @@
             {
               "seed": "difficulty-v5-audit-target-championship-circuit-v2-12-1",
               "status": "unavailable",
-              "elapsedMs": 485.353,
+              "elapsedMs": 535.896,
               "candidateAttempts": 4,
               "eligibleCandidates": 0,
               "candidateScoreRange": {
@@ -4748,7 +4736,7 @@
             {
               "seed": "difficulty-v5-audit-target-championship-circuit-v2-12-2",
               "status": "unavailable",
-              "elapsedMs": 598.192,
+              "elapsedMs": 655.691,
               "candidateAttempts": 4,
               "eligibleCandidates": 0,
               "candidateScoreRange": {
@@ -4804,7 +4792,7 @@
         "meanDependencyDepth": 1.333,
         "crossCategorySteps": 11,
         "workingMemoryMean": 9.619,
-        "elapsedMs": 19.152
+        "elapsedMs": 22.82
       },
       "clueMetadata": [
         {
@@ -4893,7 +4881,7 @@
         "meanDependencyDepth": 2.15,
         "crossCategorySteps": 12,
         "workingMemoryMean": 10.65,
-        "elapsedMs": 3.864
+        "elapsedMs": 6.043
       },
       "clueMetadata": [
         {
@@ -4976,7 +4964,7 @@
         "meanDependencyDepth": 1.778,
         "crossCategorySteps": 6,
         "workingMemoryMean": 19.111,
-        "elapsedMs": 2.862
+        "elapsedMs": 3.787
       },
       "clueMetadata": [
         {
@@ -5061,7 +5049,7 @@
         "meanDependencyDepth": 2.591,
         "crossCategorySteps": 14,
         "workingMemoryMean": 11.045,
-        "elapsedMs": 2.589
+        "elapsedMs": 2.933
       },
       "clueMetadata": [
         {
@@ -5151,7 +5139,7 @@
         "meanDependencyDepth": 3,
         "crossCategorySteps": 20,
         "workingMemoryMean": 12.125,
-        "elapsedMs": 2.155
+        "elapsedMs": 4.267
       },
       "clueMetadata": [
         {
@@ -5243,7 +5231,7 @@
         "meanDependencyDepth": 0.667,
         "crossCategorySteps": 2,
         "workingMemoryMean": 19.167,
-        "elapsedMs": 4.595
+        "elapsedMs": 4.587
       },
       "clueMetadata": [
         {
@@ -5340,7 +5328,7 @@
         "meanDependencyDepth": 1.909,
         "crossCategorySteps": 9,
         "workingMemoryMean": 15.455,
-        "elapsedMs": 3.419
+        "elapsedMs": 3.865
       },
       "clueMetadata": [
         {
@@ -5431,7 +5419,7 @@
         "meanDependencyDepth": 2.136,
         "crossCategorySteps": 16,
         "workingMemoryMean": 14.045,
-        "elapsedMs": 3.237
+        "elapsedMs": 3.441
       },
       "clueMetadata": [
         {
@@ -5515,7 +5503,7 @@
         "meanDependencyDepth": 0.778,
         "crossCategorySteps": 4,
         "workingMemoryMean": 18.333,
-        "elapsedMs": 2.792
+        "elapsedMs": 2.591
       },
       "clueMetadata": [
         {
@@ -5599,7 +5587,7 @@
         "meanDependencyDepth": 1.889,
         "crossCategorySteps": 9,
         "workingMemoryMean": 10.222,
-        "elapsedMs": 2.858
+        "elapsedMs": 3.047
       },
       "clueMetadata": [
         {
@@ -5674,7 +5662,7 @@
         "meanDependencyDepth": 1.7,
         "crossCategorySteps": 16,
         "workingMemoryMean": 13.2,
-        "elapsedMs": 2.837
+        "elapsedMs": 2.932
       },
       "clueMetadata": [
         {
@@ -5751,7 +5739,7 @@
         "meanDependencyDepth": 1.727,
         "crossCategorySteps": 15,
         "workingMemoryMean": 12.818,
-        "elapsedMs": 2.554
+        "elapsedMs": 2.499
       },
       "clueMetadata": [
         {
@@ -5835,7 +5823,7 @@
         "meanDependencyDepth": 2.455,
         "crossCategorySteps": 16,
         "workingMemoryMean": 10.682,
-        "elapsedMs": 1.997
+        "elapsedMs": 2.493
       },
       "clueMetadata": [
         {
@@ -5925,7 +5913,7 @@
         "meanDependencyDepth": 2,
         "crossCategorySteps": 5,
         "workingMemoryMean": 18.5,
-        "elapsedMs": 3.886
+        "elapsedMs": 5.401
       },
       "clueMetadata": [
         {
@@ -6008,7 +5996,7 @@
         "meanDependencyDepth": 1.111,
         "crossCategorySteps": 8,
         "workingMemoryMean": 10.944,
-        "elapsedMs": 1.496
+        "elapsedMs": 1.702
       },
       "clueMetadata": [
         {
@@ -6090,7 +6078,7 @@
         "meanDependencyDepth": 0.571,
         "crossCategorySteps": 7,
         "workingMemoryMean": 10.381,
-        "elapsedMs": 1.819
+        "elapsedMs": 2.495
       },
       "clueMetadata": [
         {
@@ -6178,7 +6166,7 @@
         "meanDependencyDepth": 2.636,
         "crossCategorySteps": 17,
         "workingMemoryMean": 12,
-        "elapsedMs": 1.335
+        "elapsedMs": 1.705
       },
       "clueMetadata": [
         {
@@ -6262,7 +6250,7 @@
         "meanDependencyDepth": 2.684,
         "crossCategorySteps": 13,
         "workingMemoryMean": 11.211,
-        "elapsedMs": 2.474
+        "elapsedMs": 4.308
       },
       "clueMetadata": [
         {
@@ -6352,7 +6340,7 @@
         "meanDependencyDepth": 3.091,
         "crossCategorySteps": 16,
         "workingMemoryMean": 11.864,
-        "elapsedMs": 2.313
+        "elapsedMs": 3.302
       },
       "clueMetadata": [
         {
@@ -6427,7 +6415,7 @@
         "meanDependencyDepth": 1.125,
         "crossCategorySteps": 5,
         "workingMemoryMean": 21.625,
-        "elapsedMs": 2.963
+        "elapsedMs": 3.738
       },
       "clueMetadata": [
         {
@@ -6518,7 +6506,7 @@
         "meanDependencyDepth": 2.048,
         "crossCategorySteps": 17,
         "workingMemoryMean": 14.19,
-        "elapsedMs": 2.363
+        "elapsedMs": 3.478
       },
       "clueMetadata": [
         {
@@ -6609,7 +6597,7 @@
         "meanDependencyDepth": 0.4,
         "crossCategorySteps": 1,
         "workingMemoryMean": 12.5,
-        "elapsedMs": 1.327
+        "elapsedMs": 1.751
       },
       "clueMetadata": [
         {
@@ -6704,7 +6692,7 @@
         "meanDependencyDepth": 1.167,
         "crossCategorySteps": 4,
         "workingMemoryMean": 12.5,
-        "elapsedMs": 1.92
+        "elapsedMs": 2.03
       },
       "clueMetadata": [
         {
@@ -6779,7 +6767,7 @@
         "meanDependencyDepth": 0.706,
         "crossCategorySteps": 3,
         "workingMemoryMean": 10.118,
-        "elapsedMs": 1.964
+        "elapsedMs": 2.835
       },
       "clueMetadata": [
         {
@@ -6867,7 +6855,7 @@
         "meanDependencyDepth": 0.5,
         "crossCategorySteps": 3,
         "workingMemoryMean": 18.625,
-        "elapsedMs": 1.441
+        "elapsedMs": 3.02
       },
       "clueMetadata": [
         {
@@ -6958,7 +6946,7 @@
         "meanDependencyDepth": 2.059,
         "crossCategorySteps": 12,
         "workingMemoryMean": 12.588,
-        "elapsedMs": 1.748
+        "elapsedMs": 2.423
       },
       "clueMetadata": [
         {
@@ -7034,7 +7022,7 @@
         "meanDependencyDepth": 2.35,
         "crossCategorySteps": 17,
         "workingMemoryMean": 11.6,
-        "elapsedMs": 3.104
+        "elapsedMs": 2.088
       },
       "clueMetadata": [
         {
@@ -7111,7 +7099,7 @@
         "meanDependencyDepth": 1.35,
         "crossCategorySteps": 7,
         "workingMemoryMean": 10.05,
-        "elapsedMs": 2.054
+        "elapsedMs": 2.288
       },
       "clueMetadata": [
         {
@@ -7208,7 +7196,7 @@
         "meanDependencyDepth": 2,
         "crossCategorySteps": 15,
         "workingMemoryMean": 11.95,
-        "elapsedMs": 1.961
+        "elapsedMs": 3.477
       },
       "clueMetadata": [
         {
@@ -7291,7 +7279,7 @@
         "meanDependencyDepth": 2.15,
         "crossCategorySteps": 14,
         "workingMemoryMean": 10.95,
-        "elapsedMs": 1.115
+        "elapsedMs": 2.096
       },
       "clueMetadata": [
         {
@@ -7381,7 +7369,7 @@
         "meanDependencyDepth": 2.563,
         "crossCategorySteps": 11,
         "workingMemoryMean": 10.5,
-        "elapsedMs": 1.166
+        "elapsedMs": 2.162
       },
       "clueMetadata": [
         {
@@ -7464,7 +7452,7 @@
         "meanDependencyDepth": 1.526,
         "crossCategorySteps": 11,
         "workingMemoryMean": 11.263,
-        "elapsedMs": 3.015
+        "elapsedMs": 4.836
       },
       "clueMetadata": [
         {
@@ -7554,7 +7542,7 @@
         "meanDependencyDepth": 2,
         "crossCategorySteps": 11,
         "workingMemoryMean": 9.952,
-        "elapsedMs": 1.53
+        "elapsedMs": 2.184
       },
       "clueMetadata": [
         {
@@ -7636,7 +7624,7 @@
         "meanDependencyDepth": 2.3,
         "crossCategorySteps": 13,
         "workingMemoryMean": 10.9,
-        "elapsedMs": 1.237
+        "elapsedMs": 1.464
       },
       "clueMetadata": [
         {
@@ -7718,7 +7706,7 @@
         "meanDependencyDepth": 1.778,
         "crossCategorySteps": 15,
         "workingMemoryMean": 13.778,
-        "elapsedMs": 1.291
+        "elapsedMs": 1.706
       },
       "clueMetadata": [
         {
@@ -7796,7 +7784,7 @@
         "meanDependencyDepth": 2.55,
         "crossCategorySteps": 12,
         "workingMemoryMean": 11.2,
-        "elapsedMs": 2.168
+        "elapsedMs": 1.934
       },
       "clueMetadata": [
         {
@@ -7878,7 +7866,7 @@
         "meanDependencyDepth": 2.227,
         "crossCategorySteps": 13,
         "workingMemoryMean": 11.318,
-        "elapsedMs": 2.341
+        "elapsedMs": 1.827
       },
       "clueMetadata": [
         {
@@ -7960,7 +7948,7 @@
         "meanDependencyDepth": 1.375,
         "crossCategorySteps": 5,
         "workingMemoryMean": 21.875,
-        "elapsedMs": 2.188
+        "elapsedMs": 2.059
       },
       "clueMetadata": [
         {
@@ -8037,7 +8025,7 @@
         "meanDependencyDepth": 1.714,
         "crossCategorySteps": 8,
         "workingMemoryMean": 14,
-        "elapsedMs": 2.142
+        "elapsedMs": 1.366
       },
       "clueMetadata": [
         {
@@ -8126,7 +8114,7 @@
         "meanDependencyDepth": 2.136,
         "crossCategorySteps": 17,
         "workingMemoryMean": 13.818,
-        "elapsedMs": 2.162
+        "elapsedMs": 1.774
       },
       "clueMetadata": [
         {
@@ -8211,7 +8199,7 @@
         "meanDependencyDepth": 0.8,
         "crossCategorySteps": 4,
         "workingMemoryMean": 17.3,
-        "elapsedMs": 1.349
+        "elapsedMs": 1.636
       },
       "clueMetadata": [
         {
@@ -8286,7 +8274,7 @@
         "meanDependencyDepth": 2.5,
         "crossCategorySteps": 16,
         "workingMemoryMean": 11.333,
-        "elapsedMs": 1.953
+        "elapsedMs": 2.16
       },
       "clueMetadata": [
         {
@@ -8363,7 +8351,7 @@
         "meanDependencyDepth": 2.261,
         "crossCategorySteps": 16,
         "workingMemoryMean": 12.261,
-        "elapsedMs": 1.605
+        "elapsedMs": 1.652
       },
       "clueMetadata": [
         {
@@ -8453,7 +8441,7 @@
         "meanDependencyDepth": 0.778,
         "crossCategorySteps": 3,
         "workingMemoryMean": 17,
-        "elapsedMs": 1.905
+        "elapsedMs": 2.249
       },
       "clueMetadata": [
         {
@@ -8543,7 +8531,7 @@
         "meanDependencyDepth": 4,
         "crossCategorySteps": 19,
         "workingMemoryMean": 14.087,
-        "elapsedMs": 3.152
+        "elapsedMs": 2.306
       },
       "clueMetadata": [
         {
@@ -8627,7 +8615,7 @@
         "meanDependencyDepth": 2.077,
         "crossCategorySteps": 8,
         "workingMemoryMean": 15.462,
-        "elapsedMs": 1.28
+        "elapsedMs": 1.166
       },
       "clueMetadata": [
         {
@@ -8703,7 +8691,7 @@
         "meanDependencyDepth": 1.591,
         "crossCategorySteps": 9,
         "workingMemoryMean": 10.182,
-        "elapsedMs": 1.605
+        "elapsedMs": 1.851
       },
       "clueMetadata": [
         {
@@ -8798,7 +8786,7 @@
         "meanDependencyDepth": 2.105,
         "crossCategorySteps": 10,
         "workingMemoryMean": 10.684,
-        "elapsedMs": 1.626
+        "elapsedMs": 1.979
       },
       "clueMetadata": [
         {
@@ -8880,7 +8868,7 @@
         "meanDependencyDepth": 3.318,
         "crossCategorySteps": 17,
         "workingMemoryMean": 12.318,
-        "elapsedMs": 2.804
+        "elapsedMs": 2.925
       },
       "clueMetadata": [
         {
@@ -8971,7 +8959,7 @@
         "meanDependencyDepth": 0.25,
         "crossCategorySteps": 1,
         "workingMemoryMean": 19,
-        "elapsedMs": 1.014
+        "elapsedMs": 1.144
       },
       "clueMetadata": [
         {
@@ -9062,7 +9050,7 @@
         "meanDependencyDepth": 1.05,
         "crossCategorySteps": 6,
         "workingMemoryMean": 13.45,
-        "elapsedMs": 2.788
+        "elapsedMs": 2.977
       },
       "clueMetadata": [
         {
@@ -9149,7 +9137,7 @@
         "meanDependencyDepth": 1.053,
         "crossCategorySteps": 4,
         "workingMemoryMean": 13.895,
-        "elapsedMs": 3.003
+        "elapsedMs": 2.756
       },
       "clueMetadata": [
         {
@@ -9229,7 +9217,7 @@
         "meanDependencyDepth": 1.765,
         "crossCategorySteps": 9,
         "workingMemoryMean": 17.765,
-        "elapsedMs": 1.872
+        "elapsedMs": 2.102
       },
       "clueMetadata": [
         {
@@ -9311,7 +9299,7 @@
         "meanDependencyDepth": 0.7,
         "crossCategorySteps": 3,
         "workingMemoryMean": 22.7,
-        "elapsedMs": 4.533
+        "elapsedMs": 5.226
       },
       "clueMetadata": [
         {
@@ -9392,7 +9380,7 @@
         "meanDependencyDepth": 1.87,
         "crossCategorySteps": 12,
         "workingMemoryMean": 16.043,
-        "elapsedMs": 1.933
+        "elapsedMs": 2.32
       },
       "clueMetadata": [
         {
@@ -9474,7 +9462,7 @@
         "meanDependencyDepth": 0.6,
         "crossCategorySteps": 2,
         "workingMemoryMean": 20.8,
-        "elapsedMs": 3.031
+        "elapsedMs": 4.901
       },
       "clueMetadata": [
         {
@@ -9554,7 +9542,7 @@
         "meanDependencyDepth": 3,
         "crossCategorySteps": 13,
         "workingMemoryMean": 17.941,
-        "elapsedMs": 3.262
+        "elapsedMs": 8.418
       },
       "clueMetadata": [
         {
@@ -9623,7 +9611,7 @@
         "meanDependencyDepth": 2.409,
         "crossCategorySteps": 10,
         "workingMemoryMean": 15.318,
-        "elapsedMs": 2.145
+        "elapsedMs": 1.997
       },
       "clueMetadata": [
         {
@@ -9704,7 +9692,7 @@
         "meanDependencyDepth": 1.083,
         "crossCategorySteps": 6,
         "workingMemoryMean": 19.417,
-        "elapsedMs": 1.75
+        "elapsedMs": 1.612
       },
       "clueMetadata": [
         {
@@ -9772,7 +9760,7 @@
         "meanDependencyDepth": 1.955,
         "crossCategorySteps": 12,
         "workingMemoryMean": 15.773,
-        "elapsedMs": 2.795
+        "elapsedMs": 1.706
       },
       "clueMetadata": [
         {
@@ -9853,7 +9841,7 @@
         "meanDependencyDepth": 1.8,
         "crossCategorySteps": 8,
         "workingMemoryMean": 24,
-        "elapsedMs": 4.173
+        "elapsedMs": 4.248
       },
       "clueMetadata": [
         {
@@ -9928,7 +9916,7 @@
         "meanDependencyDepth": 3.409,
         "crossCategorySteps": 15,
         "workingMemoryMean": 18.455,
-        "elapsedMs": 3.994
+        "elapsedMs": 4.074
       },
       "clueMetadata": [
         {
@@ -10003,7 +9991,7 @@
         "meanDependencyDepth": 1.105,
         "crossCategorySteps": 0,
         "workingMemoryMean": 12.684,
-        "elapsedMs": 1.945
+        "elapsedMs": 2.119
       },
       "clueMetadata": [
         {
@@ -10082,7 +10070,7 @@
         "meanDependencyDepth": 2.294,
         "crossCategorySteps": 9,
         "workingMemoryMean": 16.235,
-        "elapsedMs": 2.142
+        "elapsedMs": 2.088
       },
       "clueMetadata": [
         {
@@ -10156,7 +10144,7 @@
         "meanDependencyDepth": 3.308,
         "crossCategorySteps": 9,
         "workingMemoryMean": 14.192,
-        "elapsedMs": 3.374
+        "elapsedMs": 3.758
       },
       "clueMetadata": [
         {
@@ -10244,7 +10232,7 @@
         "meanDependencyDepth": 3.941,
         "crossCategorySteps": 13,
         "workingMemoryMean": 17.353,
-        "elapsedMs": 5.14
+        "elapsedMs": 5.524
       },
       "clueMetadata": [
         {
@@ -10327,7 +10315,7 @@
         "meanDependencyDepth": 2.214,
         "crossCategorySteps": 11,
         "workingMemoryMean": 25.857,
-        "elapsedMs": 9.949
+        "elapsedMs": 11.481
       },
       "clueMetadata": [
         {
@@ -10404,7 +10392,7 @@
         "meanDependencyDepth": 2.941,
         "crossCategorySteps": 12,
         "workingMemoryMean": 17.176,
-        "elapsedMs": 2.859
+        "elapsedMs": 4.203
       },
       "clueMetadata": [
         {
@@ -10478,7 +10466,7 @@
         "meanDependencyDepth": 1.313,
         "crossCategorySteps": 7,
         "workingMemoryMean": 14.813,
-        "elapsedMs": 3.594
+        "elapsedMs": 3.357
       },
       "clueMetadata": [
         {
@@ -10551,7 +10539,7 @@
         "meanDependencyDepth": 2.818,
         "crossCategorySteps": 18,
         "workingMemoryMean": 18.545,
-        "elapsedMs": 4.467
+        "elapsedMs": 4.295
       },
       "clueMetadata": [
         {
@@ -10634,7 +10622,7 @@
         "meanDependencyDepth": 2.294,
         "crossCategorySteps": 9,
         "workingMemoryMean": 15.059,
-        "elapsedMs": 2.228
+        "elapsedMs": 2.075
       },
       "clueMetadata": [
         {
@@ -10708,7 +10696,7 @@
         "meanDependencyDepth": 1,
         "crossCategorySteps": 3,
         "workingMemoryMean": 26.778,
-        "elapsedMs": 3.062
+        "elapsedMs": 3.11
       },
       "clueMetadata": [
         {
@@ -10790,7 +10778,7 @@
         "meanDependencyDepth": 1.417,
         "crossCategorySteps": 13,
         "workingMemoryMean": 16.792,
-        "elapsedMs": 4.979
+        "elapsedMs": 4.386
       },
       "clueMetadata": [
         {
@@ -10871,7 +10859,7 @@
         "meanDependencyDepth": 1.1,
         "crossCategorySteps": 3,
         "workingMemoryMean": 23.9,
-        "elapsedMs": 1.938
+        "elapsedMs": 1.84
       },
       "clueMetadata": [
         {
@@ -10945,7 +10933,7 @@
         "meanDependencyDepth": 3.65,
         "crossCategorySteps": 16,
         "workingMemoryMean": 16.6,
-        "elapsedMs": 4.135
+        "elapsedMs": 3.34
       },
       "clueMetadata": [
         {
@@ -11028,7 +11016,7 @@
         "meanDependencyDepth": 2.438,
         "crossCategorySteps": 27,
         "workingMemoryMean": 17.969,
-        "elapsedMs": 18.791
+        "elapsedMs": 20.559
       },
       "clueMetadata": [
         {
@@ -11135,7 +11123,7 @@
         "meanDependencyDepth": 2.136,
         "crossCategorySteps": 17,
         "workingMemoryMean": 17.091,
-        "elapsedMs": 5.176
+        "elapsedMs": 5.153
       },
       "clueMetadata": [
         {
@@ -11226,7 +11214,7 @@
         "meanDependencyDepth": 0.818,
         "crossCategorySteps": 7,
         "workingMemoryMean": 35,
-        "elapsedMs": 26.175
+        "elapsedMs": 24.628
       },
       "clueMetadata": [
         {
@@ -11326,7 +11314,7 @@
         "meanDependencyDepth": 4.065,
         "crossCategorySteps": 22,
         "workingMemoryMean": 18.613,
-        "elapsedMs": 17.129
+        "elapsedMs": 18.14
       },
       "clueMetadata": [
         {
@@ -11431,7 +11419,7 @@
         "meanDependencyDepth": 2.542,
         "crossCategorySteps": 17,
         "workingMemoryMean": 21.375,
-        "elapsedMs": 10.361
+        "elapsedMs": 11.077
       },
       "clueMetadata": [
         {
@@ -11535,7 +11523,7 @@
         "meanDependencyDepth": 4.083,
         "crossCategorySteps": 16,
         "workingMemoryMean": 15.167,
-        "elapsedMs": 12.482
+        "elapsedMs": 13.119
       },
       "clueMetadata": [
         {
@@ -11633,7 +11621,7 @@
         "meanDependencyDepth": 1.385,
         "crossCategorySteps": 8,
         "workingMemoryMean": 30.846,
-        "elapsedMs": 22.668
+        "elapsedMs": 23.266
       },
       "clueMetadata": [
         {
@@ -11739,7 +11727,7 @@
         "meanDependencyDepth": 2.4,
         "crossCategorySteps": 21,
         "workingMemoryMean": 15.6,
-        "elapsedMs": 9.086
+        "elapsedMs": 8.95
       },
       "clueMetadata": [
         {
@@ -11829,7 +11817,7 @@
         "meanDependencyDepth": 2.357,
         "crossCategorySteps": 21,
         "workingMemoryMean": 21.429,
-        "elapsedMs": 10.562
+        "elapsedMs": 11.215
       },
       "clueMetadata": [
         {
@@ -11928,7 +11916,7 @@
         "meanDependencyDepth": 2.25,
         "crossCategorySteps": 15,
         "workingMemoryMean": 15.786,
-        "elapsedMs": 6.13
+        "elapsedMs": 5.671
       },
       "clueMetadata": [
         {
@@ -12032,7 +12020,7 @@
         "meanDependencyDepth": 2.862,
         "crossCategorySteps": 19,
         "workingMemoryMean": 16.138,
-        "elapsedMs": 12.482
+        "elapsedMs": 15.72
       },
       "clueMetadata": [
         {
@@ -12144,7 +12132,7 @@
         "meanDependencyDepth": 2.138,
         "crossCategorySteps": 20,
         "workingMemoryMean": 17.655,
-        "elapsedMs": 6.445
+        "elapsedMs": 5.986
       },
       "clueMetadata": [
         {
@@ -12248,7 +12236,7 @@
         "meanDependencyDepth": 3.645,
         "crossCategorySteps": 22,
         "workingMemoryMean": 16,
-        "elapsedMs": 6.26
+        "elapsedMs": 6.626
       },
       "clueMetadata": [
         {
@@ -12352,7 +12340,7 @@
         "meanDependencyDepth": 1.333,
         "crossCategorySteps": 11,
         "workingMemoryMean": 25.467,
-        "elapsedMs": 7.538
+        "elapsedMs": 7.36
       },
       "clueMetadata": [
         {
@@ -12445,7 +12433,7 @@
         "meanDependencyDepth": 4.333,
         "crossCategorySteps": 29,
         "workingMemoryMean": 18.806,
-        "elapsedMs": 8.197
+        "elapsedMs": 7.876
       },
       "clueMetadata": [
         {
@@ -12564,7 +12552,7 @@
         "meanDependencyDepth": 2.933,
         "crossCategorySteps": 20,
         "workingMemoryMean": 16.733,
-        "elapsedMs": 8.734
+        "elapsedMs": 8.888
       },
       "clueMetadata": [
         {
@@ -12669,7 +12657,7 @@
         "meanDependencyDepth": 1.833,
         "crossCategorySteps": 13,
         "workingMemoryMean": 28.5,
-        "elapsedMs": 6.266
+        "elapsedMs": 5.687
       },
       "clueMetadata": [
         {
@@ -12767,7 +12755,7 @@
         "meanDependencyDepth": 3.688,
         "crossCategorySteps": 22,
         "workingMemoryMean": 17.719,
-        "elapsedMs": 20.749
+        "elapsedMs": 22.366
       },
       "clueMetadata": [
         {
@@ -12866,7 +12854,7 @@
         "meanDependencyDepth": 2.462,
         "crossCategorySteps": 20,
         "workingMemoryMean": 15.038,
-        "elapsedMs": 2.608
+        "elapsedMs": 2.415
       },
       "clueMetadata": [
         {
@@ -12971,7 +12959,7 @@
         "meanDependencyDepth": 1.839,
         "crossCategorySteps": 19,
         "workingMemoryMean": 16.903,
-        "elapsedMs": 5.624
+        "elapsedMs": 5.96
       },
       "clueMetadata": [
         {
@@ -13068,7 +13056,7 @@
         "meanDependencyDepth": 0.533,
         "crossCategorySteps": 6,
         "workingMemoryMean": 28.2,
-        "elapsedMs": 12.702
+        "elapsedMs": 13.525
       },
       "clueMetadata": [
         {
@@ -13187,7 +13175,7 @@
         "meanDependencyDepth": 1.6,
         "crossCategorySteps": 16,
         "workingMemoryMean": 16.28,
-        "elapsedMs": 30.16
+        "elapsedMs": 27.383
       },
       "clueMetadata": [
         {
@@ -13285,7 +13273,7 @@
         "meanDependencyDepth": 1.545,
         "crossCategorySteps": 9,
         "workingMemoryMean": 34,
-        "elapsedMs": 28.753
+        "elapsedMs": 26.044
       },
       "clueMetadata": [
         {
@@ -13386,7 +13374,7 @@
         "meanDependencyDepth": 0.556,
         "crossCategorySteps": 4,
         "workingMemoryMean": 31.222,
-        "elapsedMs": 13.844
+        "elapsedMs": 13.479
       },
       "clueMetadata": [
         {
@@ -13485,7 +13473,7 @@
         "meanDependencyDepth": 2.767,
         "crossCategorySteps": 23,
         "workingMemoryMean": 17.6,
-        "elapsedMs": 13.218
+        "elapsedMs": 11.01
       },
       "clueMetadata": [
         {
@@ -13591,7 +13579,7 @@
         "meanDependencyDepth": 3.824,
         "crossCategorySteps": 24,
         "workingMemoryMean": 16.265,
-        "elapsedMs": 5.145
+        "elapsedMs": 5.166
       },
       "clueMetadata": [
         {
@@ -13709,7 +13697,7 @@
         "meanDependencyDepth": 0.5,
         "crossCategorySteps": 5,
         "workingMemoryMean": 32.3,
-        "elapsedMs": 12.408
+        "elapsedMs": 6.391
       },
       "clueMetadata": [
         {
@@ -13822,7 +13810,7 @@
         "meanDependencyDepth": 3,
         "crossCategorySteps": 24,
         "workingMemoryMean": 18.423,
-        "elapsedMs": 18.912
+        "elapsedMs": 17.985
       },
       "clueMetadata": [
         {
@@ -13923,7 +13911,7 @@
         "meanDependencyDepth": 1,
         "crossCategorySteps": 5,
         "workingMemoryMean": 32,
-        "elapsedMs": 11.617
+        "elapsedMs": 10.328
       },
       "clueMetadata": [
         {
@@ -14028,7 +14016,7 @@
         "meanDependencyDepth": 1.9,
         "crossCategorySteps": 21,
         "workingMemoryMean": 19.867,
-        "elapsedMs": 9.599
+        "elapsedMs": 8.631
       },
       "clueMetadata": [
         {
@@ -14135,7 +14123,7 @@
         "meanDependencyDepth": 1.353,
         "crossCategorySteps": 10,
         "workingMemoryMean": 28.529,
-        "elapsedMs": 30.719
+        "elapsedMs": 31.037
       },
       "clueMetadata": [
         {
@@ -14234,7 +14222,7 @@
         "meanDependencyDepth": 0.75,
         "crossCategorySteps": 5,
         "workingMemoryMean": 27.583,
-        "elapsedMs": 18.542
+        "elapsedMs": 18.211
       },
       "clueMetadata": [
         {
@@ -14339,7 +14327,7 @@
         "meanDependencyDepth": 1,
         "crossCategorySteps": 8,
         "workingMemoryMean": 25.4,
-        "elapsedMs": 10.263
+        "elapsedMs": 8.748
       },
       "clueMetadata": [
         {
@@ -14457,7 +14445,7 @@
         "meanDependencyDepth": 1.48,
         "crossCategorySteps": 14,
         "workingMemoryMean": 16.08,
-        "elapsedMs": 7.943
+        "elapsedMs": 7.881
       },
       "clueMetadata": [
         {
@@ -14560,7 +14548,7 @@
         "meanDependencyDepth": 2.346,
         "crossCategorySteps": 18,
         "workingMemoryMean": 17.769,
-        "elapsedMs": 25.6
+        "elapsedMs": 24.049
       },
       "clueMetadata": [
         {
@@ -14659,7 +14647,7 @@
         "meanDependencyDepth": 1,
         "crossCategorySteps": 5,
         "workingMemoryMean": 28.455,
-        "elapsedMs": 5.113
+        "elapsedMs": 5.105
       },
       "clueMetadata": [
         {
@@ -14765,7 +14753,7 @@
         "meanDependencyDepth": 4.103,
         "crossCategorySteps": 26,
         "workingMemoryMean": 20.621,
-        "elapsedMs": 14.057
+        "elapsedMs": 12.704
       },
       "clueMetadata": [
         {
@@ -14865,7 +14853,7 @@
         "meanDependencyDepth": 5.162,
         "crossCategorySteps": 29,
         "workingMemoryMean": 18.135,
-        "elapsedMs": 9.963
+        "elapsedMs": 9.571
       },
       "clueMetadata": [
         {
@@ -14969,7 +14957,7 @@
         "meanDependencyDepth": 1.429,
         "crossCategorySteps": 4,
         "workingMemoryMean": 36.286,
-        "elapsedMs": 11.027
+        "elapsedMs": 9.526
       },
       "clueMetadata": [
         {
@@ -15077,7 +15065,7 @@
         "meanDependencyDepth": 2.357,
         "crossCategorySteps": 21,
         "workingMemoryMean": 19.179,
-        "elapsedMs": 17.964
+        "elapsedMs": 20.262
       },
       "clueMetadata": [
         {
@@ -15176,7 +15164,7 @@
         "meanDependencyDepth": 1.5,
         "crossCategorySteps": 12,
         "workingMemoryMean": 20.636,
-        "elapsedMs": 10.62
+        "elapsedMs": 7.108
       },
       "clueMetadata": [
         {
@@ -15280,7 +15268,7 @@
         "meanDependencyDepth": 1.333,
         "crossCategorySteps": 6,
         "workingMemoryMean": 34.444,
-        "elapsedMs": 8.001
+        "elapsedMs": 8.628
       },
       "clueMetadata": [
         {
@@ -15381,7 +15369,7 @@
         "meanDependencyDepth": 1.667,
         "crossCategorySteps": 13,
         "workingMemoryMean": 23.19,
-        "elapsedMs": 16.847
+        "elapsedMs": 13.807
       },
       "clueMetadata": [
         {
@@ -15479,7 +15467,7 @@
         "meanDependencyDepth": 0.75,
         "crossCategorySteps": 5,
         "workingMemoryMean": 33.625,
-        "elapsedMs": 7.238
+        "elapsedMs": 12.199
       },
       "clueMetadata": [
         {
@@ -15586,7 +15574,7 @@
         "meanDependencyDepth": 1,
         "crossCategorySteps": 7,
         "workingMemoryMean": 35.111,
-        "elapsedMs": 22.305
+        "elapsedMs": 25.997
       },
       "clueMetadata": [
         {
@@ -15686,7 +15674,7 @@
         "meanDependencyDepth": 2,
         "crossCategorySteps": 19,
         "workingMemoryMean": 18.815,
-        "elapsedMs": 19.404
+        "elapsedMs": 25.613
       },
       "clueMetadata": [
         {
@@ -15778,7 +15766,7 @@
         "meanDependencyDepth": 1.214,
         "crossCategorySteps": 10,
         "workingMemoryMean": 31.643,
-        "elapsedMs": 13.777
+        "elapsedMs": 13.238
       },
       "clueMetadata": [
         {
@@ -15884,7 +15872,7 @@
         "meanDependencyDepth": 1.731,
         "crossCategorySteps": 12,
         "workingMemoryMean": 14.269,
-        "elapsedMs": 3.738
+        "elapsedMs": 3.468
       },
       "clueMetadata": [
         {
@@ -15988,7 +15976,7 @@
         "meanDependencyDepth": 2.238,
         "crossCategorySteps": 14,
         "workingMemoryMean": 20.905,
-        "elapsedMs": 10.248
+        "elapsedMs": 10.556
       },
       "clueMetadata": [
         {
@@ -16094,7 +16082,7 @@
         "meanDependencyDepth": 1.7,
         "crossCategorySteps": 22,
         "workingMemoryMean": 17.067,
-        "elapsedMs": 7.821
+        "elapsedMs": 9.08
       },
       "clueMetadata": [
         {

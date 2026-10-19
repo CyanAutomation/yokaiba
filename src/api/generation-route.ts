@@ -53,7 +53,7 @@ export async function generationRoute(
     if (error instanceof DifficultyUnavailableError) return json({
       error: { code: "difficulty_unavailable", message: error.message },
       templateId: error.templateId,
-      requestedDifficultyLevel: error.requestedDifficultyLevel,
+      ...(error.requestedDifficultyLevel === undefined ? {} : { requestedDifficultyLevel: error.requestedDifficultyLevel }),
       availableDifficultyLevels: error.availableDifficultyLevels,
       ...(error.diagnostics ? { selectionDiagnostics: error.diagnostics } : {}),
     }, 422, request.method === "GET" ? { "cache-control": GENERATED_PUZZLE_CACHE_CONTROL } : undefined);

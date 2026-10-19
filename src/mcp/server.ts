@@ -116,7 +116,7 @@ function generationErrorResult(error: unknown) {
   if (error instanceof DifficultyUnavailableError) {
     return errorResult("difficulty_unavailable", error.message, {
       templateId: error.templateId,
-      requestedDifficultyLevel: error.requestedDifficultyLevel,
+      ...(error.requestedDifficultyLevel === undefined ? {} : { requestedDifficultyLevel: error.requestedDifficultyLevel }),
       availableDifficultyLevels: error.availableDifficultyLevels,
       ...(error.diagnostics ? { selectionDiagnostics: error.diagnostics } : {}),
     });
