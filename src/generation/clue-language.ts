@@ -86,7 +86,7 @@ export function renderDistanceConstraintText(
   template: PuzzleTemplate,
   constraint: Extract<ClueConstraint, { kind: "distance" }>,
   index: number,
-  wording: "between-count" | "places-apart" = "between-count",
+  wording: "between-count" | "places-apart" = "places-apart",
 ): string {
   const { left, right } = orderedTerms(constraint);
   if (wording === "places-apart") {
@@ -115,6 +115,6 @@ export function renderConstraintText(template: PuzzleTemplate, constraint: ClueC
     case "sameRow": return renderSameRow(constraint, index);
     case "before": return renderBefore(template, constraint, index);
     case "adjacent": return renderAdjacent(template, constraint, index);
-    case "distance": return renderDistanceConstraintText(template, constraint, index);
+    case "distance": return renderDistanceConstraintText(template, constraint, index, "places-apart");
   }
 }
