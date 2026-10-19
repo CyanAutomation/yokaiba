@@ -280,5 +280,25 @@ test("clue ablation reports whether removing each latest-version clue breaks uni
     assert.equal(result.logicalContribution, !result.uniqueWithout
       ? "uniqueness-critical"
       : !result.humanTraceCompleteWithout ? "no-guess-critical" : "not-essential");
+    assert.ok(Number.isInteger(result.deductionStepsUsingClue));
+    assert.ok(Number.isInteger(result.traceStepCountWithoutClue));
+    assert.ok(Number.isInteger(result.traceStepDelta));
+    assert.deepEqual(result.redundantWithClueIds, []);
   }
+});
+
+test("clue ablation detects jointly essential pairs and reports trace impact", () => {
+  const puzzle = generatePuzzleForRequest(tournamentOrderV2Template, "audit-clue-ablation");
+  const original = puzzle.clues[0]!;
+  const duplicate = { ...original, id: `${original.id}-duplicate` };
+  const ablation = auditClueAblation(tournamentOrderV2Template, [...puzzle.clues, duplicate]);
+  const originalResult = ablation.find(result => result.clueId === original.id)!;
+  const duplicateResult = ablation.find(result => result.clueId === duplicate.id)!;
+
+  assert.equal(originalResult.logicalContribution, "not-essential");
+  assert.equal(duplicateResult.logicalContribution, "not-essential");
+  assert.ok(originalResult.redundantWithClueIds.includes(duplicate.id));
+  assert.ok(duplicateResult.redundantWithClueIds.includes(original.id));
+  assert.ok(originalResult.deductionStepsUsingClue >= 0);
+  assert.ok(duplicateResult.deductionStepsUsingClue >= 0);
 });

@@ -11,21 +11,48 @@ export interface ClueAblationResult {
   uniqueWithout: boolean;
   humanTraceCompleteWithout: boolean;
   logicalContribution: ClueLogicalContribution;
+  deductionStepsUsingClue: number;
+  traceStepCountWithoutClue: number;
+  /** Steps in the reduced trace minus steps in the full trace; positive means the alternative trace is longer. */
+  traceStepDelta: number;
+  /** Other individually non-essential clues whose joint removal breaks uniqueness or no-guess completion. */
+  redundantWithClueIds: string[];
 }
 
-/** Measure each clue's independent effect on uniqueness and v5 no-guess solvability. */
+/** Measure single-clue effects and interactions between individually non-essential clues. */
 export function auditClueAblation(template: PuzzleTemplate, clues: readonly Clue[], solver: PuzzleSolver = exhaustivePuzzleSolver): ClueAblationResult[] {
-  return clues.map((clue, removedIndex) => {
+  const fullTrace = evaluateHumanDeductionTraceV5(template, clues);
+  const results = clues.map((clue, removedIndex): ClueAblationResult => {
     const remaining = clues.filter((_candidate, index) => index !== removedIndex);
     const uniqueWithout = solver.countSolutions(template, remaining, 2) === 1;
-    const humanTraceCompleteWithout = evaluateHumanDeductionTraceV5(template, remaining).solved;
+    const traceWithout = evaluateHumanDeductionTraceV5(template, remaining);
+    const humanTraceCompleteWithout = traceWithout.solved;
     return {
       clueId: clue.id,
       uniqueWithout,
       humanTraceCompleteWithout,
       logicalContribution: !uniqueWithout ? "uniqueness-critical" : !humanTraceCompleteWithout ? "no-guess-critical" : "not-essential",
+      deductionStepsUsingClue: fullTrace.steps.filter(step => step.clueIds.includes(clue.id)).length,
+      traceStepCountWithoutClue: traceWithout.steps.length,
+      traceStepDelta: traceWithout.steps.length - fullTrace.steps.length,
+      redundantWithClueIds: [],
     };
   });
+
+  const individuallyNonEssential = results.flatMap((result, index) => result.logicalContribution === "not-essential" ? [index] : []);
+  for (let candidateIndex = 0; candidateIndex < individuallyNonEssential.length; candidateIndex += 1) {
+    const leftIndex = individuallyNonEssential[candidateIndex]!;
+    for (let otherIndex = candidateIndex + 1; otherIndex < individuallyNonEssential.length; otherIndex += 1) {
+      const rightIndex = individuallyNonEssential[otherIndex]!;
+      const remaining = clues.filter((_candidate, index) => index !== leftIndex && index !== rightIndex);
+      const uniqueWithoutPair = solver.countSolutions(template, remaining, 2) === 1;
+      const traceCompleteWithoutPair = evaluateHumanDeductionTraceV5(template, remaining).solved;
+      if (uniqueWithoutPair && traceCompleteWithoutPair) continue;
+      results[leftIndex]!.redundantWithClueIds.push(clues[rightIndex]!.id);
+      results[rightIndex]!.redundantWithClueIds.push(clues[leftIndex]!.id);
+    }
+  }
+  return results;
 }
 
 export interface DifficultyCorpusAudit {
