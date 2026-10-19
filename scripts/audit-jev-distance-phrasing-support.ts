@@ -23,6 +23,7 @@ export function buildDistancePhrasingPairs(
     const template = templateById.get(clue.templateId);
     if (!template) throw new Error(`unknown template ${clue.templateId} for distance clue ${clue.clueId}`);
     const variant = Number(/distance-(\d+)/.exec(clue.phraseVariant ?? "")?.[1] ?? 0);
+    const betweenCount = renderDistanceConstraintText(template, clue.structuredSemantics, variant, "between-count");
     const placesApart = renderDistanceConstraintText(template, clue.structuredSemantics, variant, "places-apart");
     const { phraseVariant: _phraseVariant, languageVersion: _languageVersion, ...pairedClue } = clue;
     return {
@@ -31,7 +32,7 @@ export function buildDistancePhrasingPairs(
       sourceClueId: clue.clueId,
       // Keep every payload field except text identical so JEV cannot infer a
       // variant from version or phrase metadata.
-      betweenCount: { ...pairedClue },
+      betweenCount: { ...pairedClue, text: betweenCount },
       placesApart: {
         ...pairedClue,
         text: placesApart,
