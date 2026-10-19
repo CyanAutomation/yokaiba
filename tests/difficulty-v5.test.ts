@@ -71,6 +71,29 @@ test("v5 deduction trace distinguishes a stalled puzzle from a contradiction", (
   assert.equal(contradiction.solved, false);
 });
 
+test("working-memory demand includes unresolved grids inherited from prerequisite deductions", () => {
+  const multiGridSpec: PuzzleTemplate = {
+    ...spec,
+    categories: [
+      { id: "person", label: "Person", values: ["Aki", "Ben", "Cora"] },
+      { id: "color", label: "Color", values: ["Red", "Blue", "Green"] },
+      { id: "pet", label: "Pet", values: ["Cat", "Dog", "Fox"] },
+      { id: "shape", label: "Shape", values: ["Star", "Moon", "Circle"] },
+    ],
+  };
+  const multiGridClues: Clue[] = [
+    { id: "ban-red", text: "", constraint: { kind: "notMatches", subject: "Aki", category: "color", value: "Red" } },
+    { id: "red-cat", text: "", constraint: { kind: "sameRow", left: { category: "color", value: "Red" }, right: { category: "pet", value: "Cat" } } },
+    { id: "cat-star", text: "", constraint: { kind: "sameRow", left: { category: "pet", value: "Cat" }, right: { category: "shape", value: "Star" } } },
+  ];
+  const trace = evaluateHumanDeductionTraceV5(multiGridSpec, multiGridClues);
+  const dependentStep = trace.steps.find(step => step.clueIds.includes("cat-star")
+    && step.categories.includes("color") && step.categories.includes("pet") && step.categories.includes("shape"));
+
+  assert.ok(dependentStep);
+  assert.ok(dependentStep.workingMemoryDemand > 18, "a two-grid clue cannot exceed its own 18 unresolved candidates");
+});
+
 test("v5 trace distinguishes negative clues and each supported relation strategy", () => {
   const negative = evaluateHumanDeductionTraceV5(spec, [{
     id: "ban-red",
@@ -164,11 +187,14 @@ test("v5 target selection reports in-band candidates and measured score gaps", (
   assert.deepEqual(replayed.clues, selected.clues);
 
   const circuitLevelTenBand = DIFFICULTY_BANDS_V5.find(band => band.level === 10)!;
-  assert.throws(() => generatePuzzleAtDifficultyV5(championshipCircuitTemplate, "difficulty-v5-audit-target-championship-circuit-v2-10-0", 10), error => {
-    assert.ok(error instanceof DifficultyUnavailableError);
-    assert.equal(error.diagnostics?.strategiesAttempted, 4);
-    assert.equal(error.diagnostics?.eligibleCandidates, 0);
-    assert.ok((error.diagnostics?.candidateScoreRange?.maximum ?? 100) < circuitLevelTenBand.minimumScore);
-    return true;
-  });
+  const circuitLevelTen = generatePuzzleAtDifficultyV5(
+    championshipCircuitTemplate,
+    "difficulty-v5-audit-target-championship-circuit-v2-10-0",
+    10,
+  );
+  assert.equal(circuitLevelTen.difficultyProfile?.logical.inDifficultyBand, true);
+  assert.equal(circuitLevelTen.difficultyProfile?.logical.level, 10);
+  assert.ok(circuitLevelTen.difficultyProfile!.logical.score >= circuitLevelTenBand.minimumScore);
+  assert.equal(circuitLevelTen.difficultyProfile?.logical.trace.status, "solved");
+  assert.equal(circuitLevelTen.difficultyProfile?.logical.trace.usedGuessing, false);
 });

@@ -607,7 +607,7 @@ test("worker bounds the documented local generation cache capacity", async () =>
 test("worker caches and conditionally revalidates deterministic unavailable-difficulty responses", async () => {
   const generatedPuzzleCache = new GeneratedPuzzleCache();
   const isolatedWorker = createWorker({ generatedPuzzleCache });
-  const url = "https://yokaiba.test/v1/puzzles/generate?templateId=open-division-v2&seed=review-20260904&difficultyLevel=7";
+  const url = "https://yokaiba.test/v1/puzzles/generate?templateId=championship-circuit-v2&seed=difficulty-v5-audit-target-championship-circuit-v2-12-0&difficultyLevel=12";
   const first = await isolatedWorker.fetch(new Request(url, { headers: { "cf-connecting-ip": "192.0.2.92" } }), {}, {} as ExecutionContext);
 
   assert.equal(first.status, 422);

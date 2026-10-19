@@ -16,7 +16,7 @@ export const DEFAULT_DIFFICULTY_MODEL_VERSION = DIFFICULTY_MODEL_V5;
 const MAX_DIFFICULTY_STRATEGIES = 64;
 const DENSE_FALLBACK_STRATEGY_LIMIT = 8;
 const V5_STRATEGY_LIMIT = 12;
-const V5_DENSE_STRATEGY_LIMIT = 4;
+const V5_DENSE_STRATEGY_LIMIT = 12;
 const V5_FALLBACK_SEED_LIMIT = 2;
 const V5_SUPPLEMENTAL_CLUE_LIMIT = 16;
 const LEVEL_TWO_CLUE_PROFILES = [
@@ -134,6 +134,47 @@ function sameRowAndDistanceCandidates(
   return candidates;
 }
 
+/** Relate values from different grids by their position in the tournament order. */
+function crossCategoryOrderCandidates(
+  categories: readonly PuzzleTemplate["categories"][number][],
+  solution: Solution,
+): Clue[] {
+  const candidates: Clue[] = [];
+  for (let leftIndex = 0; leftIndex < categories.length; leftIndex += 1) {
+    for (let rightIndex = leftIndex + 1; rightIndex < categories.length; rightIndex += 1) {
+      const leftCategory = categories[leftIndex]!;
+      const rightCategory = categories[rightIndex]!;
+      const leftAssignment = solution.assignments[leftCategory.id]!;
+      const rightAssignment = solution.assignments[rightCategory.id]!;
+      for (let leftRow = 0; leftRow < leftAssignment.length; leftRow += 1) {
+        for (let rightRow = 0; rightRow < rightAssignment.length; rightRow += 1) {
+          if (leftRow === rightRow) continue;
+          const earlier = leftRow < rightRow
+            ? { category: leftCategory.id, value: leftAssignment[leftRow]! }
+            : { category: rightCategory.id, value: rightAssignment[rightRow]! };
+          const later = leftRow < rightRow
+            ? { category: rightCategory.id, value: rightAssignment[rightRow]! }
+            : { category: leftCategory.id, value: leftAssignment[leftRow]! };
+          const id = `${leftCategory.id}-${leftRow}-${rightCategory.id}-${rightRow}`;
+          candidates.push({
+            id: `before-cross-${id}`,
+            constraint: { kind: "before", left: earlier, right: later },
+            text: "",
+          });
+          if (Math.abs(leftRow - rightRow) === 1) {
+            candidates.push({
+              id: `adjacent-cross-${id}`,
+              constraint: { kind: "adjacent", left: earlier, right: later },
+              text: "",
+            });
+          }
+        }
+      }
+    }
+  }
+  return candidates;
+}
+
 /**
  * Create true relational and negative statements from the hidden assignment.
  * The wording deliberately references the tournament lineup, rather than
@@ -244,6 +285,8 @@ function prioritizeForDifficulty(candidates: readonly Clue[], difficultyLevel: G
 
 function v5ClueWeight(clue: Clue, level: DifficultyLevel, strategy: number, rowCount: number): number {
   const kind = clue.constraint.kind;
+  if (level >= 11 && (kind === "before" || kind === "adjacent")
+    && clue.constraint.left.category !== clue.constraint.right.category) return -6 + (strategy % 6);
   if (level >= 3 && level <= 5) {
     const anchorRow = strategy % rowCount;
     if (kind === "matches") {
@@ -271,7 +314,24 @@ function v5ClueWeight(clue: Clue, level: DifficultyLevel, strategy: number, rowC
     [5, 4, 1, 3, 2, 0],  // Level 11: exact-distance clues lead, then ordering.
     [5, 4, 3, 2, 1, 0],  // Level 12: lead with exact-distance and cross-category row links.
   ];
-  const rank = preferences[level - 1]![family]!;
+  let rank = preferences[level - 1]![family]!;
+  if (level >= 6) {
+    // Explore three deterministic clue-family profiles on harder boards. The
+    // first preserves the calibrated order; the others vary the priority among
+    // relation families while keeping the target-specific relation families
+    // ahead of direct facts.
+    const profile = Math.floor(strategy / 4) % 3;
+    const alternativeOrders = level <= 8
+      ? [
+        [5, 4, 1, 2, 3, 0], // exact cross-category relations lead, with exclusions before ordering
+        [4, 5, 2, 1, 3, 0], // same-row and distance relations lead in the reverse order
+      ]
+      : [
+        [5, 2, 4, 1, 3, 0], // distance, ordering, and same-row links lead
+        [4, 5, 2, 1, 3, 0], // same-row, distance, then ordering and exclusions
+      ];
+    if (profile > 0) rank = alternativeOrders[profile - 1]!.indexOf(family);
+  }
   // Six stable rotations keep equal-rank clue ordering reproducible while
   // giving candidate search useful structural variety.
   return rank * 6 + ((family + strategy) % 6);
@@ -292,14 +352,21 @@ function prioritizeForV5(candidates: readonly Clue[], difficultyLevel: Difficult
  * Select a clue subset that establishes uniqueness, then remove every
  * individually redundant clue. The candidate pool combines direct, negative,
  * ordering, and adjacency clues so template prose can create genuine logic
- * deductions instead of presenting the full answer as facts.
+ * deductions instead of presenting the full answer as facts. V5 additionally
+ * connects position clues across grids; the legacy candidate pool stays stable.
  */
 export function generatePuzzle(template: PuzzleTemplate, seed: string, solver: PuzzleSolver = exhaustivePuzzleSolver, options: GenerationOptions = {}): GeneratedPuzzle {
   validateTemplate(template);
   const next = random(`${template.id}:${seed}`);
   const solution = makeSolution(template, next);
   const selected: Clue[] = [];
-  const clueCandidates = [...directCandidates(template, solution, next), ...relationalCandidates(template, solution, next)];
+  const clueCandidates = [
+    ...directCandidates(template, solution, next),
+    ...relationalCandidates(template, solution, next),
+    ...(options.difficultyModel === "v5" && (options.difficultyLevel ?? 0) >= 11
+      ? crossCategoryOrderCandidates(generationDimensions(template).categories, solution)
+      : []),
+  ];
   const strategyRandom = random(`${template.id}:${seed}:strategy:${options.strategy ?? 0}`);
   const candidates = options.difficultyModel === "v5"
     ? prioritizeForV5(clueCandidates, options.difficultyLevel, strategyRandom, options.strategy ?? 0)
@@ -366,9 +433,13 @@ export function generatePuzzleAtDifficulty(template: PuzzleTemplate, seed: strin
   throw new DifficultyUnavailableError(template.id, seed, difficultyLevel, [...observedLevels].sort((left, right) => left - right));
 }
 
-function v5StrategyLimit(template: PuzzleTemplate): number {
+function usesDenseV5Search(template: PuzzleTemplate): boolean {
   const base = template.categories.find(category => category.id === template.baseCategory)!;
-  return base.values.length >= 5 && template.categories.length >= 3 ? V5_DENSE_STRATEGY_LIMIT : V5_STRATEGY_LIMIT;
+  return base.values.length >= 5 && template.categories.length >= 3;
+}
+
+function v5StrategyLimit(template: PuzzleTemplate): number {
+  return usesDenseV5Search(template) ? V5_DENSE_STRATEGY_LIMIT : V5_STRATEGY_LIMIT;
 }
 
 function v5CandidateRank(puzzle: GeneratedPuzzle, requestedDifficultyLevel: DifficultyLevel): number {
@@ -410,7 +481,11 @@ export function generatePuzzleAtDifficultyV5(
   let incompleteCandidates = 0;
   for (let strategy = 0; strategy < strategyLimit; strategy += 1) {
     strategiesAttempted += 1;
-    const candidate = generatePuzzle(template, seed, solver, { difficultyLevel, difficultyModel: "v5", strategy });
+    const candidate = generatePuzzle(template, seed, solver, {
+      difficultyLevel,
+      difficultyModel: "v5",
+      strategy,
+    });
     const logical = candidate.difficultyProfile!.logical;
     if (logical.inDifficultyBand && logical.status === "complete"
       && logical.level >= minimumLevel && logical.level <= maximumLevel) observedLevels.add(logical.level);

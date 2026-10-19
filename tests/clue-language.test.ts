@@ -1,7 +1,8 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import type { ClueConstraint, PuzzleTemplate } from "../src/domain/types.js";
-import { renderConstraintText } from "../src/generation/clue-language.js";
+import { CLUE_LANGUAGE_VERSION } from "../src/generation/clue-text.js";
+import { renderConstraintText, renderDistanceConstraintText } from "../src/generation/clue-language.js";
 
 const template: PuzzleTemplate = {
   id: "clue-language-test",
@@ -61,4 +62,16 @@ test("distance clues state how many competitors finished between the named compe
     "In the spring cup order, exactly one competitor finished between the -60 kg competitor and the competitor on Tatami 2.");
   assert.equal(renderConstraintText(template, { kind: "distance", left, right, distance: 3 }, 1),
     "Exactly two competitors finished between the -60 kg competitor and the competitor on Tatami 2 in the spring cup order.");
+});
+
+test("v8 distance wording counts intervening competitors and retains the previous variant for paired review", () => {
+  assert.equal(CLUE_LANGUAGE_VERSION, "yokaiba-clue-prose-v8");
+
+  const constraint = { kind: "distance", left: { category: "weight", value: "-60 kg" }, right: { category: "tatami", value: "Tatami 2" }, distance: 3 } as const;
+  assert.equal(renderDistanceConstraintText(template, constraint, 0, "between-count"),
+    "In the spring cup order, exactly two competitors finished between the -60 kg competitor and the competitor on Tatami 2.");
+  assert.equal(renderDistanceConstraintText(template, constraint, 0, "places-apart"),
+    "In the spring cup order, the -60 kg competitor and the competitor on Tatami 2 were exactly three places apart.");
+  assert.equal(renderDistanceConstraintText(template, { ...constraint, distance: 1 }, 1, "places-apart"),
+    "the -60 kg competitor and the competitor on Tatami 2 were exactly one place apart in the spring cup order.");
 });

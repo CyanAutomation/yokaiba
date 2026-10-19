@@ -15,6 +15,7 @@
     "audit:difficulty:v5": "tsx scripts/audit-difficulty-v5.mts",
     "audit:difficulty:targeted": "tsx scripts/audit-targeted-difficulty.mts",
     "audit:jev": "tsx scripts/audit-jev.mts",
+    "audit:jev:distance-wording": "tsx scripts/audit-jev-distance-phrasing.mts",
     "deployment:record-output": "tsx scripts/record-deployment-output.mts",
     "deployment:health": "tsx scripts/health-deployment.mts",
     "deployment:smoke": "tsx scripts/smoke-deployment.mts",
