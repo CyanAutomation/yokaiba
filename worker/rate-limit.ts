@@ -94,6 +94,16 @@ export async function providerRateLimitDecision(
   return undefined;
 }
 
+export function restRateLimitConfiguration(path: string, env: RestRateLimitEnvironment): { limit: string; scope: string } {
+  const scope = path === "/v1/puzzles/verify" || path === "/v1/puzzles/hint"
+    ? "protected-puzzle"
+    : path === "/v1/puzzles/generate" ? "rest-generate" : "rest";
+  const limit = scope === "protected-puzzle"
+    ? path === "/v1/puzzles/hint" ? env.HINT_RATE_LIMIT ?? "10" : env.VERIFY_RATE_LIMIT ?? "10"
+    : scope === "rest-generate" ? env.REST_GENERATE_RATE_LIMIT ?? "10" : env.REST_RATE_LIMIT ?? "60";
+  return { limit, scope };
+}
+
 export async function restRateLimitDecision(
   rateLimited: RateLimiter,
   request: Request,
@@ -113,10 +123,6 @@ export async function restRateLimitDecision(
     : puzzleGeneration ? onRestGenerateProviderFailure : onRestProviderFailure;
   const providerDecision = await providerRateLimitDecision(provider, request, onProviderFailure);
   if (providerDecision) return providerDecision;
-  if (protectedPuzzleOperation) {
-    const rawLimit = path === "/v1/puzzles/hint" ? env.HINT_RATE_LIMIT ?? "10" : env.VERIFY_RATE_LIMIT ?? "10";
-    return asRateLimitDecision(rateLimited(request, rawLimit, "protected-puzzle"));
-  }
-  if (puzzleGeneration) return asRateLimitDecision(rateLimited(request, env.REST_GENERATE_RATE_LIMIT ?? "10", "rest-generate"));
-  return asRateLimitDecision(rateLimited(request, env.REST_RATE_LIMIT ?? "60", "rest"));
+  const { limit, scope } = restRateLimitConfiguration(path, env);
+  return asRateLimitDecision(rateLimited(request, limit, scope));
 }
