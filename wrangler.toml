@@ -10,8 +10,7 @@ run_worker_first = ["/docs", "/docs/", "/openapi/*"]
 [[d1_databases]]
 binding = "PUZZLE_FEEDBACK"
 database_name = "yokaiba-puzzle-feedback"
-# Replace this placeholder with the ID returned by `npx wrangler d1 create yokaiba-puzzle-feedback`.
-database_id = "REPLACE_WITH_D1_DATABASE_ID"
+database_id = "18db62b2-9b51-47fb-b233-2155f5db924b"
 migrations_dir = "migrations"
 
 # Set these as Worker secrets before deployment:
