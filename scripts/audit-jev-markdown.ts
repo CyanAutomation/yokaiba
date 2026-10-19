@@ -16,13 +16,19 @@ function targetedExactCount(row: TargetedDifficultyCorpusAudit["levels"][number]
 
 function auditHeaderLines(report: JevAuditReport): string[] {
   const { clueAudit } = report;
+  const resolvedModels = (phase: JevAuditReport["clueAudit"] | JevAuditReport["puzzleAudit"]) => {
+    const names = phase.models.length === 0 ? "not returned" : phase.model ?? `mixed (${phase.models.join(", ")})`;
+    return phase.modelAttribution === "legacy-aggregate" ? `${names} (legacy aggregate attribution)` : names;
+  };
   return [
     "# Yokaiba JEV audit",
     "",
     `Started: ${report.startedAt}`,
     `Generated: ${report.generatedAt}`,
     `JEV model requested: ${report.configuration.requestedModel}`,
-    `JEV model resolved: ${report.configuration.resolvedModel}`,
+    `JEV model resolved overall: ${report.configuration.resolvedModel ?? "multiple or unknown; see phase results"}`,
+    `JEV clue-review model: ${resolvedModels(clueAudit)}`,
+    `JEV puzzle-review model: ${resolvedModels(report.puzzleAudit)}`,
     `Semantic assessment schema: ${report.configuration.semanticAssessmentSchemaVersion}`,
     `Puzzle generation model: ${report.configuration.generationModelVersion}`,
     `Provisional review thresholds: ${JSON.stringify(report.configuration.reviewThresholds)}`,
@@ -77,10 +83,21 @@ function countContributionRole(
 
 function clueContributionLines(report: JevAuditReport): string[] {
   const assessed = report.clueAudit.clues.filter(clue => clue.logicalContribution !== undefined);
+  const interactions = new Set<string>();
+  for (const clue of assessed) {
+    for (const otherId of clue.redundantWithClueIds ?? []) {
+      interactions.add(JSON.stringify([clue.templateId, clue.seed, ...[clue.clueId, otherId].sort()]));
+    }
+  }
+  const mean = (values: Array<number | undefined>) => {
+    const present = values.filter((value): value is number => value !== undefined && Number.isFinite(value));
+    return present.length ? (present.reduce((sum, value) => sum + value, 0) / present.length).toFixed(2) : "n/a";
+  };
   const lines = [
     "## Logical clue contribution by removal",
     "",
     "Each clue is removed in turn. A clue is uniqueness-critical if the remaining clues admit multiple solutions, no-guess-critical if the solution stays unique but the v5 deduction trace no longer completes, and not essential if both properties remain.",
+    "The trace-step delta is the reduced trace length minus the full trace length; cited steps include deductions that depend on the clue. Joint-removal links show pairs that pass single-clue removal individually but break uniqueness or no-guess completion when both are removed.",
     "",
   ];
   if (assessed.length === 0) {
@@ -89,16 +106,19 @@ function clueContributionLines(report: JevAuditReport): string[] {
   }
   lines.push(
     `Ablation was measured for ${assessed.length}/${report.clueAudit.clues.length} sampled clues.`,
+    `Detected ${interactions.size} jointly essential clue pairs.`,
     "",
-    "| Constraint kind | Uniqueness-critical | No-guess-critical | Not essential | Total |",
-    "| --- | ---: | ---: | ---: | ---: |",
+    "| Constraint kind | Uniqueness-critical | No-guess-critical | Not essential | Mean cited trace steps | Mean trace-step delta | Clues in joint-removal pairs | Total |",
+    "| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: |",
   );
   const kinds = [...new Set(assessed.map(clue => clue.constraintKind))].sort();
   for (const kind of kinds) {
     const clues = assessed.filter(clue => clue.constraintKind === kind);
-    lines.push(`| ${kind} | ${countContributionRole(clues, "uniqueness-critical")} | ${countContributionRole(clues, "no-guess-critical")} | ${countContributionRole(clues, "not-essential")} | ${clues.length} |`);
+    const interactionClues = clues.filter(clue => (clue.redundantWithClueIds?.length ?? 0) > 0).length;
+    lines.push(`| ${kind} | ${countContributionRole(clues, "uniqueness-critical")} | ${countContributionRole(clues, "no-guess-critical")} | ${countContributionRole(clues, "not-essential")} | ${mean(clues.map(clue => clue.deductionStepsUsingClue))} | ${mean(clues.map(clue => clue.traceStepDelta))} | ${interactionClues} | ${clues.length} |`);
   }
-  lines.push(`| Total | ${countContributionRole(assessed, "uniqueness-critical")} | ${countContributionRole(assessed, "no-guess-critical")} | ${countContributionRole(assessed, "not-essential")} | ${assessed.length} |`);
+  const interactionClues = assessed.filter(clue => (clue.redundantWithClueIds?.length ?? 0) > 0).length;
+  lines.push(`| Total | ${countContributionRole(assessed, "uniqueness-critical")} | ${countContributionRole(assessed, "no-guess-critical")} | ${countContributionRole(assessed, "not-essential")} | ${mean(assessed.map(clue => clue.deductionStepsUsingClue))} | ${mean(assessed.map(clue => clue.traceStepDelta))} | ${interactionClues} | ${assessed.length} |`);
   return lines;
 }
 

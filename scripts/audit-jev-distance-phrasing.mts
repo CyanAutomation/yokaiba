@@ -11,9 +11,16 @@ import {
   buildClueDecisionPayload,
   readJevAuditReport,
   requestJevDecisionBatch,
+  JEV_REQUESTED_MODEL,
   type AuditedClue,
 } from "./audit-jev-support.js";
-import { buildDistancePhrasingPairs, summarizeDistanceMetric, type DistanceComparisonMetric } from "./audit-jev-distance-phrasing-support.js";
+import {
+  buildDistancePhrasingPairs,
+  DISTANCE_BOOTSTRAP_RESAMPLES,
+  renderDistanceComparisonMarkdown,
+  summarizeDistanceMetric,
+  type DistanceComparisonMetric,
+} from "./audit-jev-distance-phrasing-support.js";
 
 const templates = [tournamentOrderTemplate, tournamentOrderV2Template, openDivisionTemplate, championshipBridgeTemplate, championshipCircuitTemplate];
 const ENDPOINT = "https://openrouter.ai/api/alpha/decisions";
@@ -45,37 +52,6 @@ function parseArguments(argv: readonly string[]) {
   return { report, outputBase, batchSize };
 }
 
-function renderMarkdown(report: {
-  sourceReport: string;
-  requestedModel: string;
-  resolvedModel: string | null;
-  pairCount: number;
-  completePairs: number;
-  totalCost: number;
-  metrics: Record<DistanceComparisonMetric, ReturnType<typeof summarizeDistanceMetric>>;
-}) {
-  const rows = METRICS.map(({ key }) => {
-    const metric = report.metrics[key];
-    return `| ${key} | ${metric.pairedCount} | ${metric.betweenCountMean ?? "n/a"} | ${metric.placesApartMean ?? "n/a"} | ${metric.placesApartMinusBetweenCountMean ?? "n/a"} | ${metric.placesApartBetter} / ${metric.betweenCountBetter} / ${metric.tied} |`;
-  });
-  return [
-    "# JEV distance wording comparison",
-    "",
-    `Source report: \`${report.sourceReport}\``,
-    `JEV model requested: \`${report.requestedModel}\`; resolved: \`${report.resolvedModel ?? "unknown"}\`.`,
-    `Matched distance clues: ${report.pairCount}; complete pairs: ${report.completePairs}; provider cost: $${report.totalCost.toFixed(6)}.`,
-    "",
-    "The same saved v5 distance clue semantics were evaluated with both the current intervening-competitor wording and the previously shipped places-apart wording. Positive deltas favor places-apart for higher-is-better metrics; negative deltas favor it for risk and ambiguity metrics.",
-    "",
-    "| Metric | Paired | Between-count mean | Places-apart mean | Places-apart minus between-count | Places-apart better / between-count better / tied |",
-    "| --- | ---: | ---: | ---: | ---: | ---: |",
-    ...rows,
-    "",
-    "Treat this comparison as a triage signal. Consider the older wording only if its faithfulness or misunderstanding-risk results improve while readability does not fall; if paired results do not show that pattern, keep the current wording.",
-    "",
-  ].join("\n");
-}
-
 const args = parseArguments(process.argv.slice(2));
 const apiKey = process.env.OPENROUTER_API_KEY;
 if (!apiKey) throw new Error("OPENROUTER_API_KEY is not set; the distance wording comparison was not run.");
@@ -86,11 +62,19 @@ if (source.configuration.generationModelVersion !== "yokaiba-difficulty-v5") {
 }
 const pairs = buildDistancePhrasingPairs(source.clueAudit.clues, templates);
 if (pairs.length === 0) throw new Error("source report contains no distance clues to compare");
-const requestedModel = source.configuration.resolvedModel ?? source.clueAudit.model;
-if (!requestedModel) throw new Error("source report does not identify a resolved JEV model for a controlled comparison");
+const requestedModel = JEV_REQUESTED_MODEL;
 const endpoint = source.configuration.endpoint || ENDPOINT;
-const usage = { resolvedModel: null as string | null, totalCost: 0, totalInputTokens: 0, totalOutputTokens: 0 };
-const evaluated: Array<{ betweenCount: AuditedClue; placesApart: AuditedClue }> = [];
+const usage = {
+  resolvedModel: null as string | null,
+  resolvedModelsByPhase: {
+    clue: { models: [] as string[], attribution: "phase-specific" as const },
+    puzzle: { models: [] as string[], attribution: "phase-specific" as const },
+  },
+  totalCost: 0,
+  totalInputTokens: 0,
+  totalOutputTokens: 0,
+};
+const evaluated: Array<{ templateId: string; seed: string; betweenCount: AuditedClue; placesApart: AuditedClue }> = [];
 
 for (let offset = 0; offset < pairs.length; offset += args.batchSize) {
   const batch = pairs.slice(offset, offset + args.batchSize);
@@ -104,7 +88,7 @@ for (let offset = 0; offset < pairs.length; offset += args.batchSize) {
   if (usage.resolvedModel && response.model && usage.resolvedModel !== response.model) {
     throw new Error(`JEV model changed during paired comparison (${usage.resolvedModel} -> ${response.model})`);
   }
-  accumulateResponseUsage(usage, response);
+  accumulateResponseUsage(usage, response, "clue");
   for (let index = 0; index < batch.length; index += 1) {
     const isReversed = (offset + index) % 2 === 1;
     const betweenCount = inputs[index * 2 + (isReversed ? 1 : 0)]!;
@@ -112,6 +96,8 @@ for (let offset = 0; offset < pairs.length; offset += args.batchSize) {
     const betweenCountIndex = index * 2 + (isReversed ? 1 : 0);
     const placesApartIndex = index * 2 + (isReversed ? 0 : 1);
     evaluated.push({
+      templateId: batch[index]!.templateId,
+      seed: batch[index]!.seed,
       betweenCount: applyJevAnswers(betweenCount, response.answers, betweenCountIndex),
       placesApart: applyJevAnswers(placesApart, response.answers, placesApartIndex),
     });
@@ -123,9 +109,17 @@ const metrics = Object.fromEntries(METRICS.map(({ key, higherIsBetter }) => [
   key,
   summarizeDistanceMetric(evaluated, key, higherIsBetter),
 ])) as Record<DistanceComparisonMetric, ReturnType<typeof summarizeDistanceMetric>>;
+const templateIds = [...new Set(pairs.map(pair => pair.templateId))];
+const byTemplate = Object.fromEntries(templateIds.map(templateId => [
+  templateId,
+  Object.fromEntries(METRICS.map(({ key, higherIsBetter }) => [
+    key,
+    summarizeDistanceMetric(evaluated.filter(pair => pair.templateId === templateId), key, higherIsBetter),
+  ])) as Record<DistanceComparisonMetric, ReturnType<typeof summarizeDistanceMetric>>,
+])) as Record<string, Record<DistanceComparisonMetric, ReturnType<typeof summarizeDistanceMetric>>>;
 const completePairs = evaluated.filter(pair => pair.betweenCount.evaluationStatus === "complete" && pair.placesApart.evaluationStatus === "complete").length;
 const report = {
-  reportVersion: 1,
+  reportVersion: 2,
   generatedAt: new Date().toISOString(),
   sourceReport: sourcePath,
   generationModelVersion: source.configuration.generationModelVersion,
@@ -137,7 +131,9 @@ const report = {
   totalCost: usage.totalCost,
   totalInputTokens: usage.totalInputTokens,
   totalOutputTokens: usage.totalOutputTokens,
+  uncertainty: { method: "cluster-bootstrap-percentile", confidenceLevel: 0.95, resamples: DISTANCE_BOOTSTRAP_RESAMPLES, clusterKey: "templateId+seed" },
   metrics,
+  byTemplate,
   pairs: evaluated.map((pair, index) => ({
     templateId: pairs[index]!.templateId,
     seed: pairs[index]!.seed,
@@ -166,7 +162,7 @@ const outputPath = resolve(`${args.outputBase}.json`);
 const markdownPath = resolve(`${args.outputBase}.md`);
 await mkdir(dirname(outputPath), { recursive: true });
 await writeFile(outputPath, `${JSON.stringify(report, null, 2)}\n`);
-await writeFile(markdownPath, renderMarkdown({
+await writeFile(markdownPath, renderDistanceComparisonMarkdown({
   sourceReport: sourcePath,
   requestedModel,
   resolvedModel: usage.resolvedModel,
@@ -174,5 +170,6 @@ await writeFile(markdownPath, renderMarkdown({
   completePairs,
   totalCost: usage.totalCost,
   metrics,
+  byTemplate,
 }));
 console.log(JSON.stringify({ json: outputPath, markdown: markdownPath, pairCount: pairs.length, completePairs, resolvedModel: usage.resolvedModel, cost: usage.totalCost }, null, 2));
