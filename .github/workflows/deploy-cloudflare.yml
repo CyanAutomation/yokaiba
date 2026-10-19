@@ -62,8 +62,13 @@ jobs:
             echo "wrangler.toml is required for deployment."
             exit 1
           fi
+          tmp_file="$(mktemp)"
           if [ -n "$PUZZLE_FEEDBACK_DATABASE_ID" ]; then
-            awk -v database_id="$PUZZLE_FEEDBACK_DATABASE_ID" '
+            export PUZZLE_FEEDBACK_DATABASE_ID
+            if ! awk '
+              BEGIN {
+                database_id = ENVIRON["PUZZLE_FEEDBACK_DATABASE_ID"]
+              }
               function replace_placeholder(text, replacement,    needle, offset, out, position) {
                 needle = "\"REPLACE_WITH_D1_DATABASE_ID\""
                 out = ""
@@ -104,9 +109,12 @@ jobs:
                 }
               }
               END { flush_block() }
-            ' wrangler.toml > wrangler.toml.tmp && mv wrangler.toml.tmp wrangler.toml
+            ' wrangler.toml > "$tmp_file"; then
+              rm -f "$tmp_file"
+              exit 1
+            fi
           else
-            awk '
+            if ! awk '
               function flush_block() {
                 if (in_d1 && !drop_block) printf "%s", block
                 block = ""
@@ -133,8 +141,12 @@ jobs:
                 }
               }
               END { flush_block() }
-            ' wrangler.toml > wrangler.toml.tmp && mv wrangler.toml.tmp wrangler.toml
+            ' wrangler.toml > "$tmp_file"; then
+              rm -f "$tmp_file"
+              exit 1
+            fi
           fi
+          mv "$tmp_file" wrangler.toml
 
       - name: Deploy Worker
         id: deploy
