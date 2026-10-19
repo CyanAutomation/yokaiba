@@ -74,8 +74,8 @@ function semanticCalibrationLines(report: JevAuditReport): string[] {
     "",
     "Logical level and model version are deterministic. Semantic measurements are probabilistic JEV assessments and remain independent; rows below aggregate each sampled puzzle's clue scores by logical level. The JSON report keeps each template, seed, and paired raw profile for later comparison with player outcomes.",
     "",
-    "| Template | Logical level / model | Puzzles | Readability (0–2) | Ambiguity (0–1) | Linguistic complexity (0–2) | Relationship explicitness (0–2) | Language burden vs logical level (0–2) |",
-    "| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: |",
+    "| Template | Logical level / model | Puzzles | Readability (0–2) | Ambiguity (0–1) | Linguistic complexity (0–2) | Relationship explicitness (0–2) | Entity clarity (0–2) | Misunderstanding risk (0–1) | Language burden vs logical level (0–2) | Cognitive burden (0–2) | First-read clarity (0–2) |",
+    "| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |",
   ];
   const groups = new Map<string, SemanticPuzzleEvidence[]>();
   for (const evidence of report.semanticCalibrationEvidence) {
@@ -88,7 +88,7 @@ function semanticCalibrationLines(report: JevAuditReport): string[] {
   };
   for (const rows of groups.values()) {
     const first = rows[0]!;
-    lines.push(`| ${first.templateId} | ${first.logicalDifficultyLevel} / ${first.difficultyModelVersion} | ${rows.length} | ${formatMean(rows.map(row => row.semanticAssessment.readability))} | ${formatMean(rows.map(row => row.semanticAssessment.ambiguity))} | ${formatMean(rows.map(row => row.semanticAssessment.linguisticComplexity))} | ${formatMean(rows.map(row => row.semanticAssessment.relationshipExplicitness))} | ${formatMean(rows.map(row => row.puzzleReview?.linguisticDifficultyComparedToLogical))} |`);
+    lines.push(`| ${first.templateId} | ${first.logicalDifficultyLevel} / ${first.difficultyModelVersion} | ${rows.length} | ${formatMean(rows.map(row => row.semanticAssessment.readability))} | ${formatMean(rows.map(row => row.semanticAssessment.ambiguity))} | ${formatMean(rows.map(row => row.semanticAssessment.linguisticComplexity))} | ${formatMean(rows.map(row => row.semanticAssessment.relationshipExplicitness))} | ${formatMean(rows.map(row => row.semanticAssessment.entityClarity))} | ${formatMean(rows.map(row => row.semanticAssessment.misunderstandingRisk))} | ${formatMean(rows.map(row => row.puzzleReview?.linguisticDifficultyComparedToLogical))} | ${formatMean(rows.map(row => row.puzzleReview?.cognitiveBurden))} | ${formatMean(rows.map(row => row.puzzleReview?.initialReadingClarity))} |`);
   }
   if (report.semanticCalibrationEvidence.length === 0) lines.push("No paired semantic and logical sample evidence was collected.");
   return lines;
@@ -103,11 +103,11 @@ function clueFlagLines(report: JevAuditReport): string[] {
   lines.push(
     "Scores include JEV confidence in parentheses when supplied.",
     "",
-    "| Template / clue | Text | Faithfulness | Ambiguity | Readability | Linguistic complexity | Relationship explicitness | Flag reasons | Evaluation |",
-    "| --- | --- | ---: | ---: | ---: | ---: | ---: | --- | --- |",
+    "| Template / clue | Text | Faithfulness | Ambiguity | Readability | Linguistic complexity | Relationship explicitness | Entity clarity | Misunderstanding risk | Flag reasons | Evaluation |",
+    "| --- | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | --- | --- |",
   );
   for (const clue of report.clueAudit.flaggedClues) {
-    lines.push(`| ${escapeTableCell(`${clue.templateId} / ${clue.clueId}`)} | ${escapeTableCell(clue.text)} | ${formattedScore(clue.faithful, clue.faithfulConfidence)} | ${formattedScore(clue.ambiguous, clue.ambiguousConfidence)} | ${formattedScore(clue.readability, clue.readabilityConfidence)} | ${formattedScore(clue.linguisticComplexity, clue.linguisticComplexityConfidence)} | ${formattedScore(clue.relationshipExplicitness, clue.relationshipExplicitnessConfidence)} | ${escapeTableCell(clue.flagReasons.join(", "))} | ${clue.evaluationStatus} |`);
+    lines.push(`| ${escapeTableCell(`${clue.templateId} / ${clue.clueId}`)} | ${escapeTableCell(clue.text)} | ${formattedScore(clue.faithful, clue.faithfulConfidence)} | ${formattedScore(clue.ambiguous, clue.ambiguousConfidence)} | ${formattedScore(clue.readability, clue.readabilityConfidence)} | ${formattedScore(clue.linguisticComplexity, clue.linguisticComplexityConfidence)} | ${formattedScore(clue.relationshipExplicitness, clue.relationshipExplicitnessConfidence)} | ${formattedScore(clue.entityClarity, clue.entityClarityConfidence)} | ${formattedScore(clue.misunderstandingRisk, clue.misunderstandingRiskConfidence)} | ${escapeTableCell(clue.flagReasons.join(", "))} | ${clue.evaluationStatus} |`);
   }
   return lines;
 }
@@ -122,11 +122,11 @@ function puzzleReviewLines(report: JevAuditReport): string[] {
   lines.push(
     "These are review leads, not deterministic QA failures.",
     "",
-    "| Template / seed | Logical level | Repetition | Terminology inconsistency | Phrasing variety | Language burden vs logical level | Evaluation |",
-    "| --- | ---: | ---: | ---: | ---: | ---: | --- |",
+    "| Template / seed | Logical level | Repetition | Terminology inconsistency | Phrasing variety | Language burden vs logical level | Cognitive burden | First-read clarity | Evaluation |",
+    "| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | --- |",
   );
   for (const puzzle of report.puzzleAudit.flaggedPuzzles) {
-    lines.push(`| ${escapeTableCell(`${puzzle.templateId} / ${puzzle.seed}`)} | ${puzzle.logicalDifficultyLevel} (${puzzle.difficultyModelVersion}) | ${formattedScore(puzzle.wordingRepetition, puzzle.wordingRepetitionConfidence)} | ${formattedScore(puzzle.terminologyInconsistency, puzzle.terminologyInconsistencyConfidence)} | ${formattedScore(puzzle.phrasingVariety, puzzle.phrasingVarietyConfidence)} | ${formattedScore(puzzle.linguisticDifficultyComparedToLogical, puzzle.linguisticDifficultyComparedToLogicalConfidence)} | ${puzzle.evaluationStatus} |`);
+    lines.push(`| ${escapeTableCell(`${puzzle.templateId} / ${puzzle.seed}`)} | ${puzzle.logicalDifficultyLevel} (${puzzle.difficultyModelVersion}) | ${formattedScore(puzzle.wordingRepetition, puzzle.wordingRepetitionConfidence)} | ${formattedScore(puzzle.terminologyInconsistency, puzzle.terminologyInconsistencyConfidence)} | ${formattedScore(puzzle.phrasingVariety, puzzle.phrasingVarietyConfidence)} | ${formattedScore(puzzle.linguisticDifficultyComparedToLogical, puzzle.linguisticDifficultyComparedToLogicalConfidence)} | ${formattedScore(puzzle.cognitiveBurden, puzzle.cognitiveBurdenConfidence)} | ${formattedScore(puzzle.initialReadingClarity, puzzle.initialReadingClarityConfidence)} | ${puzzle.evaluationStatus} |`);
   }
   return lines;
 }

@@ -34,6 +34,7 @@ export async function issuePuzzleToken(
     issuedAt,
     expiresAt: issuedAt + ttlSeconds,
     ...(puzzle.requestedDifficultyLevel === undefined ? {} : { requestedDifficultyLevel: puzzle.requestedDifficultyLevel }),
+    ...(puzzle.difficultyModel === undefined ? {} : { difficultyModel: puzzle.difficultyModel }),
   };
   const encodedPayload = base64UrlEncode(encoder.encode(JSON.stringify(payload)));
   return `${encodedPayload}.${base64UrlEncode(await signTokenPayload(secret, encodedPayload))}`;

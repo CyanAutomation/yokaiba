@@ -21,6 +21,14 @@ const ErrorOutputSchema = z.object({
   templateId: z.string().optional(),
   requestedDifficultyLevel: z.number().int().min(1).max(12).optional(),
   availableDifficultyLevels: z.array(z.number().int().min(1).max(12)).optional(),
+  selectionDiagnostics: z.object({
+    modelVersion: z.string(),
+    strategiesAttempted: z.number().int().min(0),
+    eligibleCandidates: z.number().int().min(0),
+    reason: z.literal("no_candidate_in_band"),
+    fallbackSeedsAttempted: z.number().int().min(0).optional(),
+    candidateScoreRange: z.object({ minimum: z.number(), maximum: z.number(), complete: z.number().int(), incomplete: z.number().int() }).optional(),
+  }).optional(),
 });
 
 const CategoryOutputSchema = z.object({
@@ -47,6 +55,17 @@ const PuzzleOutputSchema = z.object({
   requestedDifficultyLevel: z.number().int().min(1).max(12).optional(),
   seedFallbackAttempt: z.number().int().min(1).optional(),
   generationStrategy: z.number().int().min(0).optional(),
+  difficultyModel: z.enum(["v4", "v5", "compare"]).optional(),
+  difficultyProfile: z.record(z.string(), z.unknown()).optional(),
+  selectionDiagnostics: z.object({
+    modelVersion: z.string(),
+    strategyBudget: z.number().int().min(1),
+    strategiesAttempted: z.number().int().min(0),
+    eligibleCandidates: z.number().int().min(0),
+    selectedScore: z.number().optional(),
+    selectedRankDistance: z.number().optional(),
+    candidateScoreRange: z.object({ minimum: z.number(), maximum: z.number(), complete: z.number().int(), incomplete: z.number().int() }).optional(),
+  }).optional(),
   templateId: z.string(),
   generatorVersion: z.string(),
   solverVersion: z.string(),
@@ -97,8 +116,9 @@ function generationErrorResult(error: unknown) {
   if (error instanceof DifficultyUnavailableError) {
     return errorResult("difficulty_unavailable", error.message, {
       templateId: error.templateId,
-      requestedDifficultyLevel: error.requestedDifficultyLevel,
+      ...(error.requestedDifficultyLevel === undefined ? {} : { requestedDifficultyLevel: error.requestedDifficultyLevel }),
       availableDifficultyLevels: error.availableDifficultyLevels,
+      ...(error.diagnostics ? { selectionDiagnostics: error.diagnostics } : {}),
     });
   }
   return errorResult("generation_failed", "puzzle generation failed");
@@ -109,10 +129,11 @@ async function generatePuzzleResult(
   requestedSeed: string,
   difficultyLevel: GeneratedPuzzle["requestedDifficultyLevel"],
   allowSeedFallback: boolean,
+  difficultyModel: "v4" | "v5" | "compare" | undefined,
   options: YokaibaMcpOptions,
 ) {
   try {
-    const puzzle = generatePuzzleForRequest(template, requestedSeed, difficultyLevel, allowSeedFallback);
+    const puzzle = generatePuzzleForRequest(template, requestedSeed, difficultyLevel, allowSeedFallback, undefined, difficultyModel ?? "v5");
     const puzzleToken = options.puzzleTokenSecret ? await issuePuzzleToken(puzzle, options.puzzleTokenSecret, {
       ttlSeconds: options.puzzleTokenTtlSeconds ?? DEFAULT_PUZZLE_TOKEN_TTL_SECONDS,
     }) : undefined;
@@ -145,9 +166,10 @@ export function createYokaibaMcpHandler(templates: readonly PuzzleTemplate[], op
         seed: z.string().min(1).max(128).optional(),
         difficultyLevel: z.number().int().min(1).max(12).optional(),
         allowSeedFallback: z.boolean().optional(),
+        difficultyModel: z.enum(["v4", "v5", "compare"]).optional(),
       },
       outputSchema: GeneratePuzzleOutputSchema,
-    }, async ({ templateId, seed, difficultyLevel, allowSeedFallback }) => {
+    }, async ({ templateId, seed, difficultyLevel, allowSeedFallback, difficultyModel }) => {
       const template = byId.get(templateId);
       if (!template) return errorResult("not_found", "unknown templateId");
       const requestedSeed = seed ?? crypto.randomUUID();
@@ -156,6 +178,7 @@ export function createYokaibaMcpHandler(templates: readonly PuzzleTemplate[], op
         requestedSeed,
         difficultyLevel as GeneratedPuzzle["requestedDifficultyLevel"],
         allowSeedFallback ?? false,
+        difficultyModel,
         options,
       );
     });

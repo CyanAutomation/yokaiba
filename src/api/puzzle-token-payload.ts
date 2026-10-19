@@ -9,6 +9,8 @@ interface PuzzleTokenFields {
   generatorVersion: string;
   solverVersion: string;
   requestedDifficultyLevel?: DifficultyLevel;
+  /** Omitted historical tokens always replay through the v4 selection policy. */
+  difficultyModel?: "v4" | "v5" | "compare";
 }
 
 export interface PuzzleTokenPayload extends PuzzleTokenFields {
@@ -44,7 +46,8 @@ function hasValidDifficulty(value: unknown): value is DifficultyLevel | undefine
 function isPuzzleTokenPayload(value: unknown): value is VerifiedPuzzleTokenPayload {
   if (!value || typeof value !== "object" || Array.isArray(value)) return false;
   const payload = value as Record<string, unknown>;
-  if (!hasTokenTextFields(payload) || !hasValidDifficulty(payload.requestedDifficultyLevel)) return false;
+  if (!hasTokenTextFields(payload) || !hasValidDifficulty(payload.requestedDifficultyLevel)
+    || !(payload.difficultyModel === undefined || payload.difficultyModel === "v4" || payload.difficultyModel === "v5" || payload.difficultyModel === "compare")) return false;
   if (payload.version === 2) return true;
   return payload.version === 3
     && Number.isSafeInteger(payload.issuedAt)

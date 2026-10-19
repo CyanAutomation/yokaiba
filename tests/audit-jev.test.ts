@@ -191,7 +191,7 @@ test("JEV answers preserve confidence and report incomplete metrics without inve
   }, 0, "2026-09-29T00:00:00.000Z");
 
   assert.equal(partial.evaluationStatus, "incomplete");
-  assert.deepEqual(partial.missingAnswers, ["ambiguous", "readability", "linguisticComplexity", "relationshipExplicitness"]);
+  assert.deepEqual(partial.missingAnswers, ["ambiguous", "readability", "linguisticComplexity", "relationshipExplicitness", "entityClarity", "misunderstandingRisk"]);
   assert.equal(partial.faithfulConfidence, 0.91);
   assert.equal(partial.flagged, true);
   assert.deepEqual(partial.flagReasons, ["faithfulness below 0.50"]);
@@ -204,6 +204,8 @@ test("complete JEV answers are explicitly marked complete and retain each metric
     "0_readability": { score: 1.8, confidence: 0.72 },
     "0_linguisticComplexity": { score: 0.4, confidence: 0.81 },
     "0_relationshipExplicitness": { score: 1.9, confidence: 0.92 },
+    "0_entityClarity": { score: 1.7, confidence: 0.9 },
+    "0_misunderstandingRisk": { noul: 0.1, confidence: 0.87 },
   }, 0, "2026-09-29T00:00:00.000Z");
 
   assert.equal(complete.evaluationStatus, "complete");
@@ -215,6 +217,10 @@ test("complete JEV answers are explicitly marked complete and retain each metric
   assert.equal(complete.linguisticComplexityConfidence, 0.81);
   assert.equal(complete.relationshipExplicitness, 1.9);
   assert.equal(complete.relationshipExplicitnessConfidence, 0.92);
+  assert.equal(complete.entityClarity, 1.7);
+  assert.equal(complete.entityClarityConfidence, 0.9);
+  assert.equal(complete.misunderstandingRisk, 0.1);
+  assert.equal(complete.misunderstandingRiskConfidence, 0.87);
   assert.equal(complete.flagged, false);
 });
 
@@ -225,10 +231,12 @@ test("JEV answer values outside their expected ranges are incomplete rather than
     "0_readability": { score: 3 },
     "0_linguisticComplexity": { score: Number.NaN },
     "0_relationshipExplicitness": { score: Number.POSITIVE_INFINITY },
+    "0_entityClarity": { score: -0.5 },
+    "0_misunderstandingRisk": { noul: 1.1 },
   }, 0, "2026-09-29T00:00:00.000Z");
 
   assert.equal(invalid.evaluationStatus, "incomplete");
-  assert.deepEqual(invalid.missingAnswers, ["faithful", "ambiguous", "readability", "linguisticComplexity", "relationshipExplicitness"]);
+  assert.deepEqual(invalid.missingAnswers, ["faithful", "ambiguous", "readability", "linguisticComplexity", "relationshipExplicitness", "entityClarity", "misunderstandingRisk"]);
   assert.equal(invalid.flagged, false);
   assert.deepEqual(invalid.flagReasons, []);
 });
@@ -240,7 +248,7 @@ test("missing or malformed answer maps are treated as empty so the batch can be 
 
     const evaluated = applyJevAnswers(clue(), answers, 0, "2026-09-29T00:00:00.000Z");
     assert.equal(evaluated.evaluationStatus, "incomplete");
-    assert.deepEqual(evaluated.missingAnswers, ["faithful", "ambiguous", "readability", "linguisticComplexity", "relationshipExplicitness"]);
+    assert.deepEqual(evaluated.missingAnswers, ["faithful", "ambiguous", "readability", "linguisticComplexity", "relationshipExplicitness", "entityClarity", "misunderstandingRisk"]);
     assert.equal(evaluated.flagged, false);
   }
 });
@@ -454,7 +462,7 @@ test("older JEV reports can be loaded for follow-up puzzle review", async () => 
 test("clue decision batches ask bounded semantic questions against structured semantics only", () => {
   const payload = buildClueDecisionPayload("test-model", [clue()]);
   assert.equal(payload.model, "test-model");
-  assert.equal(Object.keys(payload.questions).length, 5);
+  assert.equal(Object.keys(payload.questions).length, 7);
   assert.deepEqual(Object.keys(payload.state), ["clues"]);
   const state = (payload.state.clues as Array<Record<string, unknown>>)[0]!;
   assert.equal(state.constraintKind, "distance");
@@ -462,7 +470,10 @@ test("clue decision batches ask bounded semantic questions against structured se
   assert.equal("solution" in payload.state, false);
   assert.equal((payload.questions["0_linguisticComplexity"] as { type: string }).type, "score");
   assert.equal((payload.questions["0_ambiguous"] as { type: string }).type, "noul");
+  assert.equal((payload.questions["0_entityClarity"] as { type: string }).type, "score");
+  assert.equal((payload.questions["0_misunderstandingRisk"] as { type: string }).type, "noul");
   assert.equal(typeof JEV_REVIEW_THRESHOLDS.linguisticComplexityAbove, "number");
+  assert.equal(SEMANTIC_ASSESSMENT_SCHEMA_VERSION, "yokaiba-jev-semantic-v2");
 });
 
 test("optional puzzle review records language-versus-logic evidence without replacing logical level", () => {
@@ -471,16 +482,22 @@ test("optional puzzle review records language-versus-logic evidence without repl
     "0_terminologyInconsistency": { noul: 0.1 },
     "0_phrasingVariety": { score: 1.4 },
     "0_linguisticDifficultyComparedToLogical": { score: 1.8, confidence: 0.9 },
+    "0_cognitiveBurden": { score: 1.6 },
+    "0_initialReadingClarity": { score: 0.8 },
   }, 0, "2026-09-29T00:00:00.000Z");
   const payload = buildPuzzleDecisionPayload("test-model", [puzzle()]);
-  assert.equal(Object.keys(payload.questions).length, 4);
+  assert.equal(Object.keys(payload.questions).length, 6);
   assert.equal(assessed.evaluationStatus, "complete");
   assert.equal(assessed.logicalDifficultyLevel, 3);
   assert.equal(assessed.linguisticDifficultyComparedToLogical, 1.8);
   assert.equal(assessed.linguisticDifficultyComparedToLogicalConfidence, 0.9);
+  assert.equal(assessed.cognitiveBurden, 1.6);
+  assert.equal(assessed.initialReadingClarity, 0.8);
   assert.deepEqual(puzzleReviewFlagReasons(assessed), [
     "wording repetition above 0.60",
     "linguistic difficulty substantially above logical level (1.50)",
+    "clue-set cognitive burden above 1.50",
+    "initial reading clarity below 1.00",
   ]);
   const assessedClue = applyJevAnswers(clue(), {
     "0_faithful": { noul: 1 },
@@ -488,12 +505,18 @@ test("optional puzzle review records language-versus-logic evidence without repl
     "0_readability": { score: 2 },
     "0_linguisticComplexity": { score: 0.4 },
     "0_relationshipExplicitness": { score: 1.8 },
+    "0_entityClarity": { score: 1.8 },
+    "0_misunderstandingRisk": { noul: 0.1 },
   }, 0);
   const evidence = aggregateSemanticCalibrationEvidence([assessedClue], [assessed]);
   assert.deepEqual(aggregateSemanticPuzzleEvidence(assessed, [assessedClue]), evidence[0]);
   assert.equal(evidence[0]?.logicalDifficultyLevel, 3);
   assert.equal(evidence[0]?.semanticAssessment.readability, 2);
+  assert.equal(evidence[0]?.semanticAssessment.entityClarity, 1.8);
+  assert.equal(evidence[0]?.semanticAssessment.misunderstandingRisk, 0.1);
   assert.equal(evidence[0]?.puzzleReview?.linguisticDifficultyComparedToLogical, 1.8);
+  assert.equal(evidence[0]?.puzzleReview?.cognitiveBurden, 1.6);
+  assert.equal(evidence[0]?.puzzleReview?.initialReadingClarity, 0.8);
 });
 
 test("puzzle review rebuilds sampled puzzle clue sets from an earlier report", () => {
