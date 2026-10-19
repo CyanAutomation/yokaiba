@@ -2,11 +2,18 @@ import { mkdir, readFile, rename, rm, unlink, writeFile } from "node:fs/promises
 import { dirname } from "node:path";
 import { randomUUID } from "node:crypto";
 import { auditTargetedDifficultyLevel } from "../src/generation/audit.js";
+import { DEFAULT_DIFFICULTY_MODEL_VERSION, generatePuzzleForRequest } from "../src/generation/generator.js";
 import type { ClueConstraint, Difficulty, DifficultyAuditProgressCallback, DifficultyCorpusAudit, PuzzleTemplate, TargetedDifficultyCorpusAudit } from "../src/index.js";
 export { parseAuditArguments } from "./audit-jev-arguments.js";
 export { buildAuditMarkdown } from "./audit-jev-markdown.js";
 
 export const SEMANTIC_ASSESSMENT_SCHEMA_VERSION = "yokaiba-jev-semantic-v2";
+export const JEV_AUDIT_GENERATION_MODEL_VERSION = DEFAULT_DIFFICULTY_MODEL_VERSION;
+
+/** Generate from the current API default so the semantic sample matches public output. */
+export function generateJevAuditPuzzle(template: PuzzleTemplate, seed: string) {
+  return generatePuzzleForRequest(template, seed);
+}
 
 type ConstraintDescriptions = {
   [K in ClueConstraint["kind"]]: (constraint: Extract<ClueConstraint, { kind: K }>) => string;
@@ -126,6 +133,9 @@ export interface AuditedClue {
   locale?: string;
   logicalDifficultyLevel: Difficulty["level"];
   difficultyModelVersion: string;
+  uniqueWithoutClue?: boolean;
+  humanTraceCompleteWithoutClue?: boolean;
+  logicalContribution?: "uniqueness-critical" | "no-guess-critical" | "not-essential";
   faithful?: number;
   faithfulConfidence?: number;
   ambiguous?: number;
@@ -204,6 +214,7 @@ export interface JevRunConfiguration {
   endpoint: string;
   requestedModel: string;
   semanticAssessmentSchemaVersion: string;
+  generationModelVersion: string;
   puzzleReview: boolean;
   reviewThresholds: typeof JEV_REVIEW_THRESHOLDS;
 }
@@ -582,7 +593,7 @@ export async function requestJevDecisionBatch(
 }
 
 export function assertCheckpointConfiguration(actual: JevRunConfiguration, expected: JevRunConfiguration): void {
-  const keys: (keyof JevRunConfiguration)[] = ["difficultySamples", "clueSamples", "batchSize", "endpoint", "requestedModel", "semanticAssessmentSchemaVersion", "puzzleReview"];
+  const keys: (keyof JevRunConfiguration)[] = ["difficultySamples", "clueSamples", "batchSize", "endpoint", "requestedModel", "semanticAssessmentSchemaVersion", "generationModelVersion", "puzzleReview"];
   const mismatches = keys.filter(key => actual[key] !== expected[key]);
   if (JSON.stringify(actual.reviewThresholds) !== JSON.stringify(expected.reviewThresholds)) mismatches.push("reviewThresholds");
   if (mismatches.length > 0) throw new Error(`audit checkpoint configuration does not match this run: ${mismatches.join(", ")}`);

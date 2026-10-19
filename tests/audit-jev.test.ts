@@ -33,6 +33,8 @@ import {
   removeCompletedAuditCheckpoint,
   requestJevDecisionBatch,
   SEMANTIC_ASSESSMENT_SCHEMA_VERSION,
+  JEV_AUDIT_GENERATION_MODEL_VERSION,
+  generateJevAuditPuzzle,
   writeAuditCheckpoint,
   type AuditCheckpoint,
   type AuditedClue,
@@ -51,6 +53,9 @@ const clue = (): AuditedClue => ({
   structuredSemantics: { kind: "distance", left: { category: "weight", value: "-60 kg" }, right: { category: "tatami", value: "Tatami 1" }, distance: 1 },
   logicalDifficultyLevel: 3,
   difficultyModelVersion: "yokaiba-difficulty-v4",
+  uniqueWithoutClue: false,
+  humanTraceCompleteWithoutClue: false,
+  logicalContribution: "uniqueness-critical",
   flagged: false,
   flagReasons: [],
   missingAnswers: [],
@@ -78,6 +83,12 @@ test("audit progress messages report milestones and omit intermediate samples", 
   assert.equal(auditProgressMessage({ phase: "difficulty", templateId: "open-division", completed: 20, total: 20 }), "difficulty audit open-division: 20/20");
 });
 
+test("JEV clue samples use the API's latest default difficulty model", () => {
+  const generated = generateJevAuditPuzzle(tournamentOrderV2Template, "jev-audit-latest-model");
+  assert.equal(JEV_AUDIT_GENERATION_MODEL_VERSION, "yokaiba-difficulty-v5");
+  assert.equal(generated.difficulty.modelVersion, JEV_AUDIT_GENERATION_MODEL_VERSION);
+});
+
 test("audit usage aggregation adds provider totals and preserves missing values", () => {
   const checkpoint = { resolvedModel: "previous-model", totalCost: 1, totalInputTokens: 2, totalOutputTokens: 3 };
   accumulateResponseUsage(checkpoint, {
@@ -96,6 +107,7 @@ const configuration: JevRunConfiguration = {
   endpoint: "https://example.test/decisions",
   requestedModel: "test-model",
   semanticAssessmentSchemaVersion: SEMANTIC_ASSESSMENT_SCHEMA_VERSION,
+  generationModelVersion: JEV_AUDIT_GENERATION_MODEL_VERSION,
   puzzleReview: false,
   reviewThresholds: JEV_REVIEW_THRESHOLDS,
 };
@@ -291,9 +303,12 @@ test("audit Markdown reports targeted delivery, fallbacks, confidence, and incom
 
   const markdown = buildAuditMarkdown(report);
   assert.match(markdown, /Targeted difficulty audit/);
+  assert.match(markdown, /Puzzle generation model: yokaiba-difficulty-v5/);
+  assert.match(markdown, /Logical clue contribution by removal/);
+  assert.match(markdown, /Ablation was measured for 1\/1 sampled clues/);
   assert.match(markdown, /Raw generation distribution/);
   assert.match(markdown, /Progressive delivery distribution/);
-  assert.match(markdown, /0\/1 \| 1 \|/);
+  assert.match(markdown, /1\/1 \| 0\/1 \| 1\/1/);
   assert.match(markdown, /Fallback/);
   assert.match(markdown, /p50 3, p95 3, max 3/);
   assert.match(markdown, /Incomplete JEV evaluations/);
@@ -344,6 +359,7 @@ test("audit checkpoints round-trip, migrate older versions, and remove completed
     assert.deepEqual(await readAuditCheckpoint(checkpointPath), checkpoint);
     assert.doesNotThrow(() => assertCheckpointConfiguration(checkpoint.configuration, configuration));
     assert.throws(() => assertCheckpointConfiguration(checkpoint.configuration, { ...configuration, clueSamples: 4 }), /does not match/);
+    assert.throws(() => assertCheckpointConfiguration(checkpoint.configuration, { ...configuration, generationModelVersion: "yokaiba-difficulty-v4" }), /does not match/);
 
     const legacyCheckpoint = JSON.parse(JSON.stringify(checkpoint)) as Record<string, unknown>;
     delete legacyCheckpoint.productionDifficultyAudit;

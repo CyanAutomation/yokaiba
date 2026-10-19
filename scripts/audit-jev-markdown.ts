@@ -24,6 +24,7 @@ function auditHeaderLines(report: JevAuditReport): string[] {
     `JEV model requested: ${report.configuration.requestedModel}`,
     `JEV model resolved: ${report.configuration.resolvedModel}`,
     `Semantic assessment schema: ${report.configuration.semanticAssessmentSchemaVersion}`,
+    `Puzzle generation model: ${report.configuration.generationModelVersion}`,
     `Provisional review thresholds: ${JSON.stringify(report.configuration.reviewThresholds)}`,
     `Samples: ${report.configuration.difficultySamples} per difficulty template; ${report.configuration.clueSamples} per wording template; batch size ${report.configuration.batchSize}.`,
     `Clues reviewed: ${clueAudit.sampledClues}; status: ${clueAudit.status}; review leads: ${clueAudit.flaggedClues.length}; incomplete: ${clueAudit.incompleteClues.length}; unavailable: ${clueAudit.unavailableClues.length}; reported cost: $${clueAudit.totalCost.toFixed(6)} (${clueAudit.totalInputTokens} input / ${clueAudit.totalOutputTokens} output tokens).`,
@@ -51,19 +52,53 @@ function targetedDifficultyLines(report: JevAuditReport): string[] {
   const lines = [
     "## Targeted difficulty audit",
     "",
-    "| Template | Level | Exact target | No-guess trace | Fallback use | Fallback attempt p50 / p95 / max |",
-    "| --- | ---: | ---: | ---: | ---: | ---: |",
+    "| Template | Level | Exact target | Unavailable / requested | No-guess trace | Fallback use | Fallback attempt p50 / p95 / max |",
+    "| --- | ---: | ---: | ---: | ---: | ---: | ---: |",
   ];
   for (const template of report.targetedDifficultyAudit) {
     for (const level of template.levels) {
       const percentiles = level.fallback.attempts
         ? `p50 ${level.fallback.attempts.p50}, p95 ${level.fallback.attempts.p95}`
         : "p50 n/a, p95 n/a";
-      lines.push(`| ${template.templateId} | ${level.requestedDifficultyLevel} | ${targetedExactCount(level)}/${level.generated} | ${level.humanTrace.complete}/${level.generated} | ${level.fallback.used}/${level.generated} | ${percentiles}, max ${level.fallback.maximumAttempt} |`);
+      lines.push(`| ${template.templateId} | ${level.requestedDifficultyLevel} | ${targetedExactCount(level)}/${level.generated} | ${level.unavailable ?? 0}/${template.sampleSize} | ${level.humanTrace.complete}/${level.generated} | ${level.fallback.used}/${level.generated} | ${percentiles}, max ${level.fallback.maximumAttempt} |`);
     }
   }
   if (report.targetedDifficultyAudit.length === 0) lines.push("No targeted difficulty results were collected.");
   lines.push("Fallback attempt percentiles include only seeds that required fallback and use the nearest-rank definition.");
+  return lines;
+}
+
+function countContributionRole(
+  clues: readonly JevAuditReport["clueAudit"]["clues"][number][],
+  role: "uniqueness-critical" | "no-guess-critical" | "not-essential",
+) {
+  return clues.filter(clue => clue.logicalContribution === role).length;
+}
+
+function clueContributionLines(report: JevAuditReport): string[] {
+  const assessed = report.clueAudit.clues.filter(clue => clue.logicalContribution !== undefined);
+  const lines = [
+    "## Logical clue contribution by removal",
+    "",
+    "Each clue is removed in turn. A clue is uniqueness-critical if the remaining clues admit multiple solutions, no-guess-critical if the solution stays unique but the v5 deduction trace no longer completes, and not essential if both properties remain.",
+    "",
+  ];
+  if (assessed.length === 0) {
+    lines.push("No clue-removal results were collected.");
+    return lines;
+  }
+  lines.push(
+    `Ablation was measured for ${assessed.length}/${report.clueAudit.clues.length} sampled clues.`,
+    "",
+    "| Constraint kind | Uniqueness-critical | No-guess-critical | Not essential | Total |",
+    "| --- | ---: | ---: | ---: | ---: |",
+  );
+  const kinds = [...new Set(assessed.map(clue => clue.constraintKind))].sort();
+  for (const kind of kinds) {
+    const clues = assessed.filter(clue => clue.constraintKind === kind);
+    lines.push(`| ${kind} | ${countContributionRole(clues, "uniqueness-critical")} | ${countContributionRole(clues, "no-guess-critical")} | ${countContributionRole(clues, "not-essential")} | ${clues.length} |`);
+  }
+  lines.push(`| Total | ${countContributionRole(assessed, "uniqueness-critical")} | ${countContributionRole(assessed, "no-guess-critical")} | ${countContributionRole(assessed, "not-essential")} | ${assessed.length} |`);
   return lines;
 }
 
@@ -159,11 +194,13 @@ export function buildAuditMarkdown(report: JevAuditReport): string {
     "",
     ...difficultyDistributionLines("Raw generation distribution", report.difficultyAudit),
     "",
-    "The raw distribution calls the base generator directly. Templates with `requiresHumanSolve` use a progressive strategy search on the ordinary production API path.",
+    "The raw distribution uses the current default model's base clue selection directly; progressive delivery follows the API's current default path.",
     "",
     ...difficultyDistributionLines("Progressive delivery distribution", report.productionDifficultyAudit, "No progressive delivery results were collected."),
     "",
     ...targetedDifficultyLines(report),
+    "",
+    ...clueContributionLines(report),
     ...semanticCalibrationLines(report),
     ...clueFlagLines(report),
     ...puzzleReviewLines(report),
