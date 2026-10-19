@@ -59,7 +59,7 @@ jobs:
           PUZZLE_FEEDBACK_DATABASE_ID: ${{ secrets.CLOUDFLARE_PUZZLE_FEEDBACK_DATABASE_ID }}
         run: |
           if [ -n "$PUZZLE_FEEDBACK_DATABASE_ID" ]; then
-            sed -i "s/REPLACE_WITH_D1_DATABASE_ID/$PUZZLE_FEEDBACK_DATABASE_ID/" wrangler.toml
+            sed -i "s/REPLACE_WITH_D1_DATABASE_ID/$PUZZLE_FEEDBACK_DATABASE_ID/g" wrangler.toml
           else
             awk '
               function flush_block() {
