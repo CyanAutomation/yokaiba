@@ -169,7 +169,7 @@ if (args.resume) {
     clues: [],
     puzzles: [],
     totalCost: 0,
-    resolvedModel: "unresolved",
+    resolvedModel: null,
     totalInputTokens: 0,
     totalOutputTokens: 0,
   };

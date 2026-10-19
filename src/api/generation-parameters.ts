@@ -7,6 +7,8 @@ export interface GenerationParameters {
   seed: string;
   difficultyLevel?: Difficulty["level"];
   allowSeedFallback?: true;
+  /** Omission selects the default v5 generator. */
+  difficultyModel?: "v4" | "v5" | "compare";
 }
 
 function requiredGenerationField(value: unknown, name: "templateId" | "seed"): string {
@@ -29,19 +31,27 @@ function optionalSeedFallback(value: unknown): true | undefined {
   throw new TypeError("allowSeedFallback must be a boolean");
 }
 
+function optionalDifficultyModel(value: unknown): "v4" | "v5" | "compare" | undefined {
+  if (value === undefined) return undefined;
+  if (value === "v4" || value === "v5" || value === "compare") return value;
+  throw new TypeError("difficultyModel must be v4, v5, or compare");
+}
+
 /** Validate and normalize the inputs which can affect puzzle generation. */
 export function normalizeGenerationParameters(value: Record<string, unknown>): GenerationParameters {
-  const allowedFields = new Set(["templateId", "seed", "difficultyLevel", "allowSeedFallback"]);
+  const allowedFields = new Set(["templateId", "seed", "difficultyLevel", "allowSeedFallback", "difficultyModel"]);
   const unknownField = Object.keys(value).find(name => !allowedFields.has(name));
   if (unknownField !== undefined) throw new TypeError(`unknown field ${unknownField}`);
   const templateId = requiredGenerationField(value.templateId, "templateId");
   const seed = requiredGenerationField(value.seed, "seed");
   const difficultyLevel = optionalDifficultyLevel(value.difficultyLevel);
   const allowSeedFallback = optionalSeedFallback(value.allowSeedFallback);
+  const difficultyModel = optionalDifficultyModel(value.difficultyModel);
   return {
     templateId,
     seed,
     ...(difficultyLevel === undefined ? {} : { difficultyLevel }),
     ...(allowSeedFallback ? { allowSeedFallback } : {}),
+    ...(difficultyModel === undefined ? {} : { difficultyModel }),
   };
 }

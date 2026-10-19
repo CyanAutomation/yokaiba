@@ -59,6 +59,8 @@ test("MCP puzzle generation matches REST, preserves a token, and never exposes t
   const restPuzzle = await restResponse.json();
 
   assert.equal("solution" in mcp, false);
+  assert.equal(mcp.difficultyModel, "v5");
+  assert.equal(mcp.difficulty.modelVersion, "yokaiba-difficulty-v5");
   assert.equal(typeof mcp.puzzleToken, "string");
   assert.equal(mcp.difficulty.evidence.humanSolve.solved, true);
 
@@ -71,6 +73,29 @@ test("MCP puzzle generation matches REST, preserves a token, and never exposes t
     stablePuzzleTokenClaims(restToken as string, options.puzzleTokenSecret),
   ]);
   assert.deepEqual(mcpClaims, restClaims);
+});
+
+test("MCP preserves explicit comparison-model profiles and candidate diagnostics", async () => {
+  const handler = createYokaibaMcpHandler([tournamentOrderV2Template]);
+  const puzzle = structuredContent(await callTool(handler, 1, "generate_puzzle", {
+    templateId: tournamentOrderV2Template.id,
+    seed: "mcp-difficulty-compare",
+    difficultyModel: "compare",
+  }));
+
+  assert.equal(puzzle.difficultyModel, "compare");
+  assert.equal(puzzle.difficulty.modelVersion, "yokaiba-difficulty-v4");
+  assert.equal(puzzle.difficultyProfile.logical.modelVersion, "yokaiba-difficulty-v5");
+  assert.equal("solution" in puzzle, false);
+
+  const selected = structuredContent(await callTool(handler, 2, "generate_puzzle", {
+    templateId: tournamentOrderV2Template.id,
+    seed: "difficulty-v5-audit-target-tournament-order-v2-3-0",
+    difficultyLevel: 3,
+    difficultyModel: "v5",
+  }));
+  assert.equal(selected.difficultyModel, "v5");
+  assert.ok(selected.selectionDiagnostics.candidateScoreRange.complete > 0);
 });
 
 test("MCP verifies answers and advances through spoiler-safe clue hints", async () => {

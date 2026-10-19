@@ -1,16 +1,22 @@
-import type { Clue, DifficultyLevel, GeneratedPuzzle, PuzzleTemplate, Solution } from "../domain/types.js";
+import type { Clue, Difficulty, DifficultyLevel, GeneratedPuzzle, PuzzleTemplate, Solution } from "../domain/types.js";
 import type { PuzzleSolver } from "../domain/puzzle-solver.js";
 import { exhaustivePuzzleSolver } from "../constraints/solver.js";
-import { assessPuzzleDifficulty } from "./quality.js";
+import { assessDifficultyProfileV5, assessPuzzleDifficulty, difficultyForV5 } from "./difficulty-assessment.js";
+import { evaluateHumanDeductionTraceV5 } from "./human-deduction-v5.js";
+import { DIFFICULTY_BANDS_V5, DIFFICULTY_MODEL_V5, type DifficultyProfileV1 } from "./difficulty-profile.js";
 import { isIjfSeniorMensWeightClass } from "../domain/ijf-weight-classes.js";
 import { renderClues } from "./clue-text.js";
 import { random, shuffled } from "./rng.js";
 
-export const GENERATOR_VERSION = "yokaiba-generator-v5";
+export const GENERATOR_VERSION = "yokaiba-generator-v6";
 /** Version of the built-in solver used when callers do not provide one. */
 export const SOLVER_VERSION = exhaustivePuzzleSolver.version;
 const MAX_DIFFICULTY_STRATEGIES = 64;
 const DENSE_FALLBACK_STRATEGY_LIMIT = 8;
+const V5_STRATEGY_LIMIT = 12;
+const V5_DENSE_STRATEGY_LIMIT = 4;
+const V5_FALLBACK_SEED_LIMIT = 2;
+const V5_SUPPLEMENTAL_CLUE_LIMIT = 16;
 const LEVEL_TWO_CLUE_PROFILES = [
   [0, 1, 2], [0, 2, 1], [1, 0, 2],
   [1, 2, 0], [2, 0, 1], [2, 1, 0],
@@ -150,6 +156,7 @@ function relationalCandidates(template: PuzzleTemplate, solution: Solution, next
 
 export interface GenerationOptions {
   difficultyLevel?: DifficultyLevel;
+  difficultyModel?: "v5" | "compare";
   /** Selects a deterministic clue strategy without changing the puzzle seed. */
   strategy?: number;
 }
@@ -164,13 +171,28 @@ export class DifficultyUnavailableError extends Error {
   readonly availableDifficultyLevels: readonly DifficultyLevel[];
   readonly templateId: string;
   readonly requestedDifficultyLevel: DifficultyLevel;
+  readonly diagnostics?: {
+    modelVersion: string;
+    strategiesAttempted: number;
+    eligibleCandidates: number;
+    reason: "no_candidate_in_band";
+    fallbackSeedsAttempted?: number;
+    candidateScoreRange?: { minimum: number; maximum: number; complete: number; incomplete: number };
+  };
 
-  constructor(templateId: string, seed: string, level: number, availableDifficultyLevels: readonly DifficultyLevel[] = []) {
+  constructor(
+    templateId: string,
+    seed: string,
+    level: number,
+    availableDifficultyLevels: readonly DifficultyLevel[] = [],
+    diagnostics?: DifficultyUnavailableError["diagnostics"],
+  ) {
     super(`difficulty level ${level} is unavailable for template ${templateId} and seed ${seed}`);
     this.name = "DifficultyUnavailableError";
     this.templateId = templateId;
     this.requestedDifficultyLevel = level as DifficultyLevel;
     this.availableDifficultyLevels = availableDifficultyLevels;
+    this.diagnostics = diagnostics;
   }
 }
 
@@ -217,6 +239,52 @@ function prioritizeForDifficulty(candidates: readonly Clue[], difficultyLevel: G
     clueWeight(left.constraint.kind, difficultyLevel, strategy) - clueWeight(right.constraint.kind, difficultyLevel, strategy));
 }
 
+function v5ClueWeight(clue: Clue, level: DifficultyLevel, strategy: number, rowCount: number): number {
+  const kind = clue.constraint.kind;
+  if (level >= 3 && level <= 5) {
+    const anchorRow = strategy % rowCount;
+    if (kind === "matches") {
+      const row = /(?:^|-)matches-.+-([0-9]+)$/.exec(clue.id)?.[1];
+      return row !== undefined && Number(row) === anchorRow ? 0 : 36;
+    }
+    if (kind === "notMatches") return 30;
+    if (level === 3) return kind === "before" || kind === "distance" ? 6 : kind === "sameRow" ? 8 : kind === "adjacent" ? 12 : 18;
+    if (level === 4) return kind === "sameRow" || kind === "adjacent" ? 6 : kind === "before" ? 12 : 18;
+    return kind === "sameRow" ? 6 : kind === "distance" ? 9 : kind === "before" ? 12 : kind === "adjacent" ? 18 : 24;
+  }
+  const family = kind === "matches" ? 0 : kind === "notMatches" ? 1 : kind === "before" ? 2
+    : kind === "adjacent" ? 3 : kind === "sameRow" ? 4 : 5;
+  const preferences: readonly (readonly number[])[] = [
+    [0, 1, 5, 4, 3, 6],  // Level 1: direct facts and exclusions form easy starts.
+    [1, 0, 4, 3, 2, 5],  // Level 2: slightly more use of a small number of relations.
+    [1, 0, 3, 2, 4, 5],
+    [1, 0, 4, 3, 2, 5],
+    [1, 0, 2, 3, 4, 5],
+    [5, 4, 2, 3, 0, 1],
+    [3, 2, 1, 3, 0, 4],
+    [4, 3, 2, 3, 0, 1],
+    [5, 4, 2, 3, 0, 1],  // Level 9: same-row and distance relations lead.
+    [4, 5, 2, 3, 1, 0],  // Level 10: distance and same-row relations lead.
+    [5, 4, 2, 3, 0, 1],  // Level 11: cross-category row links precede direct facts.
+    [5, 4, 3, 2, 1, 0],  // Level 12: lead with exact-distance and cross-category row links.
+  ];
+  const rank = preferences[level - 1]![family]!;
+  // Six stable rotations keep equal-rank clue ordering reproducible while
+  // giving candidate search useful structural variety.
+  return rank * 6 + ((family + strategy) % 6);
+}
+
+function prioritizeForV5(candidates: readonly Clue[], difficultyLevel: DifficultyLevel | undefined, next: () => number, strategy = 0): Clue[] {
+  const shuffledCandidates = shuffled(candidates, next);
+  if (difficultyLevel === undefined) return shuffledCandidates;
+  const rowCount = Math.max(...candidates.map(clue => clue.constraint.kind === "matches" || clue.constraint.kind === "notMatches"
+    ? Number(/([0-9]+)$/.exec(clue.id)?.[1] ?? 0) + 1
+    : 0));
+  return shuffledCandidates.sort((left, right) =>
+    v5ClueWeight(left, difficultyLevel, strategy, rowCount)
+    - v5ClueWeight(right, difficultyLevel, strategy, rowCount));
+}
+
 /**
  * Select a clue subset that establishes uniqueness, then remove every
  * individually redundant clue. The candidate pool combines direct, negative,
@@ -228,31 +296,52 @@ export function generatePuzzle(template: PuzzleTemplate, seed: string, solver: P
   const next = random(`${template.id}:${seed}`);
   const solution = makeSolution(template, next);
   const selected: Clue[] = [];
-  const candidates = prioritizeForDifficulty(
-    [...directCandidates(template, solution, next), ...relationalCandidates(template, solution, next)],
-    options.difficultyLevel,
-    random(`${template.id}:${seed}:strategy:${options.strategy ?? 0}`),
-    options.strategy ?? 0,
-  );
+  const clueCandidates = [...directCandidates(template, solution, next), ...relationalCandidates(template, solution, next)];
+  const strategyRandom = random(`${template.id}:${seed}:strategy:${options.strategy ?? 0}`);
+  const candidates = options.difficultyModel === "v5"
+    ? prioritizeForV5(clueCandidates, options.difficultyLevel, strategyRandom, options.strategy ?? 0)
+    : prioritizeForDifficulty(clueCandidates, options.difficultyLevel, strategyRandom, options.strategy ?? 0);
+  const useV5 = options.difficultyModel === "v5";
+  let uniquenessEstablished = false;
+  let supplementalClues = 0;
   for (const clue of candidates) {
-    if (solver.countSolutions(template, selected, 2) === 1) break;
+    if (uniquenessEstablished) {
+      if (evaluateHumanDeductionTraceV5(template, selected).solved || supplementalClues >= V5_SUPPLEMENTAL_CLUE_LIMIT) break;
+      selected.push(clue);
+      supplementalClues += 1;
+      continue;
+    }
+    if (solver.countSolutions(template, selected, 2) === 1) {
+      uniquenessEstablished = true;
+      if (!useV5 || evaluateHumanDeductionTraceV5(template, selected).solved) break;
+      if (supplementalClues >= V5_SUPPLEMENTAL_CLUE_LIMIT) break;
+      selected.push(clue);
+      supplementalClues += 1;
+      continue;
+    }
     selected.push(clue);
   }
   if (solver.countSolutions(template, selected, 2) !== 1) throw new Error("candidate pool did not establish uniqueness");
   for (let index = selected.length - 1; index >= 0; index -= 1) {
     const without = selected.filter((_clue, candidateIndex) => candidateIndex !== index);
-    if (solver.countSolutions(template, without, 2) === 1) selected.splice(index, 1);
+    if (solver.countSolutions(template, without, 2) === 1
+      && (!useV5 || evaluateHumanDeductionTraceV5(template, without).solved)) selected.splice(index, 1);
   }
+  const profile = options.difficultyModel ? assessDifficultyProfileV5(template, selected) : undefined;
+  const legacyDifficulty = profile?.legacy ?? assessPuzzleDifficulty(template, selected);
+  const difficulty = useV5 && profile ? difficultyForV5(profile) : legacyDifficulty;
   return {
-    id: `${template.id}:${seed}`,
+    id: useV5 ? `${template.id}:${seed}:${DIFFICULTY_MODEL_V5}` : `${template.id}:${seed}`,
     requestedSeed: seed,
     seed,
     templateId: template.id,
     generatorVersion: GENERATOR_VERSION,
     solverVersion: solver.version,
+    ...(options.difficultyModel ? { difficultyModel: options.difficultyModel } : {}),
+    ...(profile ? { difficultyProfile: profile } : {}),
     spec: template,
     clues: renderClues(template, seed, selected),
-    difficulty: assessPuzzleDifficulty(template, selected),
+    difficulty,
     solution,
   };
 }
@@ -272,6 +361,133 @@ export function generatePuzzleAtDifficulty(template: PuzzleTemplate, seed: strin
     }
   }
   throw new DifficultyUnavailableError(template.id, seed, difficultyLevel, [...observedLevels].sort((left, right) => left - right));
+}
+
+function v5StrategyLimit(template: PuzzleTemplate): number {
+  const base = template.categories.find(category => category.id === template.baseCategory)!;
+  return base.values.length >= 5 && template.categories.length >= 3 ? V5_DENSE_STRATEGY_LIMIT : V5_STRATEGY_LIMIT;
+}
+
+function v5CandidateRank(puzzle: GeneratedPuzzle, requestedDifficultyLevel: DifficultyLevel): number {
+  const assessment = puzzle.difficultyProfile!.logical;
+  const band = DIFFICULTY_BANDS_V5.find(item => item.level === requestedDifficultyLevel)!;
+  const midpoint = (band.minimumScore + band.maximumScore) / 2;
+  const depth = assessment.trace.maximumDependencyDepth;
+  const depthShortfall = Math.max(0, band.preferredMinimumDepth - depth);
+  const strategyKinds = new Set(assessment.trace.steps.flatMap(step => step.strategy));
+  const diversityCredit = Math.min(3, Math.max(0, strategyKinds.size - 1)) * 0.25;
+  const accessibility = assessment.metrics.startingAccessibility.score;
+  const accessibilityPenalty = Math.max(0, 30 - accessibility) * 0.04;
+  const cascadePenalty = Math.max(0, assessment.metrics.automaticCascadeBehaviour.score - 80) * 0.04;
+  return Math.abs(assessment.score - midpoint) + depthShortfall * 3 + accessibilityPenalty + cascadePenalty - diversityCredit;
+}
+
+/** Search a strict, deterministic strategy budget and retain the best in-band v5 candidate. */
+export function generatePuzzleAtDifficultyV5(
+  template: PuzzleTemplate,
+  seed: string,
+  difficultyLevel: DifficultyLevel,
+  solver: PuzzleSolver = exhaustivePuzzleSolver,
+  strategyLimit = v5StrategyLimit(template),
+): GeneratedPuzzle {
+  const [minimumLevel, maximumLevel] = template.metadata?.difficultyCalibration.levelRange ?? [1, 12];
+  if (difficultyLevel < minimumLevel || difficultyLevel > maximumLevel) {
+    throw new DifficultyUnavailableError(template.id, seed, difficultyLevel, [], {
+      modelVersion: DIFFICULTY_MODEL_V5, strategiesAttempted: 0, eligibleCandidates: 0, reason: "no_candidate_in_band",
+    });
+  }
+  const observedLevels = new Set<DifficultyLevel>();
+  let best: GeneratedPuzzle | undefined;
+  let bestRank = Number.POSITIVE_INFINITY;
+  let eligibleCandidates = 0;
+  let strategiesAttempted = 0;
+  let minimumScore = Number.POSITIVE_INFINITY;
+  let maximumScore = Number.NEGATIVE_INFINITY;
+  let completeCandidates = 0;
+  let incompleteCandidates = 0;
+  for (let strategy = 0; strategy < strategyLimit; strategy += 1) {
+    strategiesAttempted += 1;
+    const candidate = generatePuzzle(template, seed, solver, { difficultyLevel, difficultyModel: "v5", strategy });
+    const logical = candidate.difficultyProfile!.logical;
+    if (logical.inDifficultyBand && logical.status === "complete"
+      && logical.level >= minimumLevel && logical.level <= maximumLevel) observedLevels.add(logical.level);
+    minimumScore = Math.min(minimumScore, logical.score);
+    maximumScore = Math.max(maximumScore, logical.score);
+    if (logical.status === "complete") completeCandidates += 1;
+    else incompleteCandidates += 1;
+    if (!logical.inDifficultyBand || logical.level !== difficultyLevel || logical.status !== "complete") continue;
+    eligibleCandidates += 1;
+    const rank = v5CandidateRank(candidate, difficultyLevel);
+    if (!best || rank < bestRank) {
+      bestRank = rank;
+      best = { ...candidate, requestedDifficultyLevel: difficultyLevel, generationStrategy: strategy };
+    }
+  }
+  if (best) return {
+    ...best,
+    selectionDiagnostics: {
+      modelVersion: DIFFICULTY_MODEL_V5,
+      strategyBudget: strategyLimit,
+      strategiesAttempted,
+      eligibleCandidates,
+      selectedScore: best.difficultyProfile!.logical.score,
+      selectedRankDistance: Number(bestRank.toFixed(3)),
+      candidateScoreRange: {
+        minimum: minimumScore,
+        maximum: maximumScore,
+        complete: completeCandidates,
+        incomplete: incompleteCandidates,
+      },
+    },
+  };
+  throw new DifficultyUnavailableError(
+    template.id,
+    seed,
+    difficultyLevel,
+    [...observedLevels].sort((left, right) => left - right),
+    {
+      modelVersion: DIFFICULTY_MODEL_V5,
+      strategiesAttempted,
+      eligibleCandidates,
+      reason: "no_candidate_in_band",
+      candidateScoreRange: strategiesAttempted ? {
+        minimum: minimumScore,
+        maximum: maximumScore,
+        complete: completeCandidates,
+        incomplete: incompleteCandidates,
+      } : undefined,
+    },
+  );
+}
+
+function generateV5Progressive(template: PuzzleTemplate, seed: string, solver: PuzzleSolver): GeneratedPuzzle {
+  const strategyLimit = v5StrategyLimit(template);
+  let best: GeneratedPuzzle | undefined;
+  let strategiesAttempted = 0;
+  let eligibleCandidates = 0;
+  const observed = new Set<DifficultyLevel>();
+  for (let strategy = 0; strategy < strategyLimit; strategy += 1) {
+    strategiesAttempted += 1;
+    const candidate = generatePuzzle(template, seed, solver, { difficultyModel: "v5", strategy });
+    const logical = candidate.difficultyProfile!.logical;
+    observed.add(logical.level);
+    if (!logical.inDifficultyBand || logical.status !== "complete") continue;
+    eligibleCandidates += 1;
+    if (!best || logical.score < best.difficultyProfile!.logical.score) best = { ...candidate, generationStrategy: strategy };
+  }
+  if (best) return {
+    ...best,
+    selectionDiagnostics: {
+      modelVersion: DIFFICULTY_MODEL_V5,
+      strategyBudget: strategyLimit,
+      strategiesAttempted,
+      eligibleCandidates,
+      selectedScore: best.difficultyProfile!.logical.score,
+    },
+  };
+  throw new DifficultyUnavailableError(template.id, seed, 1, [...observed].sort((left, right) => left - right), {
+    modelVersion: DIFFICULTY_MODEL_V5, strategiesAttempted: strategyLimit, eligibleCandidates: 0, reason: "no_candidate_in_band",
+  });
 }
 
 /** Five-row boards with at least two working grids can exceed Worker CPU limits during repeated fallback searches. */
@@ -295,11 +511,57 @@ export function generatePuzzleForRequest(
   difficultyLevel?: DifficultyLevel,
   allowSeedFallback = false,
   solver: PuzzleSolver = exhaustivePuzzleSolver,
+  difficultyModel: "v4" | "v5" | "compare" = "v5",
 ): GeneratedPuzzle {
-  if (difficultyLevel === undefined) return generateProgressivePuzzle(template, seed, solver);
-  return allowSeedFallback
+  if (difficultyModel === "compare") {
+    const legacy = difficultyLevel === undefined
+      ? generateProgressivePuzzle(template, seed, solver)
+      : allowSeedFallback
+        ? generatePuzzleAtDifficultyWithFallback(template, seed, difficultyLevel, solver)
+        : generatePuzzleAtDifficulty(template, seed, difficultyLevel, solver);
+    const difficultyProfile = assessDifficultyProfileV5(template, legacy.clues);
+    return { ...legacy, difficultyModel: "compare", difficultyProfile };
+  }
+  if (difficultyModel === "v5") {
+    if (difficultyLevel !== undefined) {
+      if (!allowSeedFallback) return generatePuzzleAtDifficultyV5(template, seed, difficultyLevel, solver);
+      let unavailable: DifficultyUnavailableError | undefined;
+      let fallbackSeedsAttempted = 0;
+      for (let attempt = 0; attempt <= V5_FALLBACK_SEED_LIMIT; attempt += 1) {
+        fallbackSeedsAttempted += 1;
+        const candidateSeed = fallbackSeed(seed, attempt);
+        try {
+          const candidate = generatePuzzleAtDifficultyV5(template, candidateSeed, difficultyLevel, solver, v5StrategyLimit(template));
+          return { ...candidate, requestedSeed: seed, ...(attempt > 0 ? { seedFallbackAttempt: attempt } : {}) };
+        } catch (error) {
+          if (!(error instanceof DifficultyUnavailableError)) throw error;
+          unavailable = new DifficultyUnavailableError(template.id, seed, difficultyLevel, error.availableDifficultyLevels, {
+            modelVersion: DIFFICULTY_MODEL_V5,
+            strategiesAttempted: (unavailable?.diagnostics?.strategiesAttempted ?? 0) + (error.diagnostics?.strategiesAttempted ?? 0),
+            eligibleCandidates: (unavailable?.diagnostics?.eligibleCandidates ?? 0) + (error.diagnostics?.eligibleCandidates ?? 0),
+            reason: "no_candidate_in_band",
+            fallbackSeedsAttempted,
+            candidateScoreRange: error.diagnostics?.candidateScoreRange === undefined
+              ? unavailable?.diagnostics?.candidateScoreRange
+              : unavailable?.diagnostics?.candidateScoreRange === undefined
+                ? error.diagnostics.candidateScoreRange
+                : {
+                  minimum: Math.min(unavailable.diagnostics.candidateScoreRange.minimum, error.diagnostics.candidateScoreRange.minimum),
+                  maximum: Math.max(unavailable.diagnostics.candidateScoreRange.maximum, error.diagnostics.candidateScoreRange.maximum),
+                  complete: unavailable.diagnostics.candidateScoreRange.complete + error.diagnostics.candidateScoreRange.complete,
+                  incomplete: unavailable.diagnostics.candidateScoreRange.incomplete + error.diagnostics.candidateScoreRange.incomplete,
+                },
+          });
+        }
+      }
+      throw unavailable ?? new DifficultyUnavailableError(template.id, seed, difficultyLevel);
+    }
+    return generateV5Progressive(template, seed, solver);
+  }
+  const legacy = difficultyLevel === undefined ? generateProgressivePuzzle(template, seed, solver) : allowSeedFallback
     ? generatePuzzleAtDifficultyWithFallback(template, seed, difficultyLevel, solver)
     : generatePuzzleAtDifficulty(template, seed, difficultyLevel, solver);
+  return { ...legacy, difficultyModel: "v4" };
 }
 
 function satisfiesRequestedDifficulty(puzzle: GeneratedPuzzle, difficultyLevel: DifficultyLevel, requiresHumanSolve: boolean): boolean {

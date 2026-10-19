@@ -11,7 +11,7 @@ function queryBoolean(value: string | null): boolean | undefined {
 
 /** Parse GET generation inputs and reject parameters the router does not consume. */
 export function parseGenerationQuery(url: URL): GenerationParameters {
-  const allowedParameters = new Set(["templateId", "seed", "difficultyLevel", "allowSeedFallback"]);
+  const allowedParameters = new Set(["templateId", "seed", "difficultyLevel", "allowSeedFallback", "difficultyModel"]);
   const unknownParameter = [...url.searchParams.keys()].find(name => !allowedParameters.has(name));
   if (unknownParameter !== undefined) throw new TypeError(`unknown query parameter ${unknownParameter}`);
   for (const name of allowedParameters) {
@@ -24,5 +24,6 @@ export function parseGenerationQuery(url: URL): GenerationParameters {
     seed: url.searchParams.get("seed"),
     ...(rawDifficulty === null ? {} : { difficultyLevel: Number(rawDifficulty) }),
     ...(rawFallback === null ? {} : { allowSeedFallback: queryBoolean(rawFallback) }),
+    ...(url.searchParams.get("difficultyModel") === null ? {} : { difficultyModel: url.searchParams.get("difficultyModel") }),
   });
 }

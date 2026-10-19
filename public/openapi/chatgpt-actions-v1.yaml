@@ -173,6 +173,7 @@ components:
         seed: { type: string, minLength: 1, maxLength: 128, description: Optional replay seed. Omission generates one on the server. }
         difficultyLevel: { type: integer, minimum: 1, maximum: 12 }
         allowSeedFallback: { type: boolean, default: false }
+        difficultyModel: { type: string, enum: [v4, v5, compare], default: v5 }
     Clue:
       type: object
       required: [id, constraint, text]
@@ -211,6 +212,9 @@ components:
         templateId: { type: string }
         generatorVersion: { type: string }
         solverVersion: { type: string }
+        difficultyModel: { type: string, enum: [v4, v5, compare] }
+        difficultyProfile: { type: object, additionalProperties: true, description: Optional v4/v5 comparison with the deterministic v5 trace and metrics. }
+        selectionDiagnostics: { type: object, additionalProperties: true, description: Bounded v5 candidate-search diagnostics. }
         puzzleToken: { type: string, description: Present only when PUZZLE_TOKEN_SECRET is configured. }
         spec: { $ref: '#/components/schemas/PuzzleSpec' }
         clues: { type: array, items: { $ref: '#/components/schemas/Clue' } }
