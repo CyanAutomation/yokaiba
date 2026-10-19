@@ -3,11 +3,11 @@ import type { GeneratedPuzzle, PuzzleTemplate } from "../domain/types.js";
 import { verifyPuzzleToken, type PuzzleTokenSecrets } from "./puzzle-token.js";
 import { PuzzleActionError } from "./puzzle-action-error.js";
 
-/** v3-v5 preserve puzzle-solution semantics for tokens issued by older releases. */
+/** v3-v6 preserve puzzle-solution semantics for tokens issued by older releases. */
 function supportsTokenGeneratorVersion(tokenVersion: string, generatedVersion: string) {
   return tokenVersion === generatedVersion || (
-    ["yokaiba-generator-v2", "yokaiba-generator-v3", "yokaiba-generator-v4"].includes(tokenVersion)
-    && ["yokaiba-generator-v3", "yokaiba-generator-v4", "yokaiba-generator-v5"].includes(generatedVersion)
+    ["yokaiba-generator-v2", "yokaiba-generator-v3", "yokaiba-generator-v4", "yokaiba-generator-v5"].includes(tokenVersion)
+    && ["yokaiba-generator-v3", "yokaiba-generator-v4", "yokaiba-generator-v5", "yokaiba-generator-v6"].includes(generatedVersion)
   );
 }
 
@@ -18,7 +18,7 @@ export async function puzzleFromToken(puzzleToken: string, templates: Map<string
   if (!template) throw new PuzzleActionError("invalid_puzzle_token", "puzzleToken references an unknown template");
   let puzzle: GeneratedPuzzle;
   try {
-    puzzle = generatePuzzleForRequest(template, token.seed, token.requestedDifficultyLevel);
+    puzzle = generatePuzzleForRequest(template, token.seed, token.requestedDifficultyLevel, false, undefined, token.difficultyModel ?? "v4");
   } catch (error) {
     if (error instanceof DifficultyUnavailableError) {
       throw new PuzzleActionError("unsupported_puzzle_version", "puzzleToken references an unsupported puzzle version");

@@ -20,7 +20,13 @@ function publicCapabilities(templates: readonly PuzzleTemplate[], puzzleTokenSec
   });
   return {
     apiVersion: "v1",
-    features: { answerVerification: Boolean(puzzleTokenSecret), conditionalGet: true, difficultySelection: true, hints: Boolean(puzzleTokenSecret), outcomeTelemetry: hasOutcomeSink, seedFallback: true },
+    features: { answerVerification: Boolean(puzzleTokenSecret), conditionalGet: true, difficultySelection: true, difficultyModelSelection: true, hints: Boolean(puzzleTokenSecret), outcomeTelemetry: hasOutcomeSink, seedFallback: true },
+    difficultyModels: {
+      default: "yokaiba-difficulty-v5",
+      supported: ["yokaiba-difficulty-v4", "yokaiba-difficulty-v5"],
+      comparisonMode: "compare",
+      v5CalibrationStatus: "provisional",
+    },
     locales: [...locales].sort(),
     scenarios,
   };

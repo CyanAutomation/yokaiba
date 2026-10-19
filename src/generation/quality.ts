@@ -4,7 +4,16 @@ import { exhaustivePuzzleSolver } from "../constraints/solver.js";
 import type { HumanDeductionTrace } from "./human-deduction.js";
 import { evaluateHumanDeductionTrace } from "./human-deduction.js";
 
-export { assessPuzzleDifficulty, DIFFICULTY_MODEL_VERSION } from "./difficulty-assessment.js";
+export {
+  assessDifficultyProfileV5,
+  assessPuzzleDifficulty,
+  assessPuzzleDifficultyV5,
+  DIFFICULTY_MODEL_VERSION,
+} from "./difficulty-assessment.js";
+export { evaluateHumanDeductionTraceV5 } from "./human-deduction-v5.js";
+export { DIFFICULTY_BANDS_V5, DIFFICULTY_MODEL_V5 } from "./difficulty-profile.js";
+export type { DifficultyAssessmentV5, DifficultyMetricV5, DifficultyProfileV1 } from "./difficulty-profile.js";
+export type { HumanDeductionStepV5, HumanDeductionTraceV5 } from "./human-deduction-v5.js";
 export { evaluateHumanDeductionTrace } from "./human-deduction.js";
 
 export interface PuzzleQuality {

@@ -6,7 +6,7 @@ import type { ClueConstraint, Difficulty, DifficultyAuditProgressCallback, Diffi
 export { parseAuditArguments } from "./audit-jev-arguments.js";
 export { buildAuditMarkdown } from "./audit-jev-markdown.js";
 
-export const SEMANTIC_ASSESSMENT_SCHEMA_VERSION = "yokaiba-jev-semantic-v1";
+export const SEMANTIC_ASSESSMENT_SCHEMA_VERSION = "yokaiba-jev-semantic-v2";
 
 type ConstraintDescriptions = {
   [K in ClueConstraint["kind"]]: (constraint: Extract<ClueConstraint, { kind: K }>) => string;
@@ -52,7 +52,7 @@ export function accumulateResponseUsage(
   checkpoint: Pick<AuditCheckpoint, "resolvedModel" | "totalCost" | "totalInputTokens" | "totalOutputTokens">,
   response: JevDecisionResponse,
 ): void {
-  checkpoint.resolvedModel = withFallback(response.model, checkpoint.resolvedModel);
+  if (response.model) checkpoint.resolvedModel = response.model;
   checkpoint.totalCost += withFallback(response.usage.cost, 0);
   checkpoint.totalInputTokens += withFallback(response.usage.inputTokens, 0);
   checkpoint.totalOutputTokens += withFallback(response.usage.outputTokens, 0);
@@ -73,9 +73,13 @@ export const JEV_REVIEW_THRESHOLDS = {
   readabilityBelow: 1,
   linguisticComplexityAbove: 1.5,
   relationshipExplicitnessBelow: 1,
+  entityClarityBelow: 1,
+  misunderstandingRiskAbove: 0.6,
   puzzleWordingRepetitionAbove: 0.6,
   puzzleTerminologyInconsistencyAbove: 0.6,
   linguisticDifficultyComparedToLogicalAbove: 1.5,
+  cognitiveBurdenAbove: 1.5,
+  initialReadingClarityBelow: 1,
 } as const;
 
 export interface JevUsage {
@@ -132,6 +136,10 @@ export interface AuditedClue {
   linguisticComplexityConfidence?: number;
   relationshipExplicitness?: number;
   relationshipExplicitnessConfidence?: number;
+  entityClarity?: number;
+  entityClarityConfidence?: number;
+  misunderstandingRisk?: number;
+  misunderstandingRiskConfidence?: number;
   evaluationStatus: JevEvaluationStatus;
   missingAnswers: string[];
   evaluatedAt?: string;
@@ -154,6 +162,10 @@ export interface AuditedPuzzle {
   phrasingVarietyConfidence?: number;
   linguisticDifficultyComparedToLogical?: number;
   linguisticDifficultyComparedToLogicalConfidence?: number;
+  cognitiveBurden?: number;
+  cognitiveBurdenConfidence?: number;
+  initialReadingClarity?: number;
+  initialReadingClarityConfidence?: number;
   flagReasons: string[];
   evaluationStatus: JevEvaluationStatus;
   missingAnswers: string[];
@@ -170,6 +182,8 @@ export interface SemanticPuzzleEvidence {
     ambiguity?: number;
     linguisticComplexity?: number;
     relationshipExplicitness?: number;
+    entityClarity?: number;
+    misunderstandingRisk?: number;
     evaluatedClues: number;
     totalClues: number;
   };
@@ -178,6 +192,8 @@ export interface SemanticPuzzleEvidence {
     terminologyInconsistency?: number;
     phrasingVariety?: number;
     linguisticDifficultyComparedToLogical?: number;
+    cognitiveBurden?: number;
+    initialReadingClarity?: number;
   };
 }
 
@@ -212,7 +228,7 @@ export interface AuditCheckpoint {
   clues: AuditedClue[];
   puzzles: AuditedPuzzle[];
   totalCost: number;
-  resolvedModel: string;
+  resolvedModel: string | null;
   totalInputTokens: number;
   totalOutputTokens: number;
 }
@@ -220,13 +236,13 @@ export interface AuditCheckpoint {
 export interface JevAuditReport {
   startedAt: string;
   generatedAt: string;
-  configuration: JevRunConfiguration & { resolvedModel: string };
+  configuration: JevRunConfiguration & { resolvedModel: string | null };
   difficultyAudit: DifficultyCorpusAudit[];
   productionDifficultyAudit: DifficultyCorpusAudit[];
   targetedDifficultyAudit: TargetedDifficultyCorpusAudit[];
   semanticCalibrationEvidence: SemanticPuzzleEvidence[];
   clueAudit: {
-    model: string;
+    model: string | null;
     sampledClues: number;
     totalCost: number;
     totalInputTokens: number;
@@ -295,6 +311,8 @@ export function applyJevAnswers(
     readability: readMetricAnswer(answers, index, "readability", "score", 2),
     linguisticComplexity: readMetricAnswer(answers, index, "linguisticComplexity", "score", 2),
     relationshipExplicitness: readMetricAnswer(answers, index, "relationshipExplicitness", "score", 2),
+    entityClarity: readMetricAnswer(answers, index, "entityClarity", "score", 2),
+    misunderstandingRisk: readMetricAnswer(answers, index, "misunderstandingRisk", "noul", 1),
   };
   const missingAnswers = missingMetricNames(metrics);
   const flagReasons = [
@@ -303,6 +321,8 @@ export function applyJevAnswers(
     belowThreshold(metrics.readability.value, JEV_REVIEW_THRESHOLDS.readabilityBelow, "readability"),
     aboveThreshold(metrics.linguisticComplexity.value, JEV_REVIEW_THRESHOLDS.linguisticComplexityAbove, "linguistic complexity"),
     belowThreshold(metrics.relationshipExplicitness.value, JEV_REVIEW_THRESHOLDS.relationshipExplicitnessBelow, "relationship explicitness"),
+    belowThreshold(metrics.entityClarity.value, JEV_REVIEW_THRESHOLDS.entityClarityBelow, "entity clarity"),
+    aboveThreshold(metrics.misunderstandingRisk.value, JEV_REVIEW_THRESHOLDS.misunderstandingRiskAbove, "misunderstanding risk"),
   ].filter((value): value is string => value !== undefined);
 
   return {
@@ -317,6 +337,10 @@ export function applyJevAnswers(
     linguisticComplexityConfidence: metrics.linguisticComplexity.confidence,
     relationshipExplicitness: metrics.relationshipExplicitness.value,
     relationshipExplicitnessConfidence: metrics.relationshipExplicitness.confidence,
+    entityClarity: metrics.entityClarity.value,
+    entityClarityConfidence: metrics.entityClarity.confidence,
+    misunderstandingRisk: metrics.misunderstandingRisk.value,
+    misunderstandingRiskConfidence: metrics.misunderstandingRisk.confidence,
     evaluationStatus: missingAnswers.length === 0 ? "complete" : "incomplete",
     missingAnswers,
     evaluatedAt,
@@ -336,6 +360,8 @@ export function applyJevPuzzleAnswers(
     terminologyInconsistency: readMetricAnswer(answers, index, "terminologyInconsistency", "noul", 1),
     phrasingVariety: readMetricAnswer(answers, index, "phrasingVariety", "score", 2),
     linguisticDifficultyComparedToLogical: readMetricAnswer(answers, index, "linguisticDifficultyComparedToLogical", "score", 2),
+    cognitiveBurden: readMetricAnswer(answers, index, "cognitiveBurden", "score", 2),
+    initialReadingClarity: readMetricAnswer(answers, index, "initialReadingClarity", "score", 2),
   };
   const missingAnswers = missingMetricNames(metrics);
   const result: AuditedPuzzle = {
@@ -348,6 +374,10 @@ export function applyJevPuzzleAnswers(
     phrasingVarietyConfidence: metrics.phrasingVariety.confidence,
     linguisticDifficultyComparedToLogical: metrics.linguisticDifficultyComparedToLogical.value,
     linguisticDifficultyComparedToLogicalConfidence: metrics.linguisticDifficultyComparedToLogical.confidence,
+    cognitiveBurden: metrics.cognitiveBurden.value,
+    cognitiveBurdenConfidence: metrics.cognitiveBurden.confidence,
+    initialReadingClarity: metrics.initialReadingClarity.value,
+    initialReadingClarityConfidence: metrics.initialReadingClarity.confidence,
     evaluationStatus: missingAnswers.length === 0 ? "complete" : "incomplete",
     missingAnswers,
     evaluatedAt,
@@ -365,6 +395,10 @@ export function puzzleReviewFlagReasons(puzzle: AuditedPuzzle): string[] {
       ? `terminology inconsistency above ${JEV_REVIEW_THRESHOLDS.puzzleTerminologyInconsistencyAbove.toFixed(2)}` : undefined,
     puzzle.linguisticDifficultyComparedToLogical !== undefined && puzzle.linguisticDifficultyComparedToLogical > JEV_REVIEW_THRESHOLDS.linguisticDifficultyComparedToLogicalAbove
       ? `linguistic difficulty substantially above logical level (${JEV_REVIEW_THRESHOLDS.linguisticDifficultyComparedToLogicalAbove.toFixed(2)})` : undefined,
+    puzzle.cognitiveBurden !== undefined && puzzle.cognitiveBurden > JEV_REVIEW_THRESHOLDS.cognitiveBurdenAbove
+      ? `clue-set cognitive burden above ${JEV_REVIEW_THRESHOLDS.cognitiveBurdenAbove.toFixed(2)}` : undefined,
+    puzzle.initialReadingClarity !== undefined && puzzle.initialReadingClarity < JEV_REVIEW_THRESHOLDS.initialReadingClarityBelow
+      ? `initial reading clarity below ${JEV_REVIEW_THRESHOLDS.initialReadingClarityBelow.toFixed(2)}` : undefined,
   ].filter((value): value is string => value !== undefined);
 }
 
@@ -387,15 +421,19 @@ export function aggregateSemanticPuzzleEvidence(puzzle: AuditedPuzzle, clues: re
   const ambiguity = meanClueMetric(puzzleClues, clue => clue.ambiguous);
   const linguisticComplexity = meanClueMetric(puzzleClues, clue => clue.linguisticComplexity);
   const relationshipExplicitness = meanClueMetric(puzzleClues, clue => clue.relationshipExplicitness);
+  const entityClarity = meanClueMetric(puzzleClues, clue => clue.entityClarity);
+  const misunderstandingRisk = meanClueMetric(puzzleClues, clue => clue.misunderstandingRisk);
   const semanticAssessment = {
     ...(readability === undefined ? {} : { readability }),
     ...(ambiguity === undefined ? {} : { ambiguity }),
     ...(linguisticComplexity === undefined ? {} : { linguisticComplexity }),
     ...(relationshipExplicitness === undefined ? {} : { relationshipExplicitness }),
+    ...(entityClarity === undefined ? {} : { entityClarity }),
+    ...(misunderstandingRisk === undefined ? {} : { misunderstandingRisk }),
     evaluatedClues: puzzleClues.filter(clue => clue.evaluationStatus === "complete").length,
     totalClues: puzzleClues.length,
   };
-  const hasPuzzleReview = puzzle.wordingRepetition !== undefined || puzzle.terminologyInconsistency !== undefined || puzzle.phrasingVariety !== undefined || puzzle.linguisticDifficultyComparedToLogical !== undefined;
+  const hasPuzzleReview = puzzle.wordingRepetition !== undefined || puzzle.terminologyInconsistency !== undefined || puzzle.phrasingVariety !== undefined || puzzle.linguisticDifficultyComparedToLogical !== undefined || puzzle.cognitiveBurden !== undefined || puzzle.initialReadingClarity !== undefined;
   return {
     templateId: puzzle.templateId,
     seed: puzzle.seed,
@@ -408,6 +446,8 @@ export function aggregateSemanticPuzzleEvidence(puzzle: AuditedPuzzle, clues: re
         ...(puzzle.terminologyInconsistency === undefined ? {} : { terminologyInconsistency: puzzle.terminologyInconsistency }),
         ...(puzzle.phrasingVariety === undefined ? {} : { phrasingVariety: puzzle.phrasingVariety }),
         ...(puzzle.linguisticDifficultyComparedToLogical === undefined ? {} : { linguisticDifficultyComparedToLogical: puzzle.linguisticDifficultyComparedToLogical }),
+        ...(puzzle.cognitiveBurden === undefined ? {} : { cognitiveBurden: puzzle.cognitiveBurden }),
+        ...(puzzle.initialReadingClarity === undefined ? {} : { initialReadingClarity: puzzle.initialReadingClarity }),
       },
     } : {}),
   };
@@ -449,6 +489,16 @@ export function buildClueDecisionPayload(model: string, clues: readonly AuditedC
       instructions: `How explicitly does ${path}.text state the relationship in ${path}.expectedSemantics?`,
       criteria: ["Relationship is indirect or must be unpacked", "Relationship is mostly clear", "Relationship is explicit and direct"],
     };
+    questions[`${index}_entityClarity`] = {
+      type: "score",
+      instructions: `How clearly does ${path}.text identify the people, categories, and values it refers to? Judge reference clarity only, not the logical relationship itself.`,
+      criteria: ["One or more references are unclear", "References are mostly clear", "Every referenced entity is easy to identify"],
+    };
+    questions[`${index}_misunderstandingRisk`] = {
+      type: "noul",
+      instructions: `Could a reasonable player misread ${path}.text in a way that would cause them to record a different fact than ${path}.expectedSemantics?`,
+      criteria: { true: "A plausible misreading could change the recorded fact.", false: "Likely readings preserve the expected fact." },
+    };
   }
   return { model, state, questions };
 }
@@ -479,6 +529,16 @@ export function buildPuzzleDecisionPayload(model: string, puzzles: readonly Audi
       type: "score",
       instructions: `Compared with the deterministic logical difficulty level ${path}.logicalDifficultyLevel, how much harder is this clue set to parse because of language alone? Do not reassess puzzle truth or logical difficulty.`,
       criteria: ["Language is no harder than the logical level suggests", "Language adds some extra effort", "Language makes the puzzle much harder to parse than its logical level suggests"],
+    };
+    questions[`${index}_cognitiveBurden`] = {
+      type: "score",
+      instructions: `Considering ${path}.clues as a set, how much information must a player hold in mind while beginning to work through them? Judge the clue set's stated facts and phrasing; do not infer hidden solution difficulty or access puzzle answers.`,
+      criteria: ["Low burden; clues are easy to track", "Moderate burden; several clues must be compared", "High burden; many details or relationships must be held together"],
+    };
+    questions[`${index}_initialReadingClarity`] = {
+      type: "score",
+      instructions: `How clearly can a player understand the complete clue set on a first read of ${path}.clues, before solving? Judge language and terminology, not whether the puzzle is logically easy.`,
+      criteria: ["Several clues are difficult to understand on first read", "Most clues are understandable with rereading", "The full clue set is clear on first read"],
     };
   }
   return { model, state, questions };

@@ -88,6 +88,8 @@ function assertCoreOpenApiSchemas(schemas: OpenApiObject): void {
   for (const name of ["GeneratedPuzzle", "PuzzleVerificationRequest", "Difficulty", "Error", "DifficultyUnavailableError"]) assert.ok(schemas[name]);
   assert.ok(schemas.Clue.properties.phraseVariant);
   assert.ok(schemas.GeneratedPuzzle.properties.generationStrategy);
+  assert.ok(schemas.GeneratedPuzzle.properties.difficultyProfile);
+  assert.deepEqual(schemas.GenerationRequest.properties.difficultyModel.enum, ["v4", "v5", "compare"]);
   assert.ok(schemas.Readiness.properties.mcpPuzzleActionRateLimitProvider);
   assert.ok(schemas.Readiness.properties.generateRateLimitProvider);
   assert.ok(schemas.Readiness.properties.outcomeTelemetryProvider);
@@ -197,9 +199,32 @@ test("REST generation redacts the hidden solution and includes reproducibility m
   assert.equal(typeof body.puzzleToken, "string");
   const difficulty = body.difficulty as { level: number; label: string; modelVersion: string; evidence: { score: number } };
   assert.ok(Array.from({ length: 12 }, (_value, index) => index + 1).includes(difficulty.level));
-  assert.equal(difficulty.modelVersion, "yokaiba-difficulty-v4");
+  assert.equal(difficulty.modelVersion, "yokaiba-difficulty-v5");
   assert.equal(typeof difficulty.evidence.score, "number");
   assert.ok(Array.isArray(body.clues));
+});
+
+test("REST defaults to v5 and comparison mode retains explicit v4/v5 profiles", async () => {
+  const route = createRestRouter([tournamentOrderTemplate]);
+  const base = "https://yokaiba.test/v1/puzzles/generate?templateId=tournament-order-v1&seed=difficulty-model-contract";
+  const defaultResponse = await route(new Request(base));
+  const compareResponse = await route(new Request(`${base}&difficultyModel=compare`));
+  const defaultPuzzle = await defaultResponse.json() as { id: string; difficultyModel?: string; difficultyProfile?: unknown; difficulty: { modelVersion: string } };
+  const compared = await compareResponse.json() as { id: string; difficultyModel?: string; difficultyProfile?: { logical: { modelVersion: string }; legacy: { modelVersion: string } }; difficulty: { modelVersion: string } };
+
+  assert.equal(defaultPuzzle.difficultyModel, "v5");
+  assert.ok(defaultPuzzle.difficultyProfile);
+  assert.equal(defaultPuzzle.difficulty.modelVersion, "yokaiba-difficulty-v5");
+  assert.equal(compared.difficultyModel, "compare");
+  assert.equal(compared.difficulty.modelVersion, "yokaiba-difficulty-v4");
+  assert.equal(compared.difficultyProfile?.legacy.modelVersion, "yokaiba-difficulty-v4");
+  assert.equal(compared.difficultyProfile?.logical.modelVersion, "yokaiba-difficulty-v5");
+  const explicitV4 = await route(new Request(`${base}&difficultyModel=v4`));
+  const v4Puzzle = await explicitV4.json() as { id: string; difficultyModel?: string; difficulty: { modelVersion: string } };
+  assert.equal(v4Puzzle.difficultyModel, "v4");
+  assert.equal(v4Puzzle.difficulty.modelVersion, "yokaiba-difficulty-v4");
+  assert.notEqual(defaultPuzzle.id, v4Puzzle.id);
+  assert.equal((await route(new Request(`${base}&difficultyModel=invalid`))).status, 400);
 });
 
 test("REST POST generation creates a replayable seed when the caller omits it", async () => {
@@ -214,7 +239,7 @@ test("REST POST generation creates a replayable seed when the caller omits it", 
   const puzzle = await response.json() as { requestedSeed: string; seed: string; id: string };
   assert.ok(puzzle.requestedSeed.length > 0);
   assert.equal(puzzle.seed, puzzle.requestedSeed);
-  assert.ok(puzzle.id.endsWith(`:${puzzle.seed}`));
+  assert.ok(puzzle.id.endsWith(`:${puzzle.seed}:yokaiba-difficulty-v5`));
 });
 
 test("REST masks unexpected generation failures behind a stable server error", async () => {
@@ -341,7 +366,13 @@ test("REST capabilities expose client-safe feature flags and catalogue metadata"
   assert.equal(response.headers.get("cache-control"), "public, max-age=300, s-maxage=300, must-revalidate");
   assert.deepEqual(await response.json(), {
     apiVersion: "v1",
-    features: { answerVerification: false, conditionalGet: true, difficultySelection: true, hints: false, outcomeTelemetry: false, seedFallback: true },
+    features: { answerVerification: false, conditionalGet: true, difficultySelection: true, difficultyModelSelection: true, hints: false, outcomeTelemetry: false, seedFallback: true },
+    difficultyModels: {
+      default: "yokaiba-difficulty-v5",
+      supported: ["yokaiba-difficulty-v4", "yokaiba-difficulty-v5"],
+      comparisonMode: "compare",
+      v5CalibrationStatus: "provisional",
+    },
     locales: ["en"],
     scenarios: [
       { id: "tournament-order-v1", difficultyLevels: [1, 2, 3, 4] },
