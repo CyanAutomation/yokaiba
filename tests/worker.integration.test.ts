@@ -17,7 +17,7 @@ test("version and readiness expose deployed build and rate-limit configuration",
   };
   const version = await isolatedWorker.fetch(new Request("https://yokaiba.test/v1/version"), env, {} as ExecutionContext);
   assert.deepEqual(await version.json(), {
-    serviceVersion: "0.1.0-test", buildSha: "deadbeef", generatorVersion: "yokaiba-generator-v5", solverVersion: "yokaiba-exhaustive-v1",
+    serviceVersion: "0.1.0-test", buildSha: "deadbeef", generatorVersion: "yokaiba-generator-v6", solverVersion: "yokaiba-exhaustive-v1",
   });
   const ready = await isolatedWorker.fetch(new Request("https://yokaiba.test/readyz"), env, {} as ExecutionContext);
   assert.deepEqual(await ready.json(), {

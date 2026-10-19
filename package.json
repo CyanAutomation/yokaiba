@@ -12,6 +12,7 @@
     "test:coverage": "c8 --reporter=json --reports-dir=coverage node --import tsx --test tests/*.test.ts",
     "dev": "wrangler dev",
     "audit:difficulty": "tsx scripts/audit-difficulty.mts",
+    "audit:difficulty:v5": "tsx scripts/audit-difficulty-v5.mts",
     "audit:difficulty:targeted": "tsx scripts/audit-targeted-difficulty.mts",
     "audit:jev": "tsx scripts/audit-jev.mts",
     "deployment:record-output": "tsx scripts/record-deployment-output.mts",

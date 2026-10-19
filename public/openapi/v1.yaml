@@ -230,6 +230,7 @@ paths:
         - $ref: '#/components/parameters/Seed'
         - $ref: '#/components/parameters/DifficultyLevel'
         - $ref: '#/components/parameters/AllowSeedFallback'
+        - $ref: '#/components/parameters/DifficultyModel'
         - $ref: '#/components/parameters/IfNoneMatch'
       responses:
         '200':
@@ -377,6 +378,12 @@ components:
       required: false
       description: When true, selects a deterministic derived seed if the supplied seed cannot provide the requested level.
       schema: { type: boolean, default: false }
+    DifficultyModel:
+      name: difficultyModel
+      in: query
+      required: false
+      description: Selects v4 or the default v5 logical model, or returns a v4/v5 comparison profile.
+      schema: { type: string, enum: [v4, v5, compare], default: v5 }
     IfNoneMatch:
       name: If-None-Match
       in: header
@@ -492,19 +499,28 @@ components:
         solverVersion: { type: string }
     Capabilities:
       type: object
-      required: [apiVersion, features, locales, scenarios]
+      required: [apiVersion, features, difficultyModels, locales, scenarios]
       properties:
         apiVersion: { type: string, const: v1 }
         features:
           type: object
-          required: [answerVerification, conditionalGet, difficultySelection, hints, outcomeTelemetry, seedFallback]
+          required: [answerVerification, conditionalGet, difficultySelection, difficultyModelSelection, hints, outcomeTelemetry, seedFallback]
           properties:
             answerVerification: { type: boolean }
             conditionalGet: { type: boolean, const: true }
             difficultySelection: { type: boolean, const: true }
+            difficultyModelSelection: { type: boolean, const: true }
             hints: { type: boolean }
             outcomeTelemetry: { type: boolean }
             seedFallback: { type: boolean, const: true }
+        difficultyModels:
+          type: object
+          required: [default, supported, comparisonMode, v5CalibrationStatus]
+          properties:
+            default: { type: string, const: yokaiba-difficulty-v5 }
+            supported: { type: array, items: { type: string, enum: [yokaiba-difficulty-v4, yokaiba-difficulty-v5] } }
+            comparisonMode: { type: string, const: compare }
+            v5CalibrationStatus: { type: string, const: provisional }
         locales: { type: array, items: { type: string }, uniqueItems: true }
         scenarios:
           type: array
@@ -558,6 +574,7 @@ components:
         seed: { type: string, minLength: 1, maxLength: 128, description: Optional replay seed. Omission generates a server-side seed returned in requestedSeed and seed. }
         difficultyLevel: { type: integer, minimum: 1, maximum: 12 }
         allowSeedFallback: { type: boolean, default: false }
+        difficultyModel: { type: string, enum: [v4, v5, compare], default: v5 }
     Constraint:
       type: object
       required: [kind]
@@ -602,6 +619,9 @@ components:
         templateId: { type: string }
         generatorVersion: { type: string }
         solverVersion: { type: string }
+        difficultyModel: { type: string, enum: [v4, v5, compare] }
+        difficultyProfile: { $ref: '#/components/schemas/DifficultyProfile' }
+        selectionDiagnostics: { type: object, additionalProperties: true }
         puzzleToken:
           type: string
           description: HMAC-signed token required by verification and hints. New tokens expire after the configured lifetime (seven days by default, maximum 30 days). Its base64url payload contains reproducibility metadata (including the seed), so it is not encryption; present when PUZZLE_TOKEN_SECRET is configured.
@@ -624,6 +644,24 @@ components:
             humanSolve: { type: object, additionalProperties: true }
             clueStructure: { type: object, additionalProperties: true }
             solver: { type: object, additionalProperties: true }
+    DifficultyProfile:
+      type: object
+      required: [profileVersion, logical, legacy, semantic, calibrationStatus]
+      properties:
+        profileVersion: { type: string, const: yokaiba-difficulty-profile-v1 }
+        logical: { type: object, additionalProperties: true, description: Deterministic v5 score, normalized metrics, and no-guess deduction trace. }
+        legacy: { $ref: '#/components/schemas/Difficulty' }
+        semantic:
+          type: object
+          required: [schemaVersion, model, resolvedModel, status, metrics, reviewFlags]
+          properties:
+            schemaVersion: { type: string, const: yokaiba-jev-semantic-v2 }
+            model: { type: string, const: '~typesafe/jev-latest' }
+            resolvedModel: { type: [string, 'null'] }
+            status: { type: string, const: not_assessed }
+            metrics: { type: object, additionalProperties: true }
+            reviewFlags: { type: array, items: { type: string } }
+        calibrationStatus: { type: string, const: provisional }
     SolutionAnswer:
       type: object
       required: [assignments]
@@ -706,3 +744,4 @@ components:
           description: Alternative levels observed while trying all deterministic strategies for the requested level.
           items: { type: integer, minimum: 1, maximum: 12 }
           uniqueItems: true
+        selectionDiagnostics: { type: object, additionalProperties: true }

@@ -2,6 +2,8 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { decodePuzzleTokenPayload, MAX_PUZZLE_TOKEN_TTL_SECONDS } from "../src/api/puzzle-token-payload.js";
 import { generatePuzzle } from "../src/generation/generator.js";
+import { generatePuzzleForRequest } from "../src/generation/generator.js";
+import { puzzleFromToken } from "../src/api/puzzle-from-token.js";
 import { tournamentOrderTemplate } from "../src/templates/tournament-order.js";
 import { issuePuzzleToken, verifyPuzzleToken, type PuzzleTokenPayload } from "../src/api/puzzle-token.js";
 
@@ -76,6 +78,41 @@ test("issued puzzle tokens round-trip the stable generation inputs", async () =>
     issuedAt: 1_000,
     expiresAt: 1_300,
   } satisfies PuzzleTokenPayload);
+});
+
+test("v5 puzzle tokens preserve their model selection when verification replays them", async () => {
+  const now = Math.floor(Date.now() / 1_000);
+  const puzzle = generatePuzzleForRequest(tournamentOrderTemplate, "token-v5-replay", undefined, false, undefined, "v5");
+  const token = await issuePuzzleToken(puzzle, secret, { now, ttlSeconds: 300 });
+  const payload = await verifyPuzzleToken(token, secret, now);
+  const replayed = await puzzleFromToken(token, new Map([[tournamentOrderTemplate.id, tournamentOrderTemplate]]), secret);
+
+  assert.equal(payload?.version, 3);
+  assert.equal(payload?.difficultyModel, "v5");
+  assert.equal(replayed.difficultyModel, "v5");
+  assert.equal(replayed.difficulty.modelVersion, "yokaiba-difficulty-v5");
+  assert.deepEqual(replayed.clues, puzzle.clues);
+  assert.deepEqual(replayed.difficultyProfile, puzzle.difficultyProfile);
+});
+
+test("historical tokens without a model keep replaying through v4 after the generator version changes", async () => {
+  const now = Math.floor(Date.now() / 1_000);
+  const legacyPayload = {
+    version: 3,
+    templateId: tournamentOrderTemplate.id,
+    seed: "historical-v4-replay",
+    generatorVersion: "yokaiba-generator-v5",
+    solverVersion: "yokaiba-exhaustive-v1",
+    issuedAt: now,
+    expiresAt: now + 300,
+  };
+  const token = await signPayload(legacyPayload);
+  const replayed = await puzzleFromToken(token, new Map([[tournamentOrderTemplate.id, tournamentOrderTemplate]]), secret);
+  const expected = generatePuzzleForRequest(tournamentOrderTemplate, legacyPayload.seed, undefined, false, undefined, "v4");
+
+  assert.equal(replayed.difficultyModel, "v4");
+  assert.equal(replayed.difficulty.modelVersion, "yokaiba-difficulty-v4");
+  assert.deepEqual(replayed.clues, expected.clues);
 });
 
 test("issued puzzle tokens expire and can be verified with a previous rotation key", async () => {

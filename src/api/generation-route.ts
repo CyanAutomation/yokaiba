@@ -42,12 +42,12 @@ export async function generationRoute(
     return badRequest(error);
   }
 
-  const { templateId, seed, difficultyLevel, allowSeedFallback } = parameters;
+  const { templateId, seed, difficultyLevel, allowSeedFallback, difficultyModel } = parameters;
   const template = templates.get(templateId);
   if (!template) return json({ error: { code: "not_found", message: "unknown templateId" } }, 404);
 
   try {
-    return json(await publicPuzzle(generatePuzzleForRequest(template, seed, difficultyLevel, allowSeedFallback), options), 200,
+    return json(await publicPuzzle(generatePuzzleForRequest(template, seed, difficultyLevel, allowSeedFallback, undefined, difficultyModel ?? "v5"), options), 200,
       request.method === "GET" ? { "cache-control": GENERATED_PUZZLE_CACHE_CONTROL } : undefined);
   } catch (error) {
     if (error instanceof DifficultyUnavailableError) return json({
@@ -55,6 +55,7 @@ export async function generationRoute(
       templateId: error.templateId,
       requestedDifficultyLevel: error.requestedDifficultyLevel,
       availableDifficultyLevels: error.availableDifficultyLevels,
+      ...(error.diagnostics ? { selectionDiagnostics: error.diagnostics } : {}),
     }, 422, request.method === "GET" ? { "cache-control": GENERATED_PUZZLE_CACHE_CONTROL } : undefined);
     return json({ error: { code: "generation_failed", message: "puzzle generation failed" } }, 500);
   }

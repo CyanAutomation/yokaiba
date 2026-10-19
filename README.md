@@ -40,8 +40,8 @@ Current response preview for this seed:
 ```text
 templateId: tournament-order-v2
 seed: first-puzzle
-difficulty: level 2 (Easy)
-clues: 7
+difficulty: level 3 (Gentle)
+clues: 8
 solution: not returned
 ```
 

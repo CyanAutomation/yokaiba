@@ -1,3 +1,5 @@
+import type { DifficultyProfileV1 } from "../generation/difficulty-profile.js";
+
 export interface Category {
   id: string;
   label: string;
@@ -87,6 +89,18 @@ export interface GeneratedPuzzle {
   templateId: string;
   generatorVersion: string;
   solverVersion: string;
+  /** Present only for explicit v5 selection or v4/v5 comparison requests. */
+  difficultyModel?: "v4" | "v5" | "compare";
+  difficultyProfile?: DifficultyProfileV1;
+  selectionDiagnostics?: {
+    modelVersion: string;
+    strategyBudget: number;
+    strategiesAttempted: number;
+    eligibleCandidates: number;
+    selectedScore?: number;
+    selectedRankDistance?: number;
+    candidateScoreRange?: { minimum: number; maximum: number; complete: number; incomplete: number };
+  };
   spec: PuzzleSpec;
   clues: Clue[];
   difficulty: Difficulty;
