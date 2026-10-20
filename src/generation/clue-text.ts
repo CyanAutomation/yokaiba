@@ -2,10 +2,13 @@ import type { Clue, ClueConstraint, PuzzleTemplate } from "../domain/types.js";
 import { hash } from "../domain/hash.js";
 import { renderConstraintText } from "./clue-language.js";
 
-export const CLUE_LANGUAGE_VERSION = "yokaiba-clue-prose-v9";
+export const CLUE_LANGUAGE_VERSION = "yokaiba-clue-prose-v10";
+// Keep variant assignments stable when prose changes; advance this only when
+// the deterministic phrase catalogue itself should be reshuffled.
+const CLUE_VARIANT_SELECTION_VERSION = "yokaiba-clue-prose-v9";
 
 function chooseVariant(seed: string, clue: Clue, count: number, previousFamily?: string) {
-  let index = hash(`${seed}:${clue.id}:${CLUE_LANGUAGE_VERSION}`) % count;
+  let index = hash(`${seed}:${clue.id}:${CLUE_VARIANT_SELECTION_VERSION}`) % count;
   const family = `${clue.constraint.kind}-${index}`;
   if (count > 1 && family === previousFamily) index = (index + 1) % count;
   return index;

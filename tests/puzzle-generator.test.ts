@@ -238,7 +238,7 @@ test("rendered clue metadata satisfies the language catalogue contract", () => {
   ];
 
   const rendered = renderClues(tournamentOrderTemplate, "metadata-contract", clues);
-  assert.ok(rendered.every(clue => clue.languageVersion === "yokaiba-clue-prose-v9"));
+  assert.ok(rendered.every(clue => clue.languageVersion === "yokaiba-clue-prose-v10"));
   assert.ok(rendered.every(clue => typeof clue.phraseVariant === "string" && clue.phraseVariant.length > 0));
 });
 
@@ -346,6 +346,24 @@ test("clue rendering is deterministic and rotates phrase variants within a puzzl
   assert.match(first[1]!.text, /-73 kg/);
   assert.match(first[1]!.text, /3rd/);
   assert.notEqual(first[0]!.phraseVariant, first[1]!.phraseVariant);
+});
+
+test("prose v10 preserves v9 phrase assignments while fixing distance sentence casing", () => {
+  const clues: Clue[] = [
+    { id: "stable-distance", constraint: { kind: "distance", left: { category: "weight", value: "-60 kg" }, right: { category: "tatami", value: "Tatami 2" }, distance: 1 }, text: "" },
+    { id: "stable-before", constraint: { kind: "before", left: { category: "weight", value: "-60 kg" }, right: { category: "tatami", value: "Tatami 2" } }, text: "" },
+    { id: "stable-adjacent", constraint: { kind: "adjacent", left: { category: "weight", value: "-60 kg" }, right: { category: "tatami", value: "Tatami 2" } }, text: "" },
+  ];
+
+  const rendered = renderClues(tournamentOrderTemplate, "stable-seed", clues);
+
+  assert.deepEqual(rendered.map(clue => [clue.id, clue.phraseVariant]), [
+    ["stable-distance", "distance-1"],
+    ["stable-before", "before-1"],
+    ["stable-adjacent", "adjacent-0"],
+  ]);
+  assert.ok(rendered.every(clue => clue.languageVersion === "yokaiba-clue-prose-v10"));
+  assert.match(rendered[0]!.text, /^The -60 kg competitor/);
 });
 
 test("targeted difficulty never substitutes a different seed", () => {
