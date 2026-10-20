@@ -84,6 +84,16 @@ export interface TargetedDifficultyLevelAudit {
   humanTrace: { complete: number; incomplete: number };
   fallback: { used: number; maximumAttempt: number; attempts?: { p50: number; p95: number } };
   clues: { average: number; minimum: number; maximum: number };
+  unavailableDiagnostics?: TargetedDifficultyUnavailableDiagnostics;
+}
+
+export interface TargetedDifficultyUnavailableDiagnostics {
+  samplesWithDiagnostics: number;
+  strategiesAttempted: number;
+  eligibleCandidates: number;
+  fallbackSeedsAttempted: number;
+  candidateScoreRange?: { minimum: number; maximum: number; complete: number; incomplete: number };
+  availableDifficultyCounts: number[];
 }
 
 export interface TargetedDifficultyLevelResult {
@@ -215,9 +225,16 @@ function collectTargetedDifficultySamples(
   seedPrefix: string,
   onProgress?: DifficultyAuditProgressCallback,
   generateTargeted: TargetedPuzzleGenerator = (candidateTemplate, seed, level) => generatePuzzleForRequest(candidateTemplate, seed, level, true),
-): { records: DifficultyAuditRecord[]; fallbackAttempts: number[]; unavailable: number; modelVersion: string } {
+): { records: DifficultyAuditRecord[]; fallbackAttempts: number[]; unavailable: number; unavailableDiagnostics: TargetedDifficultyUnavailableDiagnostics; modelVersion: string } {
   const records: DifficultyAuditRecord[] = [];
   const fallbackAttempts: number[] = [];
+  const unavailableDiagnostics: TargetedDifficultyUnavailableDiagnostics = {
+    samplesWithDiagnostics: 0,
+    strategiesAttempted: 0,
+    eligibleCandidates: 0,
+    fallbackSeedsAttempted: 0,
+    availableDifficultyCounts: Array<number>(12).fill(0),
+  };
   let unavailable = 0;
   let modelVersion: string | undefined;
   for (let index = 0; index < sampleSize; index += 1) {
@@ -229,10 +246,33 @@ function collectTargetedDifficultySamples(
     } catch (error) {
       if (!(error instanceof DifficultyUnavailableError)) throw error;
       unavailable += 1;
+      for (const level of error.availableDifficultyLevels) {
+        if (Number.isInteger(level) && level >= 1 && level <= 12) {
+          unavailableDiagnostics.availableDifficultyCounts[level - 1] += 1;
+        }
+      }
+      if (error.diagnostics) {
+        const diagnostics = error.diagnostics;
+        unavailableDiagnostics.samplesWithDiagnostics += 1;
+        unavailableDiagnostics.strategiesAttempted += diagnostics.strategiesAttempted;
+        unavailableDiagnostics.eligibleCandidates += diagnostics.eligibleCandidates;
+        unavailableDiagnostics.fallbackSeedsAttempted += diagnostics.fallbackSeedsAttempted ?? 0;
+        if (diagnostics.candidateScoreRange) {
+          const current = unavailableDiagnostics.candidateScoreRange;
+          unavailableDiagnostics.candidateScoreRange = current === undefined
+            ? { ...diagnostics.candidateScoreRange }
+            : {
+              minimum: Math.min(current.minimum, diagnostics.candidateScoreRange.minimum),
+              maximum: Math.max(current.maximum, diagnostics.candidateScoreRange.maximum),
+              complete: current.complete + diagnostics.candidateScoreRange.complete,
+              incomplete: current.incomplete + diagnostics.candidateScoreRange.incomplete,
+            };
+        }
+      }
     }
     onProgress?.({ phase: "targeted", templateId: template.id, requestedDifficultyLevel, completed: index + 1, total: sampleSize });
   }
-  return { records, fallbackAttempts, unavailable, modelVersion: modelVersion ?? DEFAULT_DIFFICULTY_MODEL_VERSION };
+  return { records, fallbackAttempts, unavailable, unavailableDiagnostics, modelVersion: modelVersion ?? DEFAULT_DIFFICULTY_MODEL_VERSION };
 }
 
 export type TargetedPuzzleGenerator = (template: PuzzleTemplate, seed: string, level: Difficulty["level"]) => GeneratedPuzzle;
@@ -250,7 +290,7 @@ export function auditTargetedDifficultyLevel(
     throw new RangeError(`${template.id} does not advertise difficulty level ${requestedDifficultyLevel}`);
   }
 
-  const { records, fallbackAttempts, unavailable, modelVersion } = collectTargetedDifficultySamples(
+  const { records, fallbackAttempts, unavailable, unavailableDiagnostics, modelVersion } = collectTargetedDifficultySamples(
     template,
     requestedDifficultyLevel,
     sampleSize,
@@ -275,6 +315,7 @@ export function auditTargetedDifficultyLevel(
         attempts: fallbackAttemptPercentiles(fallbackAttempts),
       },
       clues: statistics.clues,
+      ...(unavailable === 0 ? {} : { unavailableDiagnostics }),
     },
   };
 }
