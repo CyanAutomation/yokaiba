@@ -659,26 +659,28 @@ export async function requestJevDecisionBatch(
   };
   const delayBeforeRetry = async (retryIndex: number) => sleep(Math.min(2_000, baseDelayMs * (2 ** retryIndex)));
 
-  for (let attempt = 0; attempt <= maxRetries; attempt += 1) {
+  let retriesUsed = 0;
+  while (true) {
     let response: Response;
     try {
       response = await fetcher(endpoint, request);
     } catch (error) {
       if (error instanceof Error && error.name === "AbortError") throw error;
-      if (attempt === maxRetries) throw error;
-      await delayBeforeRetry(attempt);
+      if (retriesUsed >= maxRetries) throw error;
+      await delayBeforeRetry(retriesUsed);
+      retriesUsed += 1;
       continue;
     }
     if (response.ok) return readJevDecisionResponse(await response.json() as unknown);
     const retryableStatus = response.status === 408 || response.status === 425 || response.status === 429 || response.status >= 500;
-    if (retryableStatus && attempt < maxRetries) {
+    if (retryableStatus && retriesUsed < maxRetries) {
       await response.body?.cancel().catch(() => {});
-      await delayBeforeRetry(attempt);
+      await delayBeforeRetry(retriesUsed);
+      retriesUsed += 1;
       continue;
     }
     throw new Error(`JEV request failed (${response.status}): ${await response.text()}`);
   }
-  throw new Error("JEV request exhausted its retry budget");
 }
 
 export function assertCheckpointConfiguration(actual: JevRunConfiguration, expected: JevRunConfiguration): void {

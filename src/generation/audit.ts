@@ -246,7 +246,11 @@ function collectTargetedDifficultySamples(
     } catch (error) {
       if (!(error instanceof DifficultyUnavailableError)) throw error;
       unavailable += 1;
-      for (const level of error.availableDifficultyLevels) unavailableDiagnostics.availableDifficultyCounts[level - 1] += 1;
+      for (const level of error.availableDifficultyLevels) {
+        if (Number.isInteger(level) && level >= 1 && level <= 12) {
+          unavailableDiagnostics.availableDifficultyCounts[level - 1] += 1;
+        }
+      }
       if (error.diagnostics) {
         const diagnostics = error.diagnostics;
         unavailableDiagnostics.samplesWithDiagnostics += 1;
