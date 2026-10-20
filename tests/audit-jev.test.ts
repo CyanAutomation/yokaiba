@@ -220,6 +220,54 @@ test("JEV decision requests send the structured payload and normalize the provid
   });
 });
 
+test("JEV decision requests retry transient provider failures but do not retry authentication failures", async () => {
+  const payload = buildClueDecisionPayload("test-model", [clue()]);
+  const sleeps: number[] = [];
+  let transientAttempts = 0;
+  const recovered = await requestJevDecisionBatch(
+    "test-secret",
+    payload,
+    "https://example.test/decisions",
+    async () => {
+      transientAttempts += 1;
+      if (transientAttempts === 1) return new Response("busy", { status: 503 });
+      if (transientAttempts === 2) return new Response("rate limited", { status: 429 });
+      return new Response(JSON.stringify({ answers: {} }), { status: 200 });
+    },
+    { maxRetries: 2, baseDelayMs: 10, sleep: async milliseconds => { sleeps.push(milliseconds); } },
+  );
+  assert.equal(transientAttempts, 3);
+  assert.deepEqual(sleeps, [10, 20]);
+  assert.deepEqual(recovered.answers, {});
+
+  let networkAttempts = 0;
+  await requestJevDecisionBatch(
+    "test-secret",
+    payload,
+    "https://example.test/decisions",
+    async () => {
+      networkAttempts += 1;
+      if (networkAttempts === 1) throw new TypeError("temporary network failure");
+      return new Response(JSON.stringify({ answers: {} }), { status: 200 });
+    },
+    { maxRetries: 1, baseDelayMs: 0, sleep: async () => {} },
+  );
+  assert.equal(networkAttempts, 2);
+
+  let authenticationAttempts = 0;
+  await assert.rejects(requestJevDecisionBatch(
+    "test-secret",
+    payload,
+    "https://example.test/decisions",
+    async () => {
+      authenticationAttempts += 1;
+      return new Response("unauthorized", { status: 401 });
+    },
+    { maxRetries: 3, sleep: async () => {} },
+  ), /JEV request failed \(401\)/);
+  assert.equal(authenticationAttempts, 1);
+});
+
 test("JEV answers preserve confidence and report incomplete metrics without inventing flags", () => {
   const partial = applyJevAnswers(clue(), {
     "0_faithful": { noul: 0.4, confidence: 0.91 },
@@ -342,6 +390,7 @@ test("audit Markdown reports targeted delivery, fallbacks, confidence, and incom
   assert.match(markdown, /Semantic and logical calibration evidence/);
   assert.match(markdown, /yokaiba-difficulty-v4/);
   assert.match(markdown, /probabilistic JEV assessments/);
+  assert.match(markdown, /Clue count/);
   const legacyReport: JevAuditReport = {
     ...report,
     targetedDifficultyAudit: report.targetedDifficultyAudit.map(template => ({
@@ -353,6 +402,57 @@ test("audit Markdown reports targeted delivery, fallbacks, confidence, and incom
     })),
   };
   assert.match(buildAuditMarkdown(legacyReport), /p50 n\/a, p95 n\/a, max 3/);
+  const failedTargetReport: JevAuditReport = {
+    ...report,
+    targetedDifficultyAudit: report.targetedDifficultyAudit.map(template => ({
+      ...template,
+      levels: template.levels.map(level => ({
+        ...level,
+        generated: 0,
+        unavailable: 1,
+        assessedLevelCounts: Array<number>(12).fill(0),
+        humanTrace: { complete: 0, incomplete: 0 },
+        fallback: { used: 0, maximumAttempt: 0 },
+        unavailableDiagnostics: {
+          samplesWithDiagnostics: 1,
+          strategiesAttempted: 36,
+          eligibleCandidates: 0,
+          fallbackSeedsAttempted: 3,
+          candidateScoreRange: { minimum: 51, maximum: 92, complete: 21, incomplete: 3 },
+          availableDifficultyCounts: [0, 1, 2, ...Array<number>(9).fill(0)],
+        },
+      })),
+    })),
+  };
+  const failedTargetMarkdown = buildAuditMarkdown(failedTargetReport);
+  assert.match(failedTargetMarkdown, /scores 51\.0–92\.0/);
+  assert.match(failedTargetMarkdown, /alternate levels 2 \(1\), 3 \(2\)/);
+
+  const unavailable = markClueUnavailable(clue());
+  const unassessedReport: JevAuditReport = {
+    ...report,
+    clueAudit: {
+      ...report.clueAudit,
+      status: "unavailable",
+      flaggedClues: [],
+      incompleteClues: [],
+      unavailableClues: [unavailable],
+      clues: [unavailable],
+    },
+    puzzleAudit: {
+      ...report.puzzleAudit,
+      enabled: true,
+      sampledPuzzles: 1,
+      completePuzzles: 0,
+      incompletePuzzles: 0,
+      unavailablePuzzles: 1,
+      flaggedPuzzles: [],
+      puzzles: [{ ...puzzle(), evaluationStatus: "unavailable", missingAnswers: ["provider unavailable"] }],
+    },
+  };
+  const unassessedMarkdown = buildAuditMarkdown(unassessedReport);
+  assert.match(unassessedMarkdown, /No clue was fully assessed/);
+  assert.match(unassessedMarkdown, /No puzzle was fully assessed/);
 });
 
 test("audit checkpoints round-trip, migrate older versions, and remove completed files", async () => {
@@ -555,8 +655,12 @@ test("clue decision batches ask bounded semantic questions against structured se
   assert.equal((payload.questions["0_ambiguous"] as { type: string }).type, "noul");
   assert.equal((payload.questions["0_entityClarity"] as { type: string }).type, "score");
   assert.equal((payload.questions["0_misunderstandingRisk"] as { type: string }).type, "noul");
+  const faithfulnessPrompt = (payload.questions["0_faithful"] as { instructions: string }).instructions;
+  assert.match(faithfulnessPrompt, /meaning-preserving paraphrase/i);
+  assert.match(faithfulnessPrompt, /won Gold/i);
+  assert.match(faithfulnessPrompt, /did not finish in 5th place/i);
   assert.equal(typeof JEV_REVIEW_THRESHOLDS.linguisticComplexityAbove, "number");
-  assert.equal(SEMANTIC_ASSESSMENT_SCHEMA_VERSION, "yokaiba-jev-semantic-v2");
+  assert.equal(SEMANTIC_ASSESSMENT_SCHEMA_VERSION, "yokaiba-jev-semantic-v3");
 });
 
 test("optional puzzle review records language-versus-logic evidence without replacing logical level", () => {
@@ -570,6 +674,7 @@ test("optional puzzle review records language-versus-logic evidence without repl
   }, 0, "2026-09-29T00:00:00.000Z");
   const payload = buildPuzzleDecisionPayload("test-model", [puzzle()]);
   assert.equal(Object.keys(payload.questions).length, 6);
+  assert.match((payload.questions["0_cognitiveBurden"] as { instructions: string }).instructions, /clue count as a separate structural contributor/i);
   assert.equal(assessed.evaluationStatus, "complete");
   assert.equal(assessed.logicalDifficultyLevel, 3);
   assert.equal(assessed.linguisticDifficultyComparedToLogical, 1.8);
@@ -594,6 +699,7 @@ test("optional puzzle review records language-versus-logic evidence without repl
   const evidence = aggregateSemanticCalibrationEvidence([assessedClue], [assessed]);
   assert.deepEqual(aggregateSemanticPuzzleEvidence(assessed, [assessedClue]), evidence[0]);
   assert.equal(evidence[0]?.logicalDifficultyLevel, 3);
+  assert.equal(evidence[0]?.clueCount, 1);
   assert.equal(evidence[0]?.semanticAssessment.readability, 2);
   assert.equal(evidence[0]?.semanticAssessment.entityClarity, 1.8);
   assert.equal(evidence[0]?.semanticAssessment.misunderstandingRisk, 0.1);
@@ -633,15 +739,21 @@ test("puzzle review rebuilds sampled puzzle clue sets from an earlier report", (
 test("provider failure marks the semantic assessment unavailable without changing deterministic evidence", async () => {
   const original = clue();
   const unavailable = markClueUnavailable(original);
+  let attempts = 0;
   await assert.rejects(
     requestJevDecisionBatch(
       "test-secret",
       buildClueDecisionPayload("test-model", [original]),
       "https://example.test/decisions",
-      async () => new Response("offline", { status: 503 }),
+      async () => {
+        attempts += 1;
+        return new Response("offline", { status: 503 });
+      },
+      { maxRetries: 2, sleep: async () => {} },
     ),
     /JEV request failed \(503\)/,
   );
+  assert.equal(attempts, 3);
   assert.equal(unavailable.evaluationStatus, "unavailable");
   assert.equal(unavailable.logicalDifficultyLevel, original.logicalDifficultyLevel);
   assert.equal(unavailable.difficultyModelVersion, original.difficultyModelVersion);

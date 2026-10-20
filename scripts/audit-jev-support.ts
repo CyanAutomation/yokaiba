@@ -7,7 +7,7 @@ import type { ClueConstraint, Difficulty, DifficultyAuditProgressCallback, Diffi
 export { parseAuditArguments } from "./audit-jev-arguments.js";
 export { buildAuditMarkdown } from "./audit-jev-markdown.js";
 
-export const SEMANTIC_ASSESSMENT_SCHEMA_VERSION = "yokaiba-jev-semantic-v2";
+export const SEMANTIC_ASSESSMENT_SCHEMA_VERSION = "yokaiba-jev-semantic-v3";
 /** Stable provider alias used for every semantic audit phase. */
 export const JEV_REQUESTED_MODEL = "~typesafe/jev-latest";
 export const JEV_AUDIT_GENERATION_MODEL_VERSION = DEFAULT_DIFFICULTY_MODEL_VERSION;
@@ -144,6 +144,15 @@ export interface JevDecisionResponse {
   usage: Partial<JevUsage>;
 }
 
+export interface JevRequestRetryOptions {
+  /** Number of additional attempts after the first request. Defaults to 2. */
+  maxRetries?: number;
+  /** Initial exponential backoff in milliseconds. Defaults to 250. */
+  baseDelayMs?: number;
+  /** Injectable for tests and nonstandard runtimes. */
+  sleep?: (milliseconds: number) => Promise<void>;
+}
+
 export interface JevAnswer {
   noul?: number;
   score?: number;
@@ -229,6 +238,8 @@ export interface SemanticPuzzleEvidence {
   seed: string;
   logicalDifficultyLevel: Difficulty["level"];
   difficultyModelVersion: string;
+  /** Number of clues in the audited set; retained to contextualize total cognitive burden. */
+  clueCount?: number;
   semanticAssessment: {
     readability?: number;
     ambiguity?: number;
@@ -501,6 +512,7 @@ export function aggregateSemanticPuzzleEvidence(puzzle: AuditedPuzzle, clues: re
     seed: puzzle.seed,
     logicalDifficultyLevel: puzzle.logicalDifficultyLevel,
     difficultyModelVersion: puzzle.difficultyModelVersion,
+    clueCount: puzzle.clues.length,
     semanticAssessment,
     ...(hasPuzzleReview ? {
       puzzleReview: {
@@ -528,7 +540,7 @@ export function buildClueDecisionPayload(model: string, clues: readonly AuditedC
     const path = `clues[${index}]`;
     questions[`${index}_faithful`] = {
       type: "noul",
-      instructions: `Does ${path}.text accurately and completely express ${path}.expectedSemantics? Treat a reversed ordering, missing exactness, changed negation, or changed relationship as inaccurate. Judge the wording only; structuredSemantics is the deterministic contract.`,
+      instructions: `Does ${path}.text accurately and completely express ${path}.expectedSemantics? Accept meaning-preserving paraphrases, such as "won Gold" for being assigned the Gold medal and "did not finish in 5th place" for not being assigned 5th place; do not require the same words as the canonical description. Treat a reversed ordering, missing exactness, changed negation, or changed relationship as inaccurate. Judge the wording only; structuredSemantics is the deterministic contract.`,
       criteria: { true: "The wording preserves every semantic constraint.", false: "The wording changes, omits, or contradicts a semantic constraint." },
     };
     questions[`${index}_ambiguous`] = {
@@ -567,7 +579,7 @@ export function buildClueDecisionPayload(model: string, clues: readonly AuditedC
 
 export function buildPuzzleDecisionPayload(model: string, puzzles: readonly AuditedPuzzle[]): JevDecisionPayload {
   const state = { puzzles: puzzles.map(({ templateId, templateTitle, seed, logicalDifficultyLevel, difficultyModelVersion, clues }) => ({
-    templateId, templateTitle, seed, logicalDifficultyLevel, difficultyModelVersion, clues,
+    templateId, templateTitle, seed, logicalDifficultyLevel, difficultyModelVersion, clueCount: clues.length, clues,
   })) };
   const questions: Record<string, unknown> = {};
   for (const [index] of puzzles.entries()) {
@@ -594,7 +606,7 @@ export function buildPuzzleDecisionPayload(model: string, puzzles: readonly Audi
     };
     questions[`${index}_cognitiveBurden`] = {
       type: "score",
-      instructions: `Considering ${path}.clues as a set, how much information must a player hold in mind while beginning to work through them? Judge the clue set's stated facts and phrasing; do not infer hidden solution difficulty or access puzzle answers.`,
+      instructions: `Considering ${path}.clues as a set, how much information must a player hold in mind while beginning to work through them? Treat clue count as a separate structural contributor to total clue-set burden (recorded in ${path}.clueCount); do not treat clue count alone as a wording flaw. Judge the clue set's stated facts and phrasing; do not infer hidden solution difficulty or access puzzle answers.`,
       criteria: ["Low burden; clues are easy to track", "Moderate burden; several clues must be compared", "High burden; many details or relationships must be held together"],
     };
     questions[`${index}_initialReadingClarity`] = {
@@ -633,14 +645,40 @@ export async function requestJevDecisionBatch(
   payload: JevDecisionPayload,
   endpoint: string,
   fetcher: typeof fetch = fetch,
+  retryOptions: JevRequestRetryOptions = {},
 ): Promise<JevDecisionResponse> {
-  const response = await fetcher(endpoint, {
+  const maxRetries = retryOptions.maxRetries ?? 2;
+  const baseDelayMs = retryOptions.baseDelayMs ?? 250;
+  if (!Number.isInteger(maxRetries) || maxRetries < 0) throw new RangeError("maxRetries must be a non-negative integer");
+  if (!Number.isFinite(baseDelayMs) || baseDelayMs < 0) throw new RangeError("baseDelayMs must be non-negative");
+  const sleep = retryOptions.sleep ?? (milliseconds => new Promise<void>(resolve => setTimeout(resolve, milliseconds)));
+  const request: RequestInit = {
     method: "POST",
     headers: { "content-type": "application/json", authorization: `Bearer ${apiKey}` },
     body: JSON.stringify(payload),
-  });
-  if (!response.ok) throw new Error(`JEV request failed (${response.status}): ${await response.text()}`);
-  return readJevDecisionResponse(await response.json() as unknown);
+  };
+  const delayBeforeRetry = async (retryIndex: number) => sleep(Math.min(2_000, baseDelayMs * (2 ** retryIndex)));
+
+  for (let attempt = 0; attempt <= maxRetries; attempt += 1) {
+    let response: Response;
+    try {
+      response = await fetcher(endpoint, request);
+    } catch (error) {
+      if (error instanceof Error && error.name === "AbortError") throw error;
+      if (attempt === maxRetries) throw error;
+      await delayBeforeRetry(attempt);
+      continue;
+    }
+    if (response.ok) return readJevDecisionResponse(await response.json() as unknown);
+    const retryableStatus = response.status === 408 || response.status === 425 || response.status === 429 || response.status >= 500;
+    if (retryableStatus && attempt < maxRetries) {
+      await response.body?.cancel().catch(() => {});
+      await delayBeforeRetry(attempt);
+      continue;
+    }
+    throw new Error(`JEV request failed (${response.status}): ${await response.text()}`);
+  }
+  throw new Error("JEV request exhausted its retry budget");
 }
 
 export function assertCheckpointConfiguration(actual: JevRunConfiguration, expected: JevRunConfiguration): void {

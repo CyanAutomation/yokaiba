@@ -58,15 +58,26 @@ function targetedDifficultyLines(report: JevAuditReport): string[] {
   const lines = [
     "## Targeted difficulty audit",
     "",
-    "| Template | Level | Exact target | Unavailable / requested | No-guess trace | Fallback use | Fallback attempt p50 / p95 / max |",
-    "| --- | ---: | ---: | ---: | ---: | ---: | ---: |",
+    "| Template | Level | Exact target | Unavailable / requested | No-guess trace | Fallback use | Fallback attempt p50 / p95 / max | Unavailable search evidence |",
+    "| --- | ---: | ---: | ---: | ---: | ---: | ---: | --- |",
   ];
   for (const template of report.targetedDifficultyAudit) {
     for (const level of template.levels) {
       const percentiles = level.fallback.attempts
         ? `p50 ${level.fallback.attempts.p50}, p95 ${level.fallback.attempts.p95}`
         : "p50 n/a, p95 n/a";
-      lines.push(`| ${template.templateId} | ${level.requestedDifficultyLevel} | ${targetedExactCount(level)}/${level.generated} | ${level.unavailable ?? 0}/${template.sampleSize} | ${level.humanTrace.complete}/${level.generated} | ${level.fallback.used}/${level.generated} | ${percentiles}, max ${level.fallback.maximumAttempt} |`);
+      const unavailable = level.unavailable ?? 0;
+      const diagnostics = level.unavailableDiagnostics;
+      const alternateLevels = diagnostics?.availableDifficultyCounts
+        .flatMap((count, index) => count > 0 ? [`${index + 1} (${count})`] : [])
+        .join(", ") ?? "";
+      const scoreRange = diagnostics?.candidateScoreRange
+        ? `scores ${diagnostics.candidateScoreRange.minimum.toFixed(1)}–${diagnostics.candidateScoreRange.maximum.toFixed(1)}, ${diagnostics.candidateScoreRange.complete} complete / ${diagnostics.candidateScoreRange.incomplete} incomplete`
+        : "score range unavailable";
+      const unavailableDetails = unavailable === 0 ? "—" : !diagnostics || diagnostics.samplesWithDiagnostics === 0
+        ? "generation diagnostics not recorded"
+        : `${diagnostics.samplesWithDiagnostics} diagnostic samples; ${diagnostics.strategiesAttempted} strategies; ${diagnostics.eligibleCandidates} eligible; ${scoreRange}; ${diagnostics.fallbackSeedsAttempted} fallback seeds${alternateLevels ? `; alternate levels ${alternateLevels}` : ""}`;
+      lines.push(`| ${template.templateId} | ${level.requestedDifficultyLevel} | ${targetedExactCount(level)}/${level.generated} | ${unavailable}/${template.sampleSize} | ${level.humanTrace.complete}/${level.generated} | ${level.fallback.used}/${level.generated} | ${percentiles}, max ${level.fallback.maximumAttempt} | ${escapeTableCell(unavailableDetails)} |`);
     }
   }
   if (report.targetedDifficultyAudit.length === 0) lines.push("No targeted difficulty results were collected.");
@@ -127,14 +138,14 @@ function semanticCalibrationLines(report: JevAuditReport): string[] {
     "",
     "## Semantic and logical calibration evidence",
     "",
-    "Logical level and model version are deterministic. Semantic measurements are probabilistic JEV assessments and remain independent; rows below aggregate each sampled puzzle's clue scores by logical level. The JSON report keeps each template, seed, and paired raw profile for later comparison with player outcomes.",
+    "Logical level and model version are deterministic. Semantic measurements are probabilistic JEV assessments and remain independent; rows below aggregate each sampled puzzle's clue scores by logical level and clue count. Cognitive burden describes the whole clue set, so compare it among samples with similar clue counts. The JSON report keeps each template, seed, and paired raw profile for later comparison with player outcomes.",
     "",
-    "| Template | Logical level / model | Puzzles | Readability (0–2) | Ambiguity (0–1) | Linguistic complexity (0–2) | Relationship explicitness (0–2) | Entity clarity (0–2) | Misunderstanding risk (0–1) | Language burden vs logical level (0–2) | Cognitive burden (0–2) | First-read clarity (0–2) |",
-    "| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |",
+    "| Template | Logical level / model | Clue count | Puzzles | Readability (0–2) | Ambiguity (0–1) | Linguistic complexity (0–2) | Relationship explicitness (0–2) | Entity clarity (0–2) | Misunderstanding risk (0–1) | Language burden vs logical level (0–2) | Cognitive burden (0–2) | First-read clarity (0–2) |",
+    "| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |",
   ];
   const groups = new Map<string, SemanticPuzzleEvidence[]>();
   for (const evidence of report.semanticCalibrationEvidence) {
-    const key = `${evidence.templateId}\u0000${evidence.difficultyModelVersion}\u0000${evidence.logicalDifficultyLevel}`;
+    const key = `${evidence.templateId}\u0000${evidence.difficultyModelVersion}\u0000${evidence.logicalDifficultyLevel}\u0000${evidence.clueCount ?? "unknown"}`;
     groups.set(key, [...(groups.get(key) ?? []), evidence]);
   }
   const formatMean = (values: Array<number | undefined>) => {
@@ -143,7 +154,7 @@ function semanticCalibrationLines(report: JevAuditReport): string[] {
   };
   for (const rows of groups.values()) {
     const first = rows[0]!;
-    lines.push(`| ${first.templateId} | ${first.logicalDifficultyLevel} / ${first.difficultyModelVersion} | ${rows.length} | ${formatMean(rows.map(row => row.semanticAssessment.readability))} | ${formatMean(rows.map(row => row.semanticAssessment.ambiguity))} | ${formatMean(rows.map(row => row.semanticAssessment.linguisticComplexity))} | ${formatMean(rows.map(row => row.semanticAssessment.relationshipExplicitness))} | ${formatMean(rows.map(row => row.semanticAssessment.entityClarity))} | ${formatMean(rows.map(row => row.semanticAssessment.misunderstandingRisk))} | ${formatMean(rows.map(row => row.puzzleReview?.linguisticDifficultyComparedToLogical))} | ${formatMean(rows.map(row => row.puzzleReview?.cognitiveBurden))} | ${formatMean(rows.map(row => row.puzzleReview?.initialReadingClarity))} |`);
+    lines.push(`| ${first.templateId} | ${first.logicalDifficultyLevel} / ${first.difficultyModelVersion} | ${first.clueCount ?? "n/a"} | ${rows.length} | ${formatMean(rows.map(row => row.semanticAssessment.readability))} | ${formatMean(rows.map(row => row.semanticAssessment.ambiguity))} | ${formatMean(rows.map(row => row.semanticAssessment.linguisticComplexity))} | ${formatMean(rows.map(row => row.semanticAssessment.relationshipExplicitness))} | ${formatMean(rows.map(row => row.semanticAssessment.entityClarity))} | ${formatMean(rows.map(row => row.semanticAssessment.misunderstandingRisk))} | ${formatMean(rows.map(row => row.puzzleReview?.linguisticDifficultyComparedToLogical))} | ${formatMean(rows.map(row => row.puzzleReview?.cognitiveBurden))} | ${formatMean(rows.map(row => row.puzzleReview?.initialReadingClarity))} |`);
   }
   if (report.semanticCalibrationEvidence.length === 0) lines.push("No paired semantic and logical sample evidence was collected.");
   return lines;
@@ -152,7 +163,12 @@ function semanticCalibrationLines(report: JevAuditReport): string[] {
 function clueFlagLines(report: JevAuditReport): string[] {
   const lines = ["", "## JEV wording flags", ""];
   if (report.clueAudit.flaggedClues.length === 0) {
-    lines.push("No clue crossed the conservative review thresholds.");
+    const assessed = report.clueAudit.clues.filter(clue => clue.evaluationStatus === "complete").length;
+    const notFullyAssessed = Math.max(0, report.clueAudit.sampledClues - assessed);
+    if (report.clueAudit.sampledClues === 0) lines.push("No clue samples were collected.");
+    else if (assessed === 0) lines.push("No clue was fully assessed; review flags are unavailable for these samples.");
+    else if (notFullyAssessed > 0) lines.push(`No clue crossed the conservative review thresholds among ${assessed} fully assessed clues; ${notFullyAssessed} sampled clues were incomplete or unavailable.`);
+    else lines.push("No clue crossed the conservative review thresholds.");
     return lines;
   }
   lines.push(
@@ -171,7 +187,12 @@ function puzzleReviewLines(report: JevAuditReport): string[] {
   if (!report.puzzleAudit.enabled) return [];
   const lines = ["", "## Puzzle-level semantic review leads", ""];
   if (report.puzzleAudit.flaggedPuzzles.length === 0) {
-    lines.push("No puzzle-level response crossed the provisional review thresholds.");
+    const sampled = report.puzzleAudit.sampledPuzzles;
+    const assessed = report.puzzleAudit.completePuzzles;
+    if (sampled === 0) lines.push("No puzzle samples were collected.");
+    else if (assessed === 0) lines.push("No puzzle was fully assessed; review flags are unavailable for these samples.");
+    else if (assessed < sampled) lines.push(`No puzzle crossed the provisional review thresholds among ${assessed} fully assessed puzzles; ${sampled - assessed} sampled puzzles were incomplete or unavailable.`);
+    else lines.push("No puzzle-level response crossed the provisional review thresholds.");
     return lines;
   }
   lines.push(
