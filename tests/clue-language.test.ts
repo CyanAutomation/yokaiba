@@ -49,7 +49,7 @@ test("clue language varies repeated wording and handles less common categories",
 
   assert.equal(renderConstraintText(template, medalAndResult, 1), "1st place went to the gold medallist.");
   assert.equal(renderConstraintText(titledOrder, { kind: "before", left: medalAndResult.left, right: medalAndResult.right }, 1), "In the judo cup order, the gold medallist was earlier than the competitor who finished 1st.");
-  assert.equal(renderConstraintText(template, longDistance, 1), "the competitor who finished Finalist and the competitor on Tatami 1 were exactly 5 places apart in the spring cup order.");
+  assert.equal(renderConstraintText(template, longDistance, 1), "The competitor who finished Finalist and the competitor on Tatami 1 were exactly 5 places apart in the spring cup order.");
 });
 
 test("distance clues state how many places apart the named competitors finished", () => {
@@ -61,11 +61,11 @@ test("distance clues state how many places apart the named competitors finished"
   assert.equal(renderConstraintText(template, { kind: "distance", left, right, distance: 2 }, 0),
     "In the spring cup order, the -60 kg competitor and the competitor on Tatami 2 were exactly two places apart.");
   assert.equal(renderConstraintText(template, { kind: "distance", left, right, distance: 3 }, 1),
-    "the -60 kg competitor and the competitor on Tatami 2 were exactly three places apart in the spring cup order.");
+    "The -60 kg competitor and the competitor on Tatami 2 were exactly three places apart in the spring cup order.");
 });
 
-test("v9 adopts places-apart wording and retains between-count wording for paired review", () => {
-  assert.equal(CLUE_LANGUAGE_VERSION, "yokaiba-clue-prose-v9");
+test("v10 adopts places-apart wording and retains between-count wording for paired review", () => {
+  assert.equal(CLUE_LANGUAGE_VERSION, "yokaiba-clue-prose-v10");
 
   const constraint = { kind: "distance", left: { category: "weight", value: "-60 kg" }, right: { category: "tatami", value: "Tatami 2" }, distance: 3 } as const;
   assert.equal(renderDistanceConstraintText(template, constraint, 0, "between-count"),
@@ -73,7 +73,7 @@ test("v9 adopts places-apart wording and retains between-count wording for paire
   assert.equal(renderDistanceConstraintText(template, constraint, 0, "places-apart"),
     "In the spring cup order, the -60 kg competitor and the competitor on Tatami 2 were exactly three places apart.");
   assert.equal(renderDistanceConstraintText(template, { ...constraint, distance: 1 }, 1, "places-apart"),
-    "the -60 kg competitor and the competitor on Tatami 2 were exactly one place apart in the spring cup order.");
+    "The -60 kg competitor and the competitor on Tatami 2 were exactly one place apart in the spring cup order.");
   assert.equal(renderConstraintText(template, constraint, 0),
     "In the spring cup order, the -60 kg competitor and the competitor on Tatami 2 were exactly three places apart.");
 });
