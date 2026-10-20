@@ -40,7 +40,7 @@ jobs:
         Perform a conservative DRY-principle review of this repository.
 
       # Adjust these paths for each repository.
-      ALLOWLIST: src/**/*,scripts/**/*,test/**/*,tests/**/*
+      ALLOWLIST: src/**/*,worker/**/*,scripts/**/*,tests/**/*
 
       VALIDATION_COMMAND: npm run typecheck && npm test && npm run build
 
