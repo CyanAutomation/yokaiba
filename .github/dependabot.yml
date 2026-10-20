@@ -10,3 +10,8 @@ updates:
     directory: /
     schedule:
       interval: weekly
+
+  - package-ecosystem: docker
+    directory: /.github/actionlint
+    schedule:
+      interval: weekly

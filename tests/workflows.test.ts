@@ -191,6 +191,13 @@ test("Kaseki sweeps share one concurrency group and remain main-only", () => {
   assert.equal(getJob(docs, "docs_sweep").if, "github.ref == 'refs/heads/main'");
 });
 
+test("Kaseki DRY sweep covers every source directory and the actual tests directory", () => {
+  const dry = readWorkflow("kaseki-dry.yaml");
+  const allowlist = getJob(dry, "dry_sweep").env.ALLOWLIST.split(",");
+
+  assert.deepEqual(allowlist, ["src/**/*", "worker/**/*", "scripts/**/*", "tests/**/*"]);
+});
+
 // Controller allowlist contract: docs/operations-and-deployment.md#github-workflow-policy.
 test("Kaseki sweep validation accepts the approved controller and rejects lookalike URLs", () => {
   for (const [name, jobName, stepName] of [
@@ -341,27 +348,51 @@ test("pull requests and main deployments share one validation workflow", () => {
   assert.equal(getJob(deploy, "deploy").steps.some((step: Workflow) => step.run === "npm test" || step.run === "npm run typecheck"), false);
 });
 
-test("Dependabot updates GitHub Actions and npm dependencies weekly", () => {
+test("Dependabot updates GitHub Actions, npm, and the actionlint Docker base weekly", () => {
   const dependabot = parseYamlDocument(readFileSync(new URL("../.github/dependabot.yml", import.meta.url), "utf8"));
   const ecosystems = (dependabot.updates as Workflow[]).map(update => update["package-ecosystem"]);
 
-  assert.deepEqual(ecosystems, ["github-actions", "npm"]);
+  assert.deepEqual(ecosystems, ["github-actions", "npm", "docker"]);
   for (const update of dependabot.updates as Workflow[]) {
     assert.equal(update.schedule.interval, "weekly");
   }
+
+  const docker = (dependabot.updates as Workflow[]).find(update => update["package-ecosystem"] === "docker");
+  assert.equal(docker?.directory, "/.github/actionlint");
+  const dockerfile = readFileSync(new URL("../.github/actionlint/Dockerfile", import.meta.url), "utf8");
+  assert.match(dockerfile, /^FROM rhysd\/actionlint:\d+\.\d+\.\d+@sha256:[a-f0-9]{64}$/m);
 });
 
-test("external README links run weekly and manually outside pull-request validation", () => {
+test("shared validation builds and runs the Dependabot-managed actionlint image", () => {
+  const shared = readWorkflow("validate-reusable.yml");
+  const job = getJob(shared, "validate");
+  const build = job.steps.find((step: Workflow) => step.name === "Build actionlint image") as Workflow | undefined;
+  const lint = job.steps.find((step: Workflow) => step.name === "Lint GitHub Actions workflows") as Workflow | undefined;
+
+  assert.equal(build?.run, "docker build --tag yokaiba-actionlint .github/actionlint");
+  assert.match(lint?.run ?? "", /docker run --rm[\s\S]*yokaiba-actionlint/);
+  assert.doesNotMatch(lint?.run ?? "", /rhysd\/actionlint@sha256:/);
+});
+
+test("documentation links run weekly, manually, and on documentation pull requests", () => {
   const workflow = readWorkflow("docs-links.yml");
   const job = getJob(workflow, "links");
 
-  assert.equal(workflow.on.pull_request, undefined);
+  assert.deepEqual(workflow.on.pull_request.branches, ["main"]);
+  assert.deepEqual(workflow.on.pull_request.paths, ["README.md", "docs/**/*.md"]);
   assert.ok(Array.isArray(workflow.on.schedule) && workflow.on.schedule.some((entry: Workflow) => entry.cron));
   assert.ok(Object.hasOwn(workflow.on, "workflow_dispatch"));
   assert.match(job["runs-on"], /^ubuntu-\d+\.\d+$/);
   assert.ok(job.steps.some((step: Workflow) => step.run === "npm ci"));
   assert.ok(job.steps.some((step: Workflow) => step.run === "npm run docs:links"));
   assert.ok(packageJson.scripts?.["docs:links"]);
+});
+
+test("PR validation cancels superseded commits per pull request", () => {
+  const workflow = readWorkflow("validate.yml");
+
+  assert.equal(workflow.concurrency.group, "pr-validation-${{ github.event.pull_request.number || github.ref }}");
+  assert.equal(workflow.concurrency["cancel-in-progress"], true);
 });
 
 // Runner policy: docs/operations-and-deployment.md#github-workflow-policy.
