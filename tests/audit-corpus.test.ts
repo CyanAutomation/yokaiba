@@ -177,6 +177,57 @@ test("targeted v5 unavailability is recorded for each failed seed instead of abo
   assert.deepEqual(progress, [1, 2].map(completed => ({ phase: "targeted", templateId: tournamentOrderV2Template.id, requestedDifficultyLevel: 1, completed, total: 2 })));
 });
 
+test("targeted audit summarizes diagnostics and alternate levels for unavailable samples", () => {
+  const result = auditTargetedDifficultyLevel(tournamentOrderV2Template, 1, {
+    sampleSize: 2,
+    generateTargeted: (template, seed, level) => {
+      if (seed.endsWith("-0")) {
+        throw new DifficultyUnavailableError(template.id, seed, level, [2, 3], {
+          modelVersion: "yokaiba-difficulty-v5",
+          strategiesAttempted: 12,
+          eligibleCandidates: 0,
+          reason: "no_candidate_in_band",
+          fallbackSeedsAttempted: 3,
+          candidateScoreRange: { minimum: 51, maximum: 89, complete: 11, incomplete: 1 },
+        });
+      }
+      throw new DifficultyUnavailableError(template.id, seed, level, [3], {
+        modelVersion: "yokaiba-difficulty-v5",
+        strategiesAttempted: 12,
+        eligibleCandidates: 0,
+        reason: "no_candidate_in_band",
+        fallbackSeedsAttempted: 3,
+        candidateScoreRange: { minimum: 55, maximum: 92, complete: 10, incomplete: 2 },
+      });
+    },
+  });
+
+  assert.deepEqual(result.level.unavailableDiagnostics, {
+    samplesWithDiagnostics: 2,
+    strategiesAttempted: 24,
+    eligibleCandidates: 0,
+    fallbackSeedsAttempted: 6,
+    candidateScoreRange: { minimum: 51, maximum: 92, complete: 21, incomplete: 3 },
+    availableDifficultyCounts: [0, 1, 2, ...Array<number>(9).fill(0)],
+  });
+});
+
+test("targeted audit ignores malformed alternate difficulty levels in diagnostics", () => {
+  const result = auditTargetedDifficultyLevel(tournamentOrderV2Template, 1, {
+    sampleSize: 1,
+    generateTargeted: (template, seed, level) => {
+      throw new DifficultyUnavailableError(
+        template.id,
+        seed,
+        level,
+        [0, 13] as unknown as DifficultyAuditRecord["level"][],
+      );
+    },
+  });
+
+  assert.deepEqual(result.level.unavailableDiagnostics?.availableDifficultyCounts, Array<number>(12).fill(0));
+});
+
 test("targeted audit reports the fallback count and attempt percentiles for a replayable seed", () => {
   const result = auditTargetedDifficultyLevel(openDivisionTemplate, 5, {
     sampleSize: 2,
