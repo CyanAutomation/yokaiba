@@ -1,6 +1,11 @@
 name: Check external documentation links
 
 on:
+  pull_request:
+    branches: [main]
+    paths:
+      - README.md
+      - docs/**/*.md
   schedule:
     - cron: "31 9 * * 1"
   workflow_dispatch:
