@@ -1,5 +1,5 @@
 import { execFile } from "node:child_process";
-import { readFileSync } from "node:fs";
+import { readFileSync, readdirSync, statSync } from "node:fs";
 import path from "node:path";
 import { promisify } from "node:util";
 import { fileURLToPath } from "node:url";
@@ -13,11 +13,52 @@ export interface ExternalLinkResult {
 type StatusChecker = (url: string) => Promise<number>;
 const execFileAsync = promisify(execFile);
 
+export interface DocumentationMarkdownFile {
+  path: string;
+  markdown: string;
+}
+
+export function readDocumentationMarkdown(root: string): DocumentationMarkdownFile[] {
+  const readmePath = path.join(root, "README.md");
+  const docsPath = path.join(root, "docs");
+  const docsMarkdownPaths: string[] = [];
+
+  if (!statSync(readmePath, { throwIfNoEntry: false })?.isFile()) {
+    throw new Error(`README.md is required for external link checking: ${readmePath}`);
+  }
+
+  function collect(directory: string): void {
+    const entries = readdirSync(directory, { withFileTypes: true })
+      .sort((left, right) => left.name.localeCompare(right.name));
+
+    for (const entry of entries) {
+      const entryPath = path.join(directory, entry.name);
+      if (entry.isDirectory()) collect(entryPath);
+      else if (entry.isFile() && path.extname(entry.name).toLowerCase() === ".md") {
+        docsMarkdownPaths.push(entryPath);
+      }
+    }
+  }
+
+  if (statSync(docsPath, { throwIfNoEntry: false })?.isDirectory()) collect(docsPath);
+  return [readmePath, ...docsMarkdownPaths].map(filePath => ({
+    path: filePath,
+    markdown: readFileSync(filePath, "utf8"),
+  }));
+}
+
 async function curlStatus(url: string): Promise<number> {
   const { stdout } = await execFileAsync("curl", [
     "--location",
     "--silent",
     "--show-error",
+    "--retry",
+    "2",
+    "--retry-all-errors",
+    "--retry-delay",
+    "1",
+    "--retry-max-time",
+    "45",
     "--max-time",
     "15",
     "--output",
@@ -61,8 +102,8 @@ export async function checkExternalLinks(
 
 async function main(): Promise<void> {
   const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
-  const readme = readFileSync(path.join(root, "README.md"), "utf8");
-  const links = extractExternalLinks(readme);
+  const documents = readDocumentationMarkdown(root);
+  const links = [...new Set(documents.flatMap(document => extractExternalLinks(document.markdown)))];
   const results = await checkExternalLinks(links);
   let failures = 0;
 
@@ -75,7 +116,7 @@ async function main(): Promise<void> {
     }
   }
 
-  console.log(`Checked ${results.length} external README links; ${failures} failed.`);
+  console.log(`Checked ${results.length} external documentation links across ${documents.length} Markdown files; ${failures} failed.`);
   if (failures > 0) process.exitCode = 1;
 }
 

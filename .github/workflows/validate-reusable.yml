@@ -16,13 +16,16 @@ jobs:
         with:
           persist-credentials: false
 
+      - name: Build actionlint image
+        run: docker build --tag yokaiba-actionlint .github/actionlint
+
       - name: Lint GitHub Actions workflows
         run: |
           find .github/workflows -type f \( -name '*.yml' -o -name '*.yaml' \) -print0 \
             | xargs -0 docker run --rm \
                 --volume "$GITHUB_WORKSPACE:/repo:ro" \
                 --workdir /repo \
-                rhysd/actionlint@sha256:1d74bfc9fd1963af8f89a7c22afaaafd42f49aad711a09951d02cb996398f61d
+                yokaiba-actionlint
 
       - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
