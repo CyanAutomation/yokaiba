@@ -32,6 +32,31 @@ test("documentation link inputs include README and nested Markdown files under d
   }
 });
 
+test("documentation link inputs still scan README when docs is absent", () => {
+  const root = mkdtempSync(join(tmpdir(), "external-doc-links-test-"));
+
+  try {
+    writeFileSync(join(root, "README.md"), "[README](https://example.test/readme)");
+
+    assert.deepEqual(readDocumentationMarkdown(root).map(document => relative(root, document.path)), ["README.md"]);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("documentation link inputs report a clear error when required README is absent", () => {
+  const root = mkdtempSync(join(tmpdir(), "external-doc-links-test-"));
+
+  try {
+    mkdirSync(join(root, "docs"), { recursive: true });
+    writeFileSync(join(root, "docs", "api.md"), "[API](https://example.test/api)");
+
+    assert.throws(readDocumentationMarkdown.bind(null, root), /README\.md is required/);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
 test("external documentation link extraction ignores code and deduplicates destinations", () => {
   const markdown = [
     "[API docs](https://example.test/docs)",

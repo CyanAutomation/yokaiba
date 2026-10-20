@@ -1,5 +1,5 @@
 import { execFile } from "node:child_process";
-import { readFileSync, readdirSync } from "node:fs";
+import { readFileSync, readdirSync, statSync } from "node:fs";
 import path from "node:path";
 import { promisify } from "node:util";
 import { fileURLToPath } from "node:url";
@@ -23,6 +23,10 @@ export function readDocumentationMarkdown(root: string): DocumentationMarkdownFi
   const docsPath = path.join(root, "docs");
   const docsMarkdownPaths: string[] = [];
 
+  if (!statSync(readmePath, { throwIfNoEntry: false })?.isFile()) {
+    throw new Error(`README.md is required for external link checking: ${readmePath}`);
+  }
+
   function collect(directory: string): void {
     const entries = readdirSync(directory, { withFileTypes: true })
       .sort((left, right) => left.name.localeCompare(right.name));
@@ -36,7 +40,7 @@ export function readDocumentationMarkdown(root: string): DocumentationMarkdownFi
     }
   }
 
-  collect(docsPath);
+  if (statSync(docsPath, { throwIfNoEntry: false })?.isDirectory()) collect(docsPath);
   return [readmePath, ...docsMarkdownPaths].map(filePath => ({
     path: filePath,
     markdown: readFileSync(filePath, "utf8"),
