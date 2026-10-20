@@ -10,7 +10,7 @@ export function createTournamentOrderTemplate(id: string, requiresHumanSolve: bo
     baseCategory: "judoka",
     categories: [
       { id: "judoka", label: "Judoka", values: ["Aki", "Hana", "Kenji", "Sora"] },
-      { id: "weight", label: "Weight category", values: ["-60 kg", "-66 kg", "-73 kg", "-81 kg"], ordered: true },
+      { id: "weight", label: "Weight division", values: ["-60 kg", "-66 kg", "-73 kg", "-81 kg"], ordered: true },
       { id: "tatami", label: "Tatami", values: ["Tatami 1", "Tatami 2", "Tatami 3", "Tatami 4"], ordered: true },
       { id: "placing", label: "Placing", values: ["1st", "2nd", "3rd", "4th"], ordered: true },
     ],

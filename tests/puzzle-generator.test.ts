@@ -238,7 +238,7 @@ test("rendered clue metadata satisfies the language catalogue contract", () => {
   ];
 
   const rendered = renderClues(tournamentOrderTemplate, "metadata-contract", clues);
-  assert.ok(rendered.every(clue => clue.languageVersion === "yokaiba-clue-prose-v10"));
+  assert.ok(rendered.every(clue => clue.languageVersion === "yokaiba-clue-prose-v11"));
   assert.ok(rendered.every(clue => typeof clue.phraseVariant === "string" && clue.phraseVariant.length > 0));
 });
 
@@ -298,15 +298,15 @@ test("relational clues name the competitors without mid-sentence capitalization"
 
     coveredVariants.add(beforeClue.phraseVariant!);
     assert.match(beforeClue.text, /competitor who finished 2nd.*competitor who finished 4th/i);
-    assert.match(beforeClue.text, /(came before|was earlier than)/i);
+    assert.match(beforeClue.text, /(came before|appeared before)/i);
     assert.doesNotMatch(beforeClue.text, /In the .*?, The competitor/);
-    assert.ok(rendered.some(clue => /competitor on Tatami 4 and the competitor who finished 3rd were exactly one place apart/i.test(clue.text)));
+    assert.ok(rendered.some(clue => /(?:In the event order, )?(?:the )?competitor on Tatami 4 and the competitor who finished 3rd were exactly one position apart(?: in the event order)?/i.test(clue.text)), JSON.stringify(rendered.map(clue => clue.text)));
   }
 
   assert.deepEqual(coveredVariants, new Set(["before-0", "before-1"]));
 });
 
-test("ordered clue prose avoids a duplicated order word and states exact place distances", () => {
+test("ordered clue prose uses a clear event order and states exact positions", () => {
   const clues: Clue[] = [
     { id: "tatami-before", constraint: { kind: "before", left: { category: "tatami", value: "Tatami 2" }, right: { category: "tatami", value: "Tatami 1" } }, text: "" },
     { id: "weight-distance", constraint: { kind: "distance", left: { category: "weight", value: "-73 kg" }, right: { category: "tatami", value: "Tatami 1" }, distance: 3 }, text: "" },
@@ -318,14 +318,13 @@ test("ordered clue prose avoids a duplicated order word and states exact place d
     const rendered = renderClues(tournamentOrderTemplate, seed, clues);
     assert.ok(rendered.every(clue => !/order order/i.test(clue.text)));
     const distance = rendered.find(clue => clue.id === "weight-distance")!;
-    assert.match(distance.text, /-73 kg competitor and the competitor on Tatami 1 were exactly three places apart/i);
+    assert.match(distance.text, /(?:In the event order, )?-73 kg competitor and the competitor on Tatami 1 were exactly three positions apart(?: in the event order)?/i);
     assert.doesNotMatch(distance.text, /positions of .* differed by exactly/i);
 
     const onePlace = renderClues(tournamentOrderTemplate, seed, [clues[2]!])[0]!;
     onePlaceVariants.add(onePlace.phraseVariant!);
     assert.match(onePlace.text, /competitor on Tatami 4.*competitor who finished 3rd/);
-    assert.match(onePlace.text, /were exactly one place apart/i);
-    assert.match(onePlace.text, /tournament order/);
+    assert.match(onePlace.text, /were exactly one position apart(?: in the event order)?/i);
     assert.doesNotMatch(onePlace.text, /positions of .* differed by exactly/);
   }
   assert.deepEqual(onePlaceVariants, new Set(["distance-0", "distance-1"]));
@@ -348,7 +347,7 @@ test("clue rendering is deterministic and rotates phrase variants within a puzzl
   assert.notEqual(first[0]!.phraseVariant, first[1]!.phraseVariant);
 });
 
-test("prose v10 preserves v9 phrase assignments while fixing distance sentence casing", () => {
+test("prose v11 keeps v9 phrase assignments with generic event-order language", () => {
   const clues: Clue[] = [
     { id: "stable-distance", constraint: { kind: "distance", left: { category: "weight", value: "-60 kg" }, right: { category: "tatami", value: "Tatami 2" }, distance: 1 }, text: "" },
     { id: "stable-before", constraint: { kind: "before", left: { category: "weight", value: "-60 kg" }, right: { category: "tatami", value: "Tatami 2" } }, text: "" },
@@ -362,7 +361,7 @@ test("prose v10 preserves v9 phrase assignments while fixing distance sentence c
     ["stable-before", "before-1"],
     ["stable-adjacent", "adjacent-0"],
   ]);
-  assert.ok(rendered.every(clue => clue.languageVersion === "yokaiba-clue-prose-v10"));
+  assert.ok(rendered.every(clue => clue.languageVersion === "yokaiba-clue-prose-v11"));
   assert.match(rendered[0]!.text, /^The -60 kg competitor/);
 });
 

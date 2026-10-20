@@ -13,11 +13,11 @@ function resultSubject(value: string) {
 }
 
 function resultAction(value: string) {
-  return isMedalResult(value) ? `won ${value}` : `finished as a ${value.toLowerCase()}`;
+  return isMedalResult(value) ? `won the ${value.toLowerCase()} medal` : `finished as a ${value.toLowerCase()}`;
 }
 
 function negativeResultAction(value: string) {
-  return isMedalResult(value) ? `win ${value}` : `finish as a ${value.toLowerCase()}`;
+  return isMedalResult(value) ? `win the ${value.toLowerCase()} medal` : `finish as a ${value.toLowerCase()}`;
 }
 
 function termSubject(categoryId: string, value: string) {
@@ -68,18 +68,18 @@ function orderedTerms(constraint: Extract<ClueConstraint, { kind: "before" | "ad
   return { left, right };
 }
 
-function renderBefore(template: PuzzleTemplate, constraint: Extract<ClueConstraint, { kind: "before" }>, index: number): string {
+function renderBefore(_template: PuzzleTemplate, constraint: Extract<ClueConstraint, { kind: "before" }>, index: number): string {
   const { left, right } = orderedTerms(constraint);
-  const relation = index === 0 ? `${left} came before ${right}` : `${left} was earlier than ${right}`;
-  return `In the ${orderedContext(template).toLowerCase()}, ${relation}.`;
+  return index === 0
+    ? `In the event order, ${left} came before ${right}.`
+    : `${capitalise(left)} appeared before ${right} in the event order.`;
 }
 
-function renderAdjacent(template: PuzzleTemplate, constraint: Extract<ClueConstraint, { kind: "adjacent" }>, index: number): string {
+function renderAdjacent(_template: PuzzleTemplate, constraint: Extract<ClueConstraint, { kind: "adjacent" }>, index: number): string {
   const { left, right } = orderedTerms(constraint);
-  const relation = `no competitor finished between ${left} and ${right}`;
   return index === 0
-    ? `In the ${orderedContext(template).toLowerCase()}, ${relation}.`
-    : `${capitalise(relation)} in the ${orderedContext(template).toLowerCase()}.`;
+    ? `In the event order, no judoka appeared between ${left} and ${right}.`
+    : `No judoka appeared between ${left} and ${right} in the event order.`;
 }
 
 export function renderDistanceConstraintText(
@@ -92,10 +92,10 @@ export function renderDistanceConstraintText(
   if (wording === "places-apart") {
     const positionWords = ["zero", "one", "two", "three", "four"];
     const distance = positionWords[constraint.distance] ?? String(constraint.distance);
-    const place = constraint.distance === 1 ? "place" : "places";
+    const position = constraint.distance === 1 ? "position" : "positions";
     return index === 0
-      ? `In the ${orderedContext(template).toLowerCase()}, ${left} and ${right} were exactly ${distance} ${place} apart.`
-      : `${capitalise(left)} and ${right} were exactly ${distance} ${place} apart in the ${orderedContext(template).toLowerCase()}.`;
+      ? `In the event order, ${left} and ${right} were exactly ${distance} ${position} apart.`
+      : `${capitalise(left)} and ${right} were exactly ${distance} ${position} apart in the event order.`;
   }
   const betweenCount = constraint.distance - 1;
   const quantityWords = ["no", "one", "two", "three", "four"];

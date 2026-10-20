@@ -2,7 +2,7 @@ import type { Clue, ClueConstraint, PuzzleTemplate } from "../domain/types.js";
 import { hash } from "../domain/hash.js";
 import { renderConstraintText } from "./clue-language.js";
 
-export const CLUE_LANGUAGE_VERSION = "yokaiba-clue-prose-v10";
+export const CLUE_LANGUAGE_VERSION = "yokaiba-clue-prose-v11";
 // Keep variant assignments stable when prose changes; advance this only when
 // the deterministic phrase catalogue itself should be reshuffled.
 const CLUE_VARIANT_SELECTION_VERSION = "yokaiba-clue-prose-v9";
