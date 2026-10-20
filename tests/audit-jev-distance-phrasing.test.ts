@@ -45,7 +45,7 @@ test("distance wording pairs preserve saved v5 semantics and render both compari
   assert.equal(pair.placesApart.phraseVariant, undefined);
   assert.deepEqual({ ...pair.betweenCount, text: "" }, { ...pair.placesApart, text: "" });
   assert.equal(pair.placesApart.text,
-    "The -60 kg competitor and the competitor who finished 3rd were exactly two places apart in the tournament order.");
+    "The -60 kg competitor and the competitor who finished 3rd were exactly two positions apart in the event order.");
 });
 
 test("distance wording pairing ignores other clue kinds and reports paired metric direction", () => {
