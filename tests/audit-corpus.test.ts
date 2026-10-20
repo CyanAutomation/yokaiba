@@ -212,6 +212,22 @@ test("targeted audit summarizes diagnostics and alternate levels for unavailable
   });
 });
 
+test("targeted audit ignores malformed alternate difficulty levels in diagnostics", () => {
+  const result = auditTargetedDifficultyLevel(tournamentOrderV2Template, 1, {
+    sampleSize: 1,
+    generateTargeted: (template, seed, level) => {
+      throw new DifficultyUnavailableError(
+        template.id,
+        seed,
+        level,
+        [0, 13] as unknown as DifficultyAuditRecord["level"][],
+      );
+    },
+  });
+
+  assert.deepEqual(result.level.unavailableDiagnostics?.availableDifficultyCounts, Array<number>(12).fill(0));
+});
+
 test("targeted audit reports the fallback count and attempt percentiles for a replayable seed", () => {
   const result = auditTargetedDifficultyLevel(openDivisionTemplate, 5, {
     sampleSize: 2,
