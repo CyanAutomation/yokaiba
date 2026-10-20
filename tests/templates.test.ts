@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { championshipBridgeTemplate } from "../src/templates/championship-bridge.js";
 import { championshipCircuitTemplate } from "../src/templates/championship-circuit.js";
+import { openDivisionTemplate } from "../src/templates/open-division.js";
 import { tournamentOrderTemplate } from "../src/templates/tournament-order.js";
 import { tournamentOrderV2Template } from "../src/templates/tournament-order-v2.js";
 
@@ -19,4 +20,10 @@ test("championship templates share their board structure and keep different resu
   assert.deepEqual(championshipCircuitTemplate.categories[3]?.values, ["Gold", "Silver", "Bronze", "Finalist", "Quarter-finalist"]);
   assert.deepEqual(championshipBridgeTemplate.metadata?.difficultyCalibration.levelRange, [8, 9]);
   assert.deepEqual(championshipCircuitTemplate.metadata?.difficultyCalibration.levelRange, [9, 12]);
+});
+
+test("all tournament templates use the same weight-division label", () => {
+  for (const template of [tournamentOrderTemplate, tournamentOrderV2Template, championshipBridgeTemplate, championshipCircuitTemplate, openDivisionTemplate]) {
+    assert.equal(template.categories.find(category => category.id === "weight")?.label, "Weight division");
+  }
 });
