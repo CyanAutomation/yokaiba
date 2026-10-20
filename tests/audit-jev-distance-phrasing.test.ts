@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import type { AuditedClue } from "../scripts/audit-jev-support.js";
-import { buildDistancePhrasingPairs, renderDistanceComparisonMarkdown, summarizeDistanceMetric } from "../scripts/audit-jev-distance-phrasing-support.js";
+import { buildDistancePhrasingPairs, renderDistanceComparisonMarkdown, selectAdverseDistanceExamples, summarizeDistanceMetric } from "../scripts/audit-jev-distance-phrasing-support.js";
 import { tournamentOrderTemplate } from "../src/templates/tournament-order.js";
 
 function distanceClue(overrides: Partial<AuditedClue> = {}): AuditedClue {
@@ -45,7 +45,7 @@ test("distance wording pairs preserve saved v5 semantics and render both compari
   assert.equal(pair.placesApart.phraseVariant, undefined);
   assert.deepEqual({ ...pair.betweenCount, text: "" }, { ...pair.placesApart, text: "" });
   assert.equal(pair.placesApart.text,
-    "the -60 kg competitor and the competitor who finished 3rd were exactly two places apart in the tournament order.");
+    "The -60 kg competitor and the competitor who finished 3rd were exactly two places apart in the tournament order.");
 });
 
 test("distance wording pairing ignores other clue kinds and reports paired metric direction", () => {
@@ -123,11 +123,74 @@ test("distance wording markdown describes variants without assuming which is cur
         ambiguous: summary,
       },
     },
+    adverseExamples: { faithful: [], readability: [], relationshipExplicitness: [], misunderstandingRisk: [], ambiguous: [] },
   });
 
   assert.match(markdown, /between-count and places-apart variants/);
   assert.match(markdown, /Intervals are n\/a when fewer than two puzzle-seed clusters contribute\./);
+  assert.match(markdown, /variation across generated puzzle clusters under this JEV model; they are not estimates of player outcomes\./);
   assert.match(markdown, /## By template/);
   assert.match(markdown, /### test-template/);
   assert.doesNotMatch(markdown, /current intervening-competitor|previously shipped places-apart|older wording/);
+});
+
+test("adverse distance examples follow metric direction, severity, deterministic ties, and skip missing scores", () => {
+  const makePair = (templateId: string, seed: string, clueId: string, between: number | undefined, places: number | undefined) => ({
+    templateId,
+    seed,
+    sourceClueId: clueId,
+    betweenCount: distanceClue({ clueId, faithful: between, ambiguous: between, text: `between ${clueId}` }),
+    placesApart: distanceClue({ clueId, faithful: places, ambiguous: places, text: `places ${clueId}` }),
+  });
+  const pairs = [
+    makePair("z-template", "seed-2", "less-adverse", 0.5, 0.4),
+    makePair("b-template", "seed-2", "tie-b", 0.5, 0.3),
+    makePair("a-template", "seed-2", "tie-a", 0.5, 0.3),
+    makePair("c-template", "seed-1", "most-adverse", 0.5, 0.1),
+    makePair("d-template", "seed-1", "missing", undefined, 0.1),
+    makePair("e-template", "seed-1", "favorable", 0.5, 0.6),
+  ];
+
+  const higherIsBetter = selectAdverseDistanceExamples(pairs, "faithful", true);
+  assert.deepEqual(higherIsBetter.map(example => example.sourceClueId), ["most-adverse", "tie-a", "tie-b"]);
+  assert.deepEqual(higherIsBetter.map(example => example.placesApartMinusBetweenCount), [-0.4, -0.2, -0.2]);
+  assert.deepEqual(selectAdverseDistanceExamples([...pairs].reverse(), "faithful", true), higherIsBetter);
+
+  const lowerIsBetter = selectAdverseDistanceExamples(pairs, "ambiguous", false);
+  assert.deepEqual(lowerIsBetter.map(example => example.sourceClueId), ["favorable"]);
+  assert.deepEqual(lowerIsBetter.map(example => Number(example.placesApartMinusBetweenCount.toFixed(4))), [0.1]);
+});
+
+test("distance wording markdown renders exploratory adverse examples with paired scores and text", () => {
+  const summary = summarizeDistanceMetric([], "faithful", true);
+  const adverseExamples = {
+    faithful: [{ templateId: "cup", seed: "seed-1", sourceClueId: "distance-1", betweenCountScore: 0.8, placesApartScore: 0.4, placesApartMinusBetweenCount: -0.4, betweenCountText: "Exactly one competitor finished between A and B.", placesApartText: "A and B were exactly two places apart." }],
+    readability: [],
+    relationshipExplicitness: [],
+    misunderstandingRisk: [],
+    ambiguous: [],
+  };
+  const markdown = renderDistanceComparisonMarkdown({
+    sourceReport: "saved-v5.json",
+    requestedModel: "~typesafe/jev-latest",
+    resolvedModel: "typesafe/jev-1.14",
+    pairCount: 1,
+    completePairs: 1,
+    totalCost: 0,
+    metrics: {
+      faithful: summary,
+      readability: summary,
+      relationshipExplicitness: summary,
+      misunderstandingRisk: summary,
+      ambiguous: summary,
+    },
+    byTemplate: {},
+    adverseExamples,
+  });
+
+  assert.match(markdown, /## Exploratory adverse paired examples/);
+  assert.match(markdown, /cup \| seed-1 \| distance-1 \| 0\.8000 \| 0\.4000 \| -0\.4000/);
+  assert.match(markdown, /Exactly one competitor finished between A and B\./);
+  assert.match(markdown, /A and B were exactly two places apart\./);
+  assert.match(markdown, /exploratory examples.*not evidence about player outcomes/i);
 });

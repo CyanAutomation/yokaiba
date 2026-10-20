@@ -18,6 +18,7 @@ import {
   buildDistancePhrasingPairs,
   DISTANCE_BOOTSTRAP_RESAMPLES,
   renderDistanceComparisonMarkdown,
+  selectAdverseDistanceExamples,
   summarizeDistanceMetric,
   type DistanceComparisonMetric,
 } from "./audit-jev-distance-phrasing-support.js";
@@ -74,7 +75,7 @@ const usage = {
   totalInputTokens: 0,
   totalOutputTokens: 0,
 };
-const evaluated: Array<{ templateId: string; seed: string; betweenCount: AuditedClue; placesApart: AuditedClue }> = [];
+const evaluated: Array<{ templateId: string; seed: string; sourceClueId: string; betweenCount: AuditedClue; placesApart: AuditedClue }> = [];
 
 for (let offset = 0; offset < pairs.length; offset += args.batchSize) {
   const batch = pairs.slice(offset, offset + args.batchSize);
@@ -98,6 +99,7 @@ for (let offset = 0; offset < pairs.length; offset += args.batchSize) {
     evaluated.push({
       templateId: batch[index]!.templateId,
       seed: batch[index]!.seed,
+      sourceClueId: batch[index]!.sourceClueId,
       betweenCount: applyJevAnswers(betweenCount, response.answers, betweenCountIndex),
       placesApart: applyJevAnswers(placesApart, response.answers, placesApartIndex),
     });
@@ -117,6 +119,10 @@ const byTemplate = Object.fromEntries(templateIds.map(templateId => [
     summarizeDistanceMetric(evaluated.filter(pair => pair.templateId === templateId), key, higherIsBetter),
   ])) as Record<DistanceComparisonMetric, ReturnType<typeof summarizeDistanceMetric>>,
 ])) as Record<string, Record<DistanceComparisonMetric, ReturnType<typeof summarizeDistanceMetric>>>;
+const adverseExamples = Object.fromEntries(METRICS.map(({ key, higherIsBetter }) => [
+  key,
+  selectAdverseDistanceExamples(evaluated, key, higherIsBetter),
+])) as Parameters<typeof renderDistanceComparisonMarkdown>[0]["adverseExamples"];
 const completePairs = evaluated.filter(pair => pair.betweenCount.evaluationStatus === "complete" && pair.placesApart.evaluationStatus === "complete").length;
 const report = {
   reportVersion: 2,
@@ -171,5 +177,6 @@ await writeFile(markdownPath, renderDistanceComparisonMarkdown({
   totalCost: usage.totalCost,
   metrics,
   byTemplate,
+  adverseExamples,
 }));
 console.log(JSON.stringify({ json: outputPath, markdown: markdownPath, pairCount: pairs.length, completePairs, resolvedModel: usage.resolvedModel, cost: usage.totalCost }, null, 2));

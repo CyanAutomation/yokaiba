@@ -64,6 +64,69 @@ type DistanceMetricPair = {
   placesApart: AuditedClue;
 };
 
+export interface DistanceAdverseExample {
+  templateId: string;
+  seed: string;
+  sourceClueId: string;
+  betweenCountScore: number;
+  placesApartScore: number;
+  placesApartMinusBetweenCount: number;
+  betweenCountText: string;
+  placesApartText: string;
+}
+
+type DistanceAdversePair = {
+  templateId: string;
+  seed: string;
+  sourceClueId: string;
+  betweenCount: AuditedClue;
+  placesApart: AuditedClue;
+};
+
+function lexicalCompare(left: string, right: string): number {
+  return left < right ? -1 : left > right ? 1 : 0;
+}
+
+/** Select the largest adverse per-clue paired differences for exploratory review. */
+export function selectAdverseDistanceExamples(
+  pairs: readonly DistanceAdversePair[],
+  metric: DistanceComparisonMetric,
+  higherIsBetter: boolean,
+  limit = 3,
+): DistanceAdverseExample[] {
+  const candidates: DistanceAdverseExample[] = [];
+  for (const pair of pairs) {
+    const betweenCountScore = pair.betweenCount[metric];
+    const placesApartScore = pair.placesApart[metric];
+    if (typeof betweenCountScore !== "number" || !Number.isFinite(betweenCountScore)
+      || typeof placesApartScore !== "number" || !Number.isFinite(placesApartScore)) continue;
+    const difference = placesApartScore - betweenCountScore;
+    if (higherIsBetter ? difference >= 0 : difference <= 0) continue;
+    candidates.push({
+      templateId: pair.templateId,
+      seed: pair.seed,
+      sourceClueId: pair.sourceClueId,
+      betweenCountScore,
+      placesApartScore,
+      placesApartMinusBetweenCount: difference,
+      betweenCountText: pair.betweenCount.text,
+      placesApartText: pair.placesApart.text,
+    });
+  }
+  candidates.sort((left, right) => {
+    const adverseOrder = higherIsBetter
+      ? left.placesApartMinusBetweenCount - right.placesApartMinusBetweenCount
+      : right.placesApartMinusBetweenCount - left.placesApartMinusBetweenCount;
+    return adverseOrder
+      || lexicalCompare(left.templateId, right.templateId)
+      || lexicalCompare(left.seed, right.seed)
+      || lexicalCompare(left.sourceClueId, right.sourceClueId)
+      || lexicalCompare(left.betweenCountText, right.betweenCountText)
+      || lexicalCompare(left.placesApartText, right.placesApartText);
+  });
+  return candidates.slice(0, Math.max(0, limit));
+}
+
 type MetricObservation = { betweenCount: number; placesApart: number; clusterKey: string };
 
 function stableHash(value: string): number {
@@ -173,9 +236,13 @@ export interface DistanceComparisonMarkdownInput {
   totalCost: number;
   metrics: Record<DistanceComparisonMetric, DistanceComparisonMetricSummary>;
   byTemplate: Record<string, Record<DistanceComparisonMetric, DistanceComparisonMetricSummary>>;
+  adverseExamples: Record<DistanceComparisonMetric, DistanceAdverseExample[]>;
 }
 
 export function renderDistanceComparisonMarkdown(report: DistanceComparisonMarkdownInput): string {
+  const markdownCell = (value: string) => value.replace(/\\/g, "\\\\").replace(/\|/g, "\\|").replace(/\r?\n/g, "<br>");
+  const score = (value: number) => value.toFixed(4);
+  const signedDifference = (value: number) => `${value > 0 ? "+" : ""}${score(value)}`;
   const metricRows = (metrics: Record<DistanceComparisonMetric, DistanceComparisonMetricSummary>) =>
     (Object.keys(metrics) as DistanceComparisonMetric[]).map(key => {
       const metric = metrics[key];
@@ -195,6 +262,21 @@ export function renderDistanceComparisonMarkdown(report: DistanceComparisonMarkd
     ...metricRows(metrics),
     "",
   ]);
+  const adverseSections = (Object.keys(report.adverseExamples) as DistanceComparisonMetric[]).flatMap(metric => {
+    const examples = report.adverseExamples[metric];
+    return [
+      `### ${metric}`,
+      "",
+      ...(examples.length === 0
+        ? ["No scored adverse pairs were available for this metric.", ""]
+        : [
+          "| Template | Seed | Clue ID | Between-count score | Places-apart score | Places-apart − between-count | Between-count text | Places-apart text |",
+          "| --- | --- | --- | ---: | ---: | ---: | --- | --- |",
+          ...examples.map(example => `| ${markdownCell(example.templateId)} | ${markdownCell(example.seed)} | ${markdownCell(example.sourceClueId)} | ${score(example.betweenCountScore)} | ${score(example.placesApartScore)} | ${signedDifference(example.placesApartMinusBetweenCount)} | ${markdownCell(example.betweenCountText)} | ${markdownCell(example.placesApartText)} |`),
+          "",
+        ]),
+    ];
+  });
   return [
     "# JEV distance wording comparison",
     "",
@@ -205,12 +287,18 @@ export function renderDistanceComparisonMarkdown(report: DistanceComparisonMarkd
     "The same saved v5 semantics were evaluated with the between-count and places-apart variants. Variant labels describe the tested text and do not imply which wording is current in the product.",
     `Uncertainty uses a deterministic 95% cluster bootstrap over puzzle seeds (${DISTANCE_BOOTSTRAP_RESAMPLES} resamples); clues from the same puzzle are sampled together.`,
     "Intervals are n/a when fewer than two puzzle-seed clusters contribute.",
+    "These intervals describe variation across generated puzzle clusters under this JEV model; they are not estimates of player outcomes.",
     "",
     "## Overall",
     "",
     ...tableHeader,
     ...metricRows(report.metrics),
     "",
+    "## Exploratory adverse paired examples",
+    "",
+    "These are the largest adverse per-clue paired differences for each metric, included to make individual cases easier to inspect. Treat them as exploratory examples, not evidence about player outcomes or representative estimates.",
+    "",
+    ...adverseSections,
     "## By template",
     "",
     ...(templateTables.length ? templateTables : ["No per-template results were collected.", ""]),

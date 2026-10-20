@@ -95,7 +95,7 @@ export function renderDistanceConstraintText(
     const place = constraint.distance === 1 ? "place" : "places";
     return index === 0
       ? `In the ${orderedContext(template).toLowerCase()}, ${left} and ${right} were exactly ${distance} ${place} apart.`
-      : `${left} and ${right} were exactly ${distance} ${place} apart in the ${orderedContext(template).toLowerCase()}.`;
+      : `${capitalise(left)} and ${right} were exactly ${distance} ${place} apart in the ${orderedContext(template).toLowerCase()}.`;
   }
   const betweenCount = constraint.distance - 1;
   const quantityWords = ["no", "one", "two", "three", "four"];
