@@ -7,7 +7,7 @@
     "build": "tsc -p tsconfig.json",
     "typecheck": "tsc -p tsconfig.json --noEmit && tsc -p tsconfig.scripts.json --noEmit",
     "test": "node --import tsx --test tests/*.test.ts",
-    "docs:check": "markdownlint-cli2 README.md \"docs/**/*.md\" && node --import tsx scripts/check-docs.ts",
+    "docs:check": "markdownlint-cli2 README.md \"docs/**/*.md\" \".github/skills/**/*.md\" && node --import tsx scripts/check-docs.ts",
     "docs:links": "tsx scripts/check-external-doc-links.ts",
     "test:coverage": "c8 --reporter=json --reports-dir=coverage node --import tsx --test tests/*.test.ts",
     "dev": "wrangler dev",
