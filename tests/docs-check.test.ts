@@ -80,6 +80,29 @@ test("documentation checker reports malformed local URL encoding at the link lin
   });
 });
 
+test("documentation checker validates links in nested repository skills", async () => {
+  await withFixture(async root => {
+    const skillReferences = path.join(root, ".github", "skills", "example", "references");
+    await mkdir(skillReferences, { recursive: true });
+    await writeFile(path.join(root, "README.md"), "# Project\n");
+    await writeFile(path.join(root, ".github", "skills", "example", "SKILL.md"), [
+      "---",
+      "name: example",
+      "description: Example skill",
+      "---",
+      "",
+      "[CLI reference](references/cli-reference.md)",
+      "",
+    ].join("\n"));
+
+    assert.deepEqual(inspectMarkdown(root), [{
+      file: ".github/skills/example/SKILL.md",
+      line: 6,
+      message: "local link target does not exist: references/cli-reference.md",
+    }]);
+  });
+});
+
 test("README generation quick starts call a registered route and produce a public puzzle", async () => {
   const readme = await readFile(new URL("../README.md", import.meta.url), "utf8");
   const examples = [...readme.matchAll(/curl -fsS '((?:https?:\/\/[^']+)?\/v1\/puzzles\/generate\?[^']+)'/g)];
