@@ -568,16 +568,21 @@ test("quality evaluation uses the supplied solver for uniqueness and redundancy"
   const solver: PuzzleSolver = {
     version: "quality-contract-test-v1",
     solve: () => [],
-    countSolutions: (spec, clues, limit) => {
-      countedClueSets.push(clues.map(clue => clue.id));
-      return exhaustivePuzzleSolver.countSolutions(spec, clues, limit);
+    countSolutions: (_spec, clues) => {
+      const ids = clues.map(clue => clue.id);
+      countedClueSets.push(ids);
+      if (ids.length === 2) return 1;
+      return ids.includes("aki-not-second") ? 1 : 2;
     },
   };
   const quality = evaluatePuzzleQuality(qualityFixtureSpec, noGuessSolveFixture, solver);
 
   assert.equal(quality.unique, true);
-  assert.deepEqual(quality.redundantClueIds, []);
-  assert.ok(countedClueSets.length > 0, "quality evaluation should use the supplied solver");
+  assert.deepEqual(quality.redundantClueIds, ["aki-red"]);
+  assert.deepEqual(
+    new Set(countedClueSets.map(ids => [...ids].sort().join(","))),
+    new Set(["aki-not-second,aki-red", "aki-not-second", "aki-red"]),
+  );
 });
 
 test("the generated clue set is minimal for uniqueness", () => {

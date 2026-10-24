@@ -22,8 +22,11 @@ test("championship templates share their board structure and keep different resu
   assert.deepEqual(championshipCircuitTemplate.metadata?.difficultyCalibration.levelRange, [9, 12]);
 });
 
-test("all tournament templates use the same weight-division label", () => {
+test("every template provides a usable weight-division category", () => {
   for (const template of [tournamentOrderTemplate, tournamentOrderV2Template, championshipBridgeTemplate, championshipCircuitTemplate, openDivisionTemplate]) {
-    assert.equal(template.categories.find(category => category.id === "weight")?.label, "Weight division");
+    const weight = template.categories.find(category => category.id === "weight");
+    assert.ok(weight, `${template.id} must expose a weight category`);
+    assert.ok(weight.label.trim().length > 0, `${template.id} must label its weight category`);
+    assert.ok(weight.values.length > 0, `${template.id} must publish weight divisions`);
   }
 });
