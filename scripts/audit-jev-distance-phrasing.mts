@@ -8,7 +8,7 @@ import { tournamentOrderV2Template } from "../src/templates/tournament-order-v2.
 import {
   accumulateResponseUsage,
   applyJevAnswers,
-  buildClueDecisionPayload,
+  buildLatestClueDecisionPayload,
   readJevAuditReport,
   requestJevDecisionBatch,
   JEV_REQUESTED_MODEL,
@@ -85,7 +85,7 @@ for (let offset = 0; offset < pairs.length; offset += args.batchSize) {
     const placesApart = { ...pair.placesApart, clueId: sharedClueId };
     return (offset + index) % 2 === 0 ? [betweenCount, placesApart] : [placesApart, betweenCount];
   });
-  const response = await requestJevDecisionBatch(apiKey, buildClueDecisionPayload(requestedModel, inputs), endpoint);
+  const response = await requestJevDecisionBatch(apiKey, buildLatestClueDecisionPayload(inputs), endpoint);
   if (usage.resolvedModel && response.model && usage.resolvedModel !== response.model) {
     throw new Error(`JEV model changed during paired comparison (${usage.resolvedModel} -> ${response.model})`);
   }

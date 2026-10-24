@@ -19,9 +19,9 @@ import {
   accumulateResponseUsage,
   auditProgressMessage,
   checkpointTargetedDifficultyLevels,
-  buildClueDecisionPayload,
+  buildLatestClueDecisionPayload,
   buildAuditMarkdown,
-  buildPuzzleDecisionPayload,
+  buildLatestPuzzleDecisionPayload,
   describeConstraint,
   markClueUnavailable,
   markPuzzleUnavailable,
@@ -278,7 +278,7 @@ try {
     const batch = checkpoint.clues.slice(offset, offset + configuration.batchSize);
     const pending = batch.filter(clue => clue.evaluationStatus === "pending");
     if (pending.length === 0) continue;
-    const response = await requestSemanticBatch(buildClueDecisionPayload(JEV_REQUESTED_MODEL, pending));
+    const response = await requestSemanticBatch(buildLatestClueDecisionPayload(pending));
     accumulateResponseUsage(checkpoint, response, "clue");
     for (const [index, clue] of pending.entries()) {
       checkpoint.clues[offset + batch.indexOf(clue)] = applyJevAnswers(clue, response.answers, index);
@@ -292,7 +292,7 @@ try {
       const batch = checkpoint.puzzles.slice(offset, offset + configuration.batchSize);
       const pending = batch.filter(puzzle => puzzle.evaluationStatus === "pending");
       if (pending.length === 0) continue;
-      const response = await requestSemanticBatch(buildPuzzleDecisionPayload(JEV_REQUESTED_MODEL, pending));
+      const response = await requestSemanticBatch(buildLatestPuzzleDecisionPayload(pending));
       accumulateResponseUsage(checkpoint, response, "puzzle");
       for (const [index, puzzle] of pending.entries()) {
         checkpoint.puzzles[offset + batch.indexOf(puzzle)] = applyJevPuzzleAnswers(puzzle, response.answers, index);

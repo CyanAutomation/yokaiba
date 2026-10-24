@@ -9,6 +9,7 @@ import { parseWranglerDeploymentUrl } from "../scripts/deployment-output.js";
 test("deployment output parser selects the last direct Worker deployment", () => {
   const output = [
     JSON.stringify({ type: "upload" }),
+    "",
     JSON.stringify({
       type: "deploy",
       worker_name: "yokaiba",
@@ -22,20 +23,6 @@ test("deployment output parser selects the last direct Worker deployment", () =>
   ].join("\n");
 
   assert.equal(parseWranglerDeploymentUrl(output), "https://yokaiba-new.workers.dev");
-});
-
-test("deployment output parser skips blank lines between Wrangler records", () => {
-  const output = [
-    JSON.stringify({ type: "upload" }),
-    "",
-    JSON.stringify({
-      type: "deploy",
-      worker_name: "yokaiba",
-      targets: ["https://yokaiba.workers.dev"],
-    }),
-  ].join("\n");
-
-  assert.equal(parseWranglerDeploymentUrl(output), "https://yokaiba.workers.dev");
 });
 
 test("deployment output parser rejects missing deployment records", () => {
@@ -63,7 +50,7 @@ test("deployment output parser rejects malformed machine-readable output", () =>
   assert.throws(() => parseWranglerDeploymentUrl("not json"), /invalid machine-readable deployment information/);
 });
 
-test("deployment output entry point writes the validated URL to the workflow output file", () => {
+test("deployment entry point publishes the validated Worker URL for workflow consumers", () => {
   const directory = mkdtempSync(join(tmpdir(), "deployment-output-test-"));
   const wranglerOutputPath = join(directory, "wrangler-output.jsonl");
   const githubOutputPath = join(directory, "github-output");

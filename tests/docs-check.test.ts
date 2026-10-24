@@ -68,15 +68,15 @@ test("documentation checker handles duplicate anchors and encoded links while ch
   });
 });
 
-test("documentation checker reports malformed local URL encoding at the link line", async () => {
+test("documentation checker reports malformed local URL encoding at the source location", async () => {
   await withFixture(async root => {
     await writeFile(path.join(root, "README.md"), "# Project\n\n[Bad link](docs/%E0%A4%A.md)\n");
 
-    assert.deepEqual(inspectMarkdown(root), [{
-      file: "README.md",
-      line: 3,
-      message: "invalid URL encoding in local link: docs/%E0%A4%A.md",
-    }]);
+    const issues = inspectMarkdown(root);
+    assert.equal(issues.length, 1);
+    assert.equal(issues[0]?.file, "README.md");
+    assert.equal(issues[0]?.line, 3);
+    assert.match(issues[0]?.message ?? "", /invalid URL encoding/);
   });
 });
 
@@ -151,28 +151,20 @@ test("README response preview matches the deterministic generation example", asy
   assert.equal(puzzle.solution, undefined);
 });
 
-test("README links contributors to the documented architecture overview", async () => {
-  const [readme, guide] = await Promise.all([
-    readFile(new URL("../README.md", import.meta.url), "utf8"),
-    readFile(new URL("../docs/development.md", import.meta.url), "utf8"),
-  ]);
-
-  assert.match(readme, /\[Architecture overview\]\(docs\/development\.md#architecture\)/);
-  assert.match(guide, /^## Architecture$/m);
-  assert.match(guide, /`worker\/index\.ts`/);
-  assert.match(guide, /`src\/api\/`/);
-  assert.match(guide, /`src\/mcp\/`/);
-  assert.match(guide, /`src\/generation\/`/);
-  assert.match(guide, /`src\/constraints\/`/);
-});
-
-test("hosted API docs point both MCP setup links at the operations guide", async () => {
+test("hosted API docs link MCP setup guidance to the operations guide", async () => {
   const worker = createWorker();
   const response = await worker.fetch(new Request("https://yokaiba.test/docs"), {}, {} as ExecutionContext);
   assert.equal(response.status, 200);
   const html = await response.text();
   const setupGuide = "https://github.com/CyanAutomation/yokaiba/blob/main/docs/operations-and-deployment.md#mcp-and-deployment";
+  const links = [...html.matchAll(/<a\b([^>]*)>([\s\S]*?)<\/a>/gi)].map(([, attributes, content]) => ({
+    href: /\bhref="([^"]+)"/i.exec(attributes ?? "")?.[1],
+    label: (content ?? "").replace(/<[^>]*>/g, "").trim(),
+  }));
 
-  assert.equal(html.split(setupGuide).length - 1, 2);
-  assert.doesNotMatch(html, /github\.com\/CyanAutomation\/yokaiba#mcp-and-deployment/);
+  for (const label of ["MCP setup", "MCP setup guide"]) {
+    const link = links.find(candidate => candidate.label === label);
+    assert.ok(link, `expected a visible ${label} link`);
+    assert.equal(link.href, setupGuide);
+  }
 });

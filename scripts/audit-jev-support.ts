@@ -618,6 +618,16 @@ export function buildPuzzleDecisionPayload(model: string, puzzles: readonly Audi
   return { model, state, questions };
 }
 
+/** Build clue-review requests with the stable alias used by the current audit. */
+export function buildLatestClueDecisionPayload(clues: readonly AuditedClue[]): JevDecisionPayload {
+  return buildClueDecisionPayload(JEV_REQUESTED_MODEL, clues);
+}
+
+/** Build puzzle-review requests with the stable alias used by the current audit. */
+export function buildLatestPuzzleDecisionPayload(puzzles: readonly AuditedPuzzle[]): JevDecisionPayload {
+  return buildPuzzleDecisionPayload(JEV_REQUESTED_MODEL, puzzles);
+}
+
 export function readJevDecisionResponse(value: unknown): JevDecisionResponse {
   const body = value !== null && typeof value === "object" && !Array.isArray(value)
     ? value as { model?: unknown; answers?: unknown; usage?: unknown }
