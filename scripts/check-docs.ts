@@ -20,6 +20,8 @@ function documentationFiles(root: string): string[] {
   const files = [path.join(root, "README.md")];
   const docs = path.join(root, "docs");
   if (statSync(docs, { throwIfNoEntry: false })?.isDirectory()) files.push(...markdownFiles(docs));
+  const skills = path.join(root, ".github", "skills");
+  if (statSync(skills, { throwIfNoEntry: false })?.isDirectory()) files.push(...markdownFiles(skills));
   return files;
 }
 
