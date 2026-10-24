@@ -32,28 +32,20 @@ test("documentation link inputs include README and nested Markdown files under d
   }
 });
 
-test("documentation link inputs still scan README when docs is absent", () => {
-  const root = mkdtempSync(join(tmpdir(), "external-doc-links-test-"));
+test("documentation link discovery tolerates an absent docs directory but requires README", () => {
+  const readmeOnlyRoot = mkdtempSync(join(tmpdir(), "external-doc-links-test-"));
+  const docsOnlyRoot = mkdtempSync(join(tmpdir(), "external-doc-links-test-"));
 
   try {
-    writeFileSync(join(root, "README.md"), "[README](https://example.test/readme)");
+    writeFileSync(join(readmeOnlyRoot, "README.md"), "[README](https://example.test/readme)");
+    assert.deepEqual(readDocumentationMarkdown(readmeOnlyRoot).map(document => relative(readmeOnlyRoot, document.path)), ["README.md"]);
 
-    assert.deepEqual(readDocumentationMarkdown(root).map(document => relative(root, document.path)), ["README.md"]);
+    mkdirSync(join(docsOnlyRoot, "docs"), { recursive: true });
+    writeFileSync(join(docsOnlyRoot, "docs", "api.md"), "[API](https://example.test/api)");
+    assert.throws(() => readDocumentationMarkdown(docsOnlyRoot), /README\.md is required/);
   } finally {
-    rmSync(root, { recursive: true, force: true });
-  }
-});
-
-test("documentation link inputs report a clear error when required README is absent", () => {
-  const root = mkdtempSync(join(tmpdir(), "external-doc-links-test-"));
-
-  try {
-    mkdirSync(join(root, "docs"), { recursive: true });
-    writeFileSync(join(root, "docs", "api.md"), "[API](https://example.test/api)");
-
-    assert.throws(readDocumentationMarkdown.bind(null, root), /README\.md is required/);
-  } finally {
-    rmSync(root, { recursive: true, force: true });
+    rmSync(readmeOnlyRoot, { recursive: true, force: true });
+    rmSync(docsOnlyRoot, { recursive: true, force: true });
   }
 });
 
