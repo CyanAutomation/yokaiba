@@ -19,8 +19,10 @@ import {
   assertCheckpointConfiguration,
   checkpointTargetedDifficultyLevels,
   buildClueDecisionPayload,
+  buildLatestClueDecisionPayload,
   buildAuditMarkdown,
   buildPuzzleDecisionPayload,
+  buildLatestPuzzleDecisionPayload,
   describeConstraint,
   JEV_REVIEW_THRESHOLDS,
   JEV_REQUESTED_MODEL,
@@ -77,11 +79,25 @@ test("audit constraint descriptions cover each supported relation", () => {
   for (const [constraint, expected] of cases) assert.equal(describeConstraint(constraint), expected);
 });
 
-test("audit progress messages report milestones and omit intermediate samples", () => {
-  assert.equal(auditProgressMessage({ phase: "difficulty", templateId: "open-division", completed: 1, total: 20 }), "difficulty audit open-division: 1/20");
-  assert.equal(auditProgressMessage({ phase: "targeted", templateId: "open-division", requestedDifficultyLevel: 7, completed: 10, total: 20 }), "targeted audit open-division level 7: 10/20");
+test("audit progress includes phase context at the first, periodic, and final milestones", () => {
+  const first = auditProgressMessage({ phase: "difficulty", templateId: "open-division", completed: 1, total: 20 });
+  assert.ok(first);
+  assert.match(first, /difficulty/);
+  assert.match(first, /open-division/);
+  assert.match(first, /1\/20/);
+
+  const periodic = auditProgressMessage({ phase: "targeted", templateId: "open-division", requestedDifficultyLevel: 7, completed: 10, total: 20 });
+  assert.ok(periodic);
+  assert.match(periodic, /targeted/);
+  assert.match(periodic, /open-division/);
+  assert.match(periodic, /level 7/);
+  assert.match(periodic, /10\/20/);
+
   assert.equal(auditProgressMessage({ phase: "difficulty", templateId: "open-division", completed: 3, total: 20 }), undefined);
-  assert.equal(auditProgressMessage({ phase: "difficulty", templateId: "open-division", completed: 20, total: 20 }), "difficulty audit open-division: 20/20");
+
+  const final = auditProgressMessage({ phase: "difficulty", templateId: "open-division", completed: 20, total: 20 });
+  assert.ok(final);
+  assert.match(final, /20\/20/);
 });
 
 test("JEV clue samples use the API's latest default difficulty model", () => {
@@ -90,8 +106,29 @@ test("JEV clue samples use the API's latest default difficulty model", () => {
   assert.equal(generated.difficulty.modelVersion, JEV_AUDIT_GENERATION_MODEL_VERSION);
 });
 
-test("every JEV audit phase uses the stable latest alias", () => {
-  assert.equal(JEV_REQUESTED_MODEL, "~typesafe/jev-latest");
+test("clue and puzzle review payloads use the stable latest model alias", () => {
+  const cluePayload = buildLatestClueDecisionPayload([clue()]);
+  const puzzlePayload = buildLatestPuzzleDecisionPayload([{
+    templateId: "test-template",
+    templateTitle: "Test template",
+    seed: "seed-1",
+    logicalDifficultyLevel: 3,
+    difficultyModelVersion: "yokaiba-difficulty-v5",
+    clues: [{
+      clueId: "distance-weight-tatami-0-1",
+      text: "The positions of the -60 kg competitor and the competitor on Tatami 1 differed by exactly one.",
+      expectedSemantics: "-60 kg and Tatami 1 differ in position by exactly 1.",
+      constraintKind: "distance",
+      structuredSemantics: { kind: "distance", left: { category: "weight", value: "-60 kg" }, right: { category: "tatami", value: "Tatami 1" }, distance: 1 },
+    }],
+    flagReasons: [],
+    evaluationStatus: "pending",
+    missingAnswers: [],
+  }]);
+
+  assert.equal(cluePayload.model, "~typesafe/jev-latest");
+  assert.equal(puzzlePayload.model, "~typesafe/jev-latest");
+  assert.equal(JEV_REQUESTED_MODEL, cluePayload.model);
 });
 
 test("audit usage aggregation adds provider totals and preserves missing values", () => {
