@@ -21,6 +21,11 @@ const defaultCalibration: DifficultyCalibration = {
   corpus: { sampleSize: 1_000, methodology: "Seeded corpus scored with the no-guess trace and deterministic solver telemetry." },
 };
 
+const LABELS: Record<DifficultyLevel, string> = {
+  1: "Very easy", 2: "Easy", 3: "Gentle", 4: "Comfortable", 5: "Moderate", 6: "Challenging",
+  7: "Tricky", 8: "Hard", 9: "Very hard", 10: "Expert", 11: "Master", 12: "Extreme",
+};
+
 /**
  * A stable initial rubric for the 4x4 template. Relational clues require more
  * mental bookkeeping than direct facts; negative clues and compact clue sets
@@ -46,13 +51,9 @@ export function assessPuzzleDifficulty(spec: PuzzleSpec, clues: readonly Clue[],
   if (minimumLevel > maximumLevel || calibration.scoreThresholds.length !== maximumLevel - minimumLevel) throw new Error("difficulty calibration thresholds must cover its level range");
   const offset = calibration.scoreThresholds.findIndex(threshold => score <= threshold);
   const level = (offset < 0 ? maximumLevel : minimumLevel + offset) as DifficultyLevel;
-  const labels: Record<DifficultyLevel, string> = {
-    1: "Very easy", 2: "Easy", 3: "Gentle", 4: "Comfortable", 5: "Moderate", 6: "Challenging",
-    7: "Tricky", 8: "Hard", 9: "Very hard", 10: "Expert", 11: "Master", 12: "Extreme",
-  };
   return {
     level,
-    label: labels[level],
+    label: LABELS[level],
     modelVersion: calibration.modelVersion,
     evidence: {
       score,
@@ -62,11 +63,6 @@ export function assessPuzzleDifficulty(spec: PuzzleSpec, clues: readonly Clue[],
     },
   };
 }
-
-const LABELS: Record<DifficultyLevel, string> = {
-  1: "Very easy", 2: "Easy", 3: "Gentle", 4: "Comfortable", 5: "Moderate", 6: "Challenging",
-  7: "Tricky", 8: "Hard", 9: "Very hard", 10: "Expert", 11: "Master", 12: "Extreme",
-};
 
 const clamp100 = (value: number) => Math.max(0, Math.min(100, value));
 const round = (value: number) => Math.round(clamp100(value));
