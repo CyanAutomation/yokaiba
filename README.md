@@ -1,6 +1,6 @@
 # Yokaiba
 
-[![Validate](https://github.com/CyanAutomation/yokaiba/actions/workflows/validate.yml/badge.svg?branch=main)](https://github.com/CyanAutomation/yokaiba/actions/workflows/validate.yml) [![Deploy Cloudflare Worker](https://github.com/CyanAutomation/yokaiba/actions/workflows/deploy-cloudflare.yml/badge.svg?branch=main)](https://github.com/CyanAutomation/yokaiba/actions/workflows/deploy-cloudflare.yml)
+[![Validate](https://github.com/CyanAutomation/yokaiba/actions/workflows/validate.yml/badge.svg?branch=main)](https://github.com/CyanAutomation/yokaiba/actions/workflows/validate.yml) [![Deploy Cloudflare Worker](https://github.com/CyanAutomation/yokaiba/actions/workflows/deploy-cloudflare.yml/badge.svg?branch=main)](https://github.com/CyanAutomation/yokaiba/actions/workflows/deploy-cloudflare.yml) [![Check external documentation links](https://github.com/CyanAutomation/yokaiba/actions/workflows/docs-links.yml/badge.svg)](https://github.com/CyanAutomation/yokaiba/actions/workflows/docs-links.yml)
 
 Yokaiba generates deterministic, uniquely solvable judo logic-grid puzzles for games and integrations. Its hosted service provides a public REST API and an authenticated Model Context Protocol (MCP) endpoint.
 
