@@ -395,6 +395,24 @@ test("worker enforces the feedback-specific fallback rate limit before token wor
   assert.equal(limited.headers.get("ratelimit-limit"), "1");
 });
 
+test("worker fails closed for feedback when the shared verify provider fails", async () => {
+  let localFallbackCalls = 0;
+  const providerKeys: string[] = [];
+  const isolatedWorker = createWorker({ rateLimiter: () => { localFallbackCalls += 1; return false; } });
+  const response = await isolatedWorker.fetch(new Request("https://yokaiba.test/v1/feedback", {
+    method: "POST",
+    headers: { "content-type": "application/json", "cf-connecting-ip": "192.0.2.96" },
+    body: "{}",
+  }), {
+    VERIFY_RATE_LIMITER: { limit: async ({ key }: { key: string }) => { providerKeys.push(key); throw new Error("provider unavailable"); } },
+    FEEDBACK_RATE_LIMIT: "1",
+  }, {} as ExecutionContext);
+
+  assert.equal(response.status, 429);
+  assert.deepEqual(providerKeys, ["192.0.2.96:/v1/feedback"]);
+  assert.equal(localFallbackCalls, 0);
+});
+
 test("worker routes signed feedback into the configured D1 binding", async () => {
   const isolatedWorker = createWorker({ rateLimiter: () => false });
   const statements: string[] = [];
