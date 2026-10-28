@@ -33,19 +33,13 @@ test("token payload decoding validates the wire format before returning claims",
   assert.equal(decodePuzzleTokenPayload("not*base64"), undefined);
   assert.equal(decodePuzzleTokenPayload(encode({ ...payload, expiresAt: payload.issuedAt })), undefined);
   assert.equal(decodePuzzleTokenPayload(encode({ ...payload, requestedDifficultyLevel: 13 })), undefined);
-  assert.deepEqual(decodePuzzleTokenPayload(encode({
+  assert.equal(decodePuzzleTokenPayload(encode({
     version: 2,
     templateId: "test-template",
     seed: "legacy-seed",
     generatorVersion: "yokaiba-generator-v4",
     solverVersion: "yokaiba-exhaustive-v1",
-  })), {
-    version: 2,
-    templateId: "test-template",
-    seed: "legacy-seed",
-    generatorVersion: "yokaiba-generator-v4",
-    solverVersion: "yokaiba-exhaustive-v1",
-  });
+  })), undefined);
   assert.notEqual(decodePuzzleTokenPayload(encode({
     ...payload,
     issuedAt: 10,
@@ -130,12 +124,15 @@ test("issued puzzle tokens expire and can be verified with a previous rotation k
 });
 
 test("verification accepts the supported difficulty endpoints and rejects invalid signed payloads", async () => {
+  const now = Math.floor(Date.now() / 1_000);
   const validBase = {
-    version: 2,
+    version: 3,
     templateId: "tournament-order-v1",
     seed: "signed-seed",
     generatorVersion: "yokaiba-generator-v5",
     solverVersion: "yokaiba-exhaustive-v1",
+    issuedAt: now,
+    expiresAt: now + 300,
   };
 
   for (const difficultyLevel of [1, 12]) {
@@ -150,6 +147,7 @@ test("verification accepts the supported difficulty endpoints and rejects invali
     [],
     "payload",
     { ...validBase, version: 1 },
+    { ...validBase, version: 2 },
     { ...validBase, templateId: "" },
     { ...validBase, seed: 4 },
     { ...validBase, generatorVersion: null },
@@ -160,7 +158,7 @@ test("verification accepts the supported difficulty endpoints and rejects invali
   }
 });
 
-test("legacy v2 tokens can use a previous key during a deliberate rotation grace window", async () => {
+test("legacy v2 tokens are rejected even when signed by an active or previous key", async () => {
   const legacyPayload = {
     version: 2,
     templateId: "tournament-order-v1",
@@ -170,7 +168,7 @@ test("legacy v2 tokens can use a previous key during a deliberate rotation grace
   };
   const legacyToken = await signPayload(legacyPayload, "previous-secret");
 
-  assert.deepEqual(await verifyPuzzleToken(legacyToken, ["active-secret", "previous-secret"]), legacyPayload);
+  assert.equal(await verifyPuzzleToken(legacyToken, ["active-secret", "previous-secret"]), undefined);
   assert.equal(await verifyPuzzleToken(legacyToken, "active-secret"), undefined);
 });
 

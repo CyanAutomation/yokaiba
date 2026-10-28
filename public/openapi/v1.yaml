@@ -507,13 +507,13 @@ components:
       properties:
         status: { type: string, const: ready }
         build: { $ref: '#/components/schemas/Build' }
-        rateLimitProvider: { type: string, enum: [configured, fallback] }
-        generateRateLimitProvider: { type: string, enum: [configured, fallback] }
-        verifyRateLimitProvider: { type: string, enum: [configured, fallback] }
-        mcpPreAuthRateLimitProvider: { type: string, enum: [configured, fallback] }
-        mcpRateLimitProvider: { type: string, enum: [configured, fallback] }
-        mcpGenerateRateLimitProvider: { type: string, enum: [configured, fallback] }
-        mcpPuzzleActionRateLimitProvider: { type: string, enum: [configured, fallback] }
+        rateLimitProvider: { type: string, enum: [configured, fallback, failing], description: General REST provider state; fallback means local per-isolate limiting is active. }
+        generateRateLimitProvider: { type: string, enum: [configured, fallback, failing], description: A configured provider error is failing and puzzle generation is denied for that request. }
+        verifyRateLimitProvider: { type: string, enum: [configured, fallback, failing], description: A configured provider error is failing and verification, hints, and feedback are denied for that request. }
+        mcpPreAuthRateLimitProvider: { type: string, enum: [configured, fallback, failing] }
+        mcpRateLimitProvider: { type: string, enum: [configured, fallback, failing] }
+        mcpGenerateRateLimitProvider: { type: string, enum: [configured, fallback, failing], description: A configured provider error is failing and puzzle generation is denied for that request. }
+        mcpPuzzleActionRateLimitProvider: { type: string, enum: [configured, fallback, failing], description: A configured provider error is failing and puzzle actions are denied for that request. }
         outcomeTelemetryProvider: { type: string, enum: [configured, disabled, failing], description: Configured when an Analytics Engine write succeeds; failing after a write exception in this Worker isolate. }
     Build:
       type: object
@@ -734,16 +734,17 @@ components:
         clue: { type: object, properties: { id: { type: string }, text: { type: string } } }
     PuzzleOutcomeEvent:
       type: object
-      required: [event, templateId]
+      required: [event, puzzleToken]
       additionalProperties: true
-      description: Unknown properties are discarded. Omitted schemaVersion is legacy version 0 and remains accepted. Version 1 requires hintsUsed and mistakes for every event, plus elapsedMs for puzzle_completed and puzzle_abandoned.
+      description: Requires an unexpired v4 puzzleToken. The service derives template and difficulty identity from the signed token and rejects mismatches. Gameplay metrics remain self-reported; tokens may be reused, so accepted events do not prove a player completed the puzzle. Unknown properties are discarded. Omitted schemaVersion is legacy version 0. Version 1 requires hintsUsed and mistakes for every event, plus elapsedMs for puzzle_completed and puzzle_abandoned.
       properties:
         schemaVersion: { type: integer, enum: [0, 1] }
         event: { type: string, enum: [puzzle_started, puzzle_completed, hint_used, mistake, puzzle_abandoned] }
-        templateId: { type: string }
-        requestedDifficultyLevel: { type: integer, minimum: 1, maximum: 12 }
-        assessedDifficultyLevel: { type: integer, minimum: 1, maximum: 12 }
-        clueCount: { type: integer, minimum: 0, maximum: 100 }
+        puzzleToken: { type: string, minLength: 1, maxLength: 3000 }
+        templateId: { type: string, description: Optional consistency check; the value is taken from the signed puzzle token. }
+        requestedDifficultyLevel: { type: integer, minimum: 1, maximum: 12, description: Optional consistency check against the signed token; server derives the stored value. }
+        assessedDifficultyLevel: { type: integer, minimum: 1, maximum: 12, description: Optional consistency check against the signed token; server derives the stored value. }
+        clueCount: { type: integer, minimum: 0, maximum: 100, description: Client-reported metric; not proof of play. }
         elapsedMs: { type: integer, minimum: 0, maximum: 86400000 }
         hintsUsed: { type: integer, minimum: 0, maximum: 100 }
         mistakes: { type: integer, minimum: 0, maximum: 100 }

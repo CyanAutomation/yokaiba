@@ -21,7 +21,7 @@ function publicCapabilities(templates: readonly PuzzleTemplate[], puzzleTokenSec
   });
   return {
     apiVersion: "v1",
-    features: { answerVerification: Boolean(puzzleTokenSecret), conditionalGet: true, difficultySelection: true, difficultyModelSelection: true, feedback: Boolean(puzzleTokenSecret && hasFeedbackSink), hints: Boolean(puzzleTokenSecret), outcomeTelemetry: hasOutcomeSink, seedFallback: true },
+    features: { answerVerification: Boolean(puzzleTokenSecret), conditionalGet: true, difficultySelection: true, difficultyModelSelection: true, feedback: Boolean(puzzleTokenSecret && hasFeedbackSink), hints: Boolean(puzzleTokenSecret), outcomeTelemetry: Boolean(puzzleTokenSecret && hasOutcomeSink), seedFallback: true },
     difficultyModels: {
       default: "yokaiba-difficulty-v5",
       supported: ["yokaiba-difficulty-v4", "yokaiba-difficulty-v5"],
@@ -43,7 +43,7 @@ export function createRestRoutes(templates: readonly PuzzleTemplate[], options: 
       ...publicCapabilities(templates, options.puzzleTokenSecret, Boolean(options.recordOutcome), Boolean(options.recordFeedback)),
     }, 200, { "cache-control": SCENARIOS_CACHE_CONTROL })],
     ["GET /v1/version", async () => json({ serviceVersion: options.serviceVersion ?? "0.1.0", buildSha: options.buildSha ?? "local", generatorVersion: GENERATOR_VERSION, solverVersion: SOLVER_VERSION }, 200, { "cache-control": VERSION_CACHE_CONTROL })],
-    ["POST /v1/events", request => outcomeRoute(request, byId, options.recordOutcome)],
+    ["POST /v1/events", request => outcomeRoute(request, byId, options.recordOutcome, protectedSecrets)],
     ["POST /v1/feedback", request => feedbackRoute(request, byId, protectedSecrets, options.recordFeedback)],
     ["POST /v1/puzzles/hint", request => hintRoute(request, byId, protectedSecrets)],
     ["POST /v1/puzzles/verify", request => verificationRoute(request, byId, protectedSecrets)],
