@@ -31,12 +31,7 @@ export interface PuzzleTokenPayload extends PuzzleTokenFields {
   expiresAt: number;
 }
 
-/** Unexpired v2 tokens remain valid under the current key for sessions created before expiry was added. */
-export interface LegacyPuzzleTokenPayload extends PuzzleTokenFields {
-  version: 2;
-}
-
-export type VerifiedPuzzleTokenPayload = PuzzleTokenPayload | LegacyPuzzleTokenPayloadV3 | LegacyPuzzleTokenPayload;
+export type VerifiedPuzzleTokenPayload = PuzzleTokenPayload | LegacyPuzzleTokenPayloadV3;
 
 const decoder = new TextDecoder();
 
@@ -60,7 +55,6 @@ function isPuzzleTokenPayload(value: unknown): value is VerifiedPuzzleTokenPaylo
   const payload = value as Record<string, unknown>;
   if (!hasTokenTextFields(payload) || !hasValidDifficulty(payload.requestedDifficultyLevel)
     || !(payload.difficultyModel === undefined || payload.difficultyModel === "v4" || payload.difficultyModel === "v5" || payload.difficultyModel === "compare")) return false;
-  if (payload.version === 2) return true;
   if (payload.version === 3) return Number.isSafeInteger(payload.issuedAt)
     && Number.isSafeInteger(payload.expiresAt)
     && (payload.expiresAt as number) > (payload.issuedAt as number)

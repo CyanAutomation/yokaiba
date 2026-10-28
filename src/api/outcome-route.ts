@@ -1,9 +1,10 @@
 import type { PuzzleTemplate } from "../domain/types.js";
 import { json } from "./json-response.js";
 import { badRequest, readJsonBody } from "./request-utils.js";
+import { verifyPuzzleToken, type PuzzleTokenSecrets } from "./puzzle-token.js";
 
 type OutcomeSink = (event: Record<string, unknown>) => void | Promise<void>;
-type ValidatedTelemetryRecord = Record<string, unknown> & { event: string; templateId: string };
+type ValidatedTelemetryRecord = Record<string, unknown> & { event: string };
 
 const PUZZLE_OUTCOME_EVENTS = new Set(["puzzle_started", "puzzle_completed", "hint_used", "mistake", "puzzle_abandoned"]);
 const TELEMETRY_NUMBER_RANGES = [
@@ -33,12 +34,15 @@ function schemaVersion(event: Record<string, unknown>): number {
   return version;
 }
 
-function validateIdentity(event: Record<string, unknown>, templates: Map<string, PuzzleTemplate>): asserts event is ValidatedTelemetryRecord {
+function validateIdentity(event: Record<string, unknown>, templates: Map<string, PuzzleTemplate>, trustedTemplateId: string): asserts event is ValidatedTelemetryRecord {
   if (typeof event.event !== "string" || !PUZZLE_OUTCOME_EVENTS.has(event.event)) {
     throw new TypeError("event must be a supported puzzle outcome");
   }
-  if (typeof event.templateId !== "string" || !templates.has(event.templateId)) {
-    throw new TypeError("templateId must reference a known template");
+  if (!templates.has(trustedTemplateId)) {
+    throw new TypeError("puzzleToken references an unknown template");
+  }
+  if (event.templateId !== undefined && event.templateId !== trustedTemplateId) {
+    throw new TypeError("templateId does not match puzzleToken");
   }
 }
 
@@ -68,13 +72,13 @@ function optionalTelemetryNumber(event: Record<string, unknown>, name: string): 
   return typeof value === "number" ? { [name]: value } : {};
 }
 
-function normalizedTelemetryEvent(event: ValidatedTelemetryRecord, version: number): Record<string, unknown> {
+function normalizedTelemetryEvent(event: ValidatedTelemetryRecord, version: number, token: Extract<Awaited<ReturnType<typeof verifyPuzzleToken>>, { version: 4 }>): Record<string, unknown> {
   return {
     schemaVersion: version,
     event: event.event,
-    templateId: event.templateId,
-    ...optionalTelemetryNumber(event, "requestedDifficultyLevel"),
-    ...optionalTelemetryNumber(event, "assessedDifficultyLevel"),
+    templateId: token.templateId,
+    ...(token.requestedDifficultyLevel === undefined ? {} : { requestedDifficultyLevel: token.requestedDifficultyLevel }),
+    assessedDifficultyLevel: token.assessedDifficultyLevel,
     ...optionalTelemetryNumber(event, "clueCount"),
     ...optionalTelemetryNumber(event, "elapsedMs"),
     ...optionalTelemetryNumber(event, "hintsUsed"),
@@ -83,27 +87,43 @@ function normalizedTelemetryEvent(event: ValidatedTelemetryRecord, version: numb
   };
 }
 
-function telemetryRequest(value: unknown, templates: Map<string, PuzzleTemplate>): Record<string, unknown> {
+async function telemetryRequest(value: unknown, templates: Map<string, PuzzleTemplate>, secrets: PuzzleTokenSecrets): Promise<Record<string, unknown>> {
   const event = telemetryRecord(value);
   const version = schemaVersion(event);
-  validateIdentity(event, templates);
+  if (typeof event.puzzleToken !== "string" || event.puzzleToken.trim().length === 0 || event.puzzleToken.length > 3_000) {
+    throw new TypeError("puzzleToken must be a bounded non-empty string");
+  }
+  const token = await verifyPuzzleToken(event.puzzleToken, secrets);
+  if (!token || token.version !== 4) throw new TypeError("puzzleToken is invalid or unsupported");
+  validateIdentity(event, templates, token.templateId);
   validateTelemetryNumbers(event);
+  if (event.requestedDifficultyLevel !== undefined && event.requestedDifficultyLevel !== token.requestedDifficultyLevel) {
+    throw new TypeError("requestedDifficultyLevel does not match puzzleToken");
+  }
+  if (event.assessedDifficultyLevel !== undefined && event.assessedDifficultyLevel !== token.assessedDifficultyLevel) {
+    throw new TypeError("assessedDifficultyLevel does not match puzzleToken");
+  }
   validateVersionOneFields(event, version);
-  return normalizedTelemetryEvent(event, version);
+  return normalizedTelemetryEvent(event, version, token);
 }
 
 export async function outcomeRoute(
   request: Request,
   templates: Map<string, PuzzleTemplate>,
   recordOutcome?: OutcomeSink,
+  secrets: PuzzleTokenSecrets = [],
 ): Promise<Response> {
+  if (!recordOutcome) return json({ error: { code: "not_configured", message: "puzzle outcome storage is not configured" } }, 503);
+  const signingSecrets = typeof secrets === "string" ? [secrets] : secrets;
+  if (!signingSecrets.some(secret => secret.length > 0)) {
+    return json({ error: { code: "not_configured", message: "puzzle outcome signing is not configured" } }, 503);
+  }
   let event: Record<string, unknown>;
   try {
-    event = telemetryRequest(await readJsonBody(request), templates);
+    event = await telemetryRequest(await readJsonBody(request), templates, signingSecrets);
   } catch (error) {
     return badRequest(error);
   }
-  if (!recordOutcome) return json({ error: { code: "not_configured", message: "puzzle outcome storage is not configured" } }, 503);
   try {
     await recordOutcome(event);
     return json({ accepted: true }, 202);

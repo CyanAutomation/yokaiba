@@ -382,9 +382,12 @@ test("REST capabilities expose client-safe feature flags and catalogue metadata"
     ],
   });
 
-  const enabled = createRestRouter([tournamentOrderTemplate], { recordOutcome: () => undefined });
+  const enabled = createRestRouter([tournamentOrderTemplate], { puzzleTokenSecret: "test-token-secret", recordOutcome: () => undefined });
   const enabledCapabilities = await enabled(new Request("https://yokaiba.test/v1/capabilities"));
   assert.equal((await enabledCapabilities.json() as { features: { outcomeTelemetry: boolean } }).features.outcomeTelemetry, true);
+  const unsignedTelemetry = createRestRouter([tournamentOrderTemplate], { recordOutcome: () => undefined });
+  const unsignedCapabilities = await unsignedTelemetry(new Request("https://yokaiba.test/v1/capabilities"));
+  assert.equal((await unsignedCapabilities.json() as { features: { outcomeTelemetry: boolean } }).features.outcomeTelemetry, false);
 });
 
 test("REST can deterministically fall back to a nearby seed for an unavailable selected level", async () => {
@@ -432,44 +435,51 @@ test("REST rejects placement hints so callers cannot enumerate the hidden soluti
 
 test("REST accepts anonymized puzzle outcomes with their smart-marking cohort and rejects malformed telemetry", async () => {
   const acceptedEvents: Record<string, unknown>[] = [];
-  const route = createRestRouter([tournamentOrderTemplate], { recordOutcome: event => { acceptedEvents.push(event); } });
-  const accepted = await route(new Request("https://yokaiba.test/v1/events", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ event: "puzzle_completed", templateId: "tournament-order-v1", assessedDifficultyLevel: 2, elapsedMs: 120_000, clueCount: 8, hintsUsed: 1, smartMarkingEnabled: true }) }));
+  const tokenSecret = "test-token-secret";
+  const puzzleToken = await issuePuzzleToken(generatePuzzle(tournamentOrderTemplate, "outcome-rest-test"), tokenSecret);
+  const route = createRestRouter([tournamentOrderTemplate], { puzzleTokenSecret: tokenSecret, recordOutcome: event => { acceptedEvents.push(event); } });
+  const send = (body: Record<string, unknown>) => route(new Request("https://yokaiba.test/v1/events", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ puzzleToken, ...body }) }));
+  const accepted = await send({ event: "puzzle_completed", templateId: "tournament-order-v1", elapsedMs: 120_000, clueCount: 8, hintsUsed: 1, smartMarkingEnabled: true });
   assert.equal(accepted.status, 202);
   assert.deepEqual(await accepted.json(), { accepted: true });
   assert.equal(acceptedEvents.length, 1);
   assert.equal(acceptedEvents[0]?.schemaVersion, 0);
   assert.equal(acceptedEvents[0]?.event, "puzzle_completed");
+  assert.equal(acceptedEvents[0]?.assessedDifficultyLevel, generatePuzzle(tournamentOrderTemplate, "outcome-rest-test").difficulty.level);
   assert.equal("seed" in acceptedEvents[0]!, false);
-  const rejected = await route(new Request("https://yokaiba.test/v1/events", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ event: "identity_captured", templateId: "tournament-order-v1" }) }));
+  const rejected = await send({ event: "identity_captured", templateId: "tournament-order-v1" });
   assert.equal(rejected.status, 400);
-  const malformed = await route(new Request("https://yokaiba.test/v1/events", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ event: "puzzle_completed", templateId: "tournament-order-v1", smartMarkingEnabled: "true" }) }));
+  const malformed = await send({ event: "puzzle_completed", templateId: "tournament-order-v1", smartMarkingEnabled: "true" });
   assert.equal(malformed.status, 400);
-  const unsupportedVersion = await route(new Request("https://yokaiba.test/v1/events", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ schemaVersion: 2, event: "puzzle_started", templateId: "tournament-order-v1" }) }));
+  const unsupportedVersion = await send({ schemaVersion: 2, event: "puzzle_started", templateId: "tournament-order-v1" });
   assert.equal(unsupportedVersion.status, 400);
-  const nullVersion = await route(new Request("https://yokaiba.test/v1/events", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ schemaVersion: null, event: "puzzle_started", templateId: "tournament-order-v1" }) }));
+  const nullVersion = await send({ schemaVersion: null, event: "puzzle_started", templateId: "tournament-order-v1" });
   assert.equal(nullVersion.status, 400);
-  const incompleteVersionOne = await route(new Request("https://yokaiba.test/v1/events", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ schemaVersion: 1, event: "puzzle_completed", templateId: "tournament-order-v1" }) }));
+  const incompleteVersionOne = await send({ schemaVersion: 1, event: "puzzle_completed", templateId: "tournament-order-v1" });
   assert.equal(incompleteVersionOne.status, 400);
-  const completeVersionOne = await route(new Request("https://yokaiba.test/v1/events", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ schemaVersion: 1, event: "puzzle_completed", templateId: "tournament-order-v1", elapsedMs: 1000, hintsUsed: 2, mistakes: 1 }) }));
+  const completeVersionOne = await send({ schemaVersion: 1, event: "puzzle_completed", templateId: "tournament-order-v1", elapsedMs: 1000, hintsUsed: 2, mistakes: 1 });
   assert.equal(completeVersionOne.status, 202);
   assert.equal(acceptedEvents[1]?.schemaVersion, 1);
 });
 
 test("REST reports telemetry as unavailable unless an event sink accepts the outcome", async () => {
-  const route = createRestRouter([tournamentOrderTemplate]);
+  const route = createRestRouter([tournamentOrderTemplate], { puzzleTokenSecret: "test-token-secret" });
   const response = await route(new Request("https://yokaiba.test/v1/events", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ event: "puzzle_started", templateId: "tournament-order-v1" }) }));
   assert.equal(response.status, 503);
   assert.deepEqual(await response.json(), { error: { code: "not_configured", message: "puzzle outcome storage is not configured" } });
 });
 
 test("REST hides asynchronous outcome storage failures behind a stable error", async () => {
+  const tokenSecret = "test-token-secret";
+  const puzzleToken = await issuePuzzleToken(generatePuzzle(tournamentOrderTemplate, "outcome-storage-error"), tokenSecret);
   const route = createRestRouter([tournamentOrderTemplate], {
+    puzzleTokenSecret: tokenSecret,
     recordOutcome: async () => { throw new Error("private storage details"); },
   });
   const response = await route(new Request("https://yokaiba.test/v1/events", {
     method: "POST",
     headers: { "content-type": "application/json" },
-    body: JSON.stringify({ event: "puzzle_started", templateId: "tournament-order-v1" }),
+    body: JSON.stringify({ event: "puzzle_started", puzzleToken, templateId: "tournament-order-v1" }),
   }));
 
   assert.equal(response.status, 503);

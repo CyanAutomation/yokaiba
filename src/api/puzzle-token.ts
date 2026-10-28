@@ -75,9 +75,6 @@ export async function verifyPuzzleToken(
     if (!await isValidTokenSignature(encodedPayload, encodedSignature, keys[index]!)) continue;
     const payload = decodePuzzleTokenPayload(encodedPayload);
     if (!payload) return undefined;
-    // Legacy tokens had no expiry. A previous key retains them only for the
-    // operator-controlled rotation grace period; removing that key ends it.
-    if (payload.version === 2) return payload;
     if (payload.issuedAt > now || payload.expiresAt <= now) return undefined;
     return payload;
   }

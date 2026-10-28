@@ -70,6 +70,25 @@ curl -X POST http://localhost:8787/v1/puzzles/generate \
 
 Generated puzzles include `difficulty` (`level` 1–12, label, model identifier, and deterministic evidence). Tournament Order is calibrated to levels 1–4, Open Division to 5–8, and Championship Circuit to 9–12. Each template publishes its locale metadata and its own 1,000-seed calibration strategy. Difficulty combines the deduction trace, relational/cross-category clue structure, and deterministic solver telemetry; retain `modelVersion` and `evidence` when recording scores. The no-guess trace is an engineering diagnostic, not a substitute for player research.
 
+## Anonymous puzzle outcome telemetry
+
+When `/v1/capabilities` reports `outcomeTelemetry: true`, send the current puzzle's `puzzleToken` with each event. The Worker verifies an unexpired v4 token and derives `templateId`, `assessedDifficultyLevel`, and any requested difficulty from its signed claims; supplied identity or difficulty fields must match. The token is available only when `PUZZLE_TOKEN_SECRET` is configured. `elapsedMs`, `hintsUsed`, `mistakes`, `clueCount`, and completion state remain client-reported. A token can be reused, so accepted telemetry is not proof that a person played or completed the puzzle.
+
+```js
+await fetch(`${baseUrl}/v1/events`, {
+  method: "POST",
+  headers: { "content-type": "application/json" },
+  body: JSON.stringify({
+    schemaVersion: 1,
+    event: "puzzle_completed",
+    puzzleToken: puzzle.puzzleToken,
+    elapsedMs: 120_000,
+    hintsUsed: 1,
+    mistakes: 0,
+  }),
+});
+```
+
 ## Anonymous puzzle difficulty feedback
 
 Puzzle applications can send a three-choice rating after solving or while a puzzle is in progress. Submit `too_easy`, `just_right`, or `too_hard`; only `too_hard` may include one of `difficult_to_start`, `confusing_clues`, `too_many_deductions`, `took_too_long`, or `other`. Include a UUID v4 `idempotencyKey` and retry the same payload with that key after a transient failure. A repeated matching key returns `200` without another insert; reusing it for changed feedback returns `409`.

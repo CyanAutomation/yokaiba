@@ -53,17 +53,17 @@ interface Env {
   REST_RATE_LIMIT?: string;
   /** Optional best-effort REST puzzle-generation requests per minute; defaults to 10. */
   REST_GENERATE_RATE_LIMIT?: string;
-  /** Optional best-effort verification attempts per minute; defaults to 10. */
+  /** Optional per-isolate fallback for answer verification when VERIFY_RATE_LIMITER is not configured; defaults to 10/minute. */
   VERIFY_RATE_LIMIT?: string;
-  /** Optional best-effort puzzle-hint requests per minute; defaults to 10. */
+  /** Optional per-isolate fallback for puzzle hints when VERIFY_RATE_LIMITER is not configured; defaults to 10/minute. */
   HINT_RATE_LIMIT?: string;
-  /** Optional best-effort feedback submissions per minute; defaults to 10. */
+  /** Optional per-isolate fallback for feedback when VERIFY_RATE_LIMITER is not configured; defaults to 10/minute. */
   FEEDBACK_RATE_LIMIT?: string;
   /** Optional Cloudflare Rate Limiting binding for production-wide general REST enforcement. */
   REST_RATE_LIMITER?: { limit(options: { key: string }): Promise<{ success: boolean }> };
   /** Optional Cloudflare Rate Limiting binding for REST puzzle generation. */
   REST_GENERATE_RATE_LIMITER?: { limit(options: { key: string }): Promise<{ success: boolean }> };
-  /** Optional Cloudflare Rate Limiting binding for production-wide answer-verification enforcement. */
+  /** Shared Cloudflare Rate Limiting binding for answer verification, hints, and feedback; these operations fail closed if it errors. */
   VERIFY_RATE_LIMITER?: { limit(options: { key: string }): Promise<{ success: boolean }> };
   /** Optional Cloudflare binding that throttles unauthenticated MCP traffic before authentication. */
   MCP_PREAUTH_RATE_LIMITER?: { limit(options: { key: string }): Promise<{ success: boolean }> };
@@ -205,13 +205,23 @@ async function apiKeyFingerprint(key: string): Promise<string> {
   return Array.from(new Uint8Array(digest), byte => byte.toString(16).padStart(2, "0")).join("");
 }
 
-async function mcpToolName(request: Request): Promise<string | undefined> {
-  if (request.method !== "POST") return undefined;
+async function mcpToolNames(request: Request): Promise<string[]> {
+  if (request.method !== "POST") return [];
   try {
-    const payload = await request.clone().json() as { method?: unknown; params?: { name?: unknown } };
-    return payload.method === "tools/call" && typeof payload.params?.name === "string" ? payload.params.name : undefined;
+    const payload: unknown = await request.clone().json();
+    const messages = Array.isArray(payload) ? payload : [payload];
+    const toolNames: string[] = [];
+    for (const message of messages) {
+      if (!message || typeof message !== "object" || Array.isArray(message)) continue;
+      const record = message as Record<string, unknown>;
+      const params = record.params;
+      if (record.method !== "tools/call" || !params || typeof params !== "object" || Array.isArray(params)) continue;
+      const name = (params as Record<string, unknown>).name;
+      if (typeof name === "string") toolNames.push(name);
+    }
+    return toolNames;
   } catch {
-    return undefined;
+    return [];
   }
 }
 
@@ -337,8 +347,10 @@ function tooManyRequests(): Response {
   });
 }
 
-function rateLimitProviderState(provider: unknown, failed: boolean): "configured" | "fallback" {
-  return provider && !failed ? "configured" : "fallback";
+function rateLimitProviderState(provider: unknown, failed: boolean, failClosedOnFailure = false): "configured" | "fallback" | "failing" {
+  if (!provider) return "fallback";
+  if (!failed) return "configured";
+  return failClosedOnFailure ? "failing" : "fallback";
 }
 
 function outcomeTelemetryProviderState(provider: unknown, failed: boolean): "disabled" | "failing" | "configured" {
@@ -350,12 +362,12 @@ function readinessResponse(env: Env, build: ReturnType<typeof buildInfo>, failur
   return json({
     status: "ready", build,
     rateLimitProvider: rateLimitProviderState(env.REST_RATE_LIMITER, failures.rest),
-    generateRateLimitProvider: rateLimitProviderState(env.REST_GENERATE_RATE_LIMITER, failures.restGenerate),
-    verifyRateLimitProvider: rateLimitProviderState(env.VERIFY_RATE_LIMITER, failures.verify),
+    generateRateLimitProvider: rateLimitProviderState(env.REST_GENERATE_RATE_LIMITER, failures.restGenerate, true),
+    verifyRateLimitProvider: rateLimitProviderState(env.VERIFY_RATE_LIMITER, failures.verify, true),
     mcpPreAuthRateLimitProvider: rateLimitProviderState(env.MCP_PREAUTH_RATE_LIMITER, failures.mcpPreAuth),
     mcpRateLimitProvider: rateLimitProviderState(env.MCP_RATE_LIMITER, failures.mcp),
-    mcpGenerateRateLimitProvider: rateLimitProviderState(env.MCP_GENERATE_RATE_LIMITER, failures.mcpGenerate),
-    mcpPuzzleActionRateLimitProvider: rateLimitProviderState(env.MCP_PUZZLE_ACTION_RATE_LIMITER, failures.mcpPuzzleAction),
+    mcpGenerateRateLimitProvider: rateLimitProviderState(env.MCP_GENERATE_RATE_LIMITER, failures.mcpGenerate, true),
+    mcpPuzzleActionRateLimitProvider: rateLimitProviderState(env.MCP_PUZZLE_ACTION_RATE_LIMITER, failures.mcpPuzzleAction, true),
     outcomeTelemetryProvider: outcomeTelemetryProviderState(env.PUZZLE_OUTCOMES, failures.outcomeTelemetry),
   });
 }
@@ -502,8 +514,9 @@ async function resolveMcpRateLimit(
   rateLimited: RateLimiter,
   onProviderFailure: () => void,
   key?: string,
+  failClosedOnFailure = false,
 ): Promise<RateLimitDecision> {
-  return await providerRateLimitDecision(provider, request, onProviderFailure, key)
+  return await providerRateLimitDecision(provider, request, onProviderFailure, key, failClosedOnFailure)
     ?? asRateLimitDecision(rateLimited(request, rawLimit, scope));
 }
 
@@ -542,30 +555,33 @@ async function routeMcpRequest(request: Request, env: Env, dependencies: McpRequ
   );
   if (dependencies.setRateLimit("mcp", principalLimit)) return dependencies.finish(tooManyRequests());
 
-  const toolName = await mcpToolName(request);
-  if (toolName === "generate_puzzle") {
-    const generationLimit = await resolveMcpRateLimit(
-      request,
-      env.MCP_GENERATE_RATE_LIMITER,
-      env.MCP_GENERATE_RATE_LIMIT ?? "10",
-      "mcp-generate",
-      dependencies.rateLimited,
-      () => { dependencies.failures.mcpGenerate = true; },
-      `${principal}:generate_puzzle`,
-    );
-    if (dependencies.setRateLimit("mcp-generate", generationLimit)) return dependencies.finish(tooManyRequests());
-  }
-  if (toolName === "verify_puzzle_answer" || toolName === "get_puzzle_hint") {
-    const actionLimit = await resolveMcpRateLimit(
-      request,
-      env.MCP_PUZZLE_ACTION_RATE_LIMITER,
-      env.MCP_PUZZLE_ACTION_RATE_LIMIT ?? "10",
-      "mcp-puzzle-action",
-      dependencies.rateLimited,
-      () => { dependencies.failures.mcpPuzzleAction = true; },
-      `${principal}:${toolName}`,
-    );
-    if (dependencies.setRateLimit("mcp-puzzle-action", actionLimit)) return dependencies.finish(tooManyRequests());
+  for (const toolName of await mcpToolNames(request)) {
+    if (toolName === "generate_puzzle") {
+      const generationLimit = await resolveMcpRateLimit(
+        request,
+        env.MCP_GENERATE_RATE_LIMITER,
+        env.MCP_GENERATE_RATE_LIMIT ?? "10",
+        "mcp-generate",
+        dependencies.rateLimited,
+        () => { dependencies.failures.mcpGenerate = true; },
+        `${principal}:generate_puzzle`,
+        true,
+      );
+      if (dependencies.setRateLimit("mcp-generate", generationLimit)) return dependencies.finish(tooManyRequests());
+    }
+    if (toolName === "verify_puzzle_answer" || toolName === "get_puzzle_hint") {
+      const actionLimit = await resolveMcpRateLimit(
+        request,
+        env.MCP_PUZZLE_ACTION_RATE_LIMITER,
+        env.MCP_PUZZLE_ACTION_RATE_LIMIT ?? "10",
+        "mcp-puzzle-action",
+        dependencies.rateLimited,
+        () => { dependencies.failures.mcpPuzzleAction = true; },
+        `${principal}:${toolName}`,
+        true,
+      );
+      if (dependencies.setRateLimit("mcp-puzzle-action", actionLimit)) return dependencies.finish(tooManyRequests());
+    }
   }
   return dependencies.finish(await createYokaibaMcpHandler(templates, {
     puzzleTokenSecret: env.PUZZLE_TOKEN_SECRET,

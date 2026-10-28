@@ -3,7 +3,7 @@ import type { FeedbackSink } from "./feedback-route.js";
 export interface RestRouterOptions {
   /** Required to issue tamper-proof puzzle tokens for server-side verification. */
   puzzleTokenSecret?: string;
-  /** Previous HMAC keys may verify existing, unexpired v3 tokens during rotation. */
+  /** Previous HMAC keys may verify existing, unexpired v3 and v4 tokens during rotation. */
   puzzleTokenPreviousSecrets?: readonly string[];
   /** New token lifetime. Defaults to seven days and is capped at 30 days. */
   puzzleTokenTtlSeconds?: number;
