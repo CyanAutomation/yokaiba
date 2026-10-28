@@ -53,17 +53,17 @@ interface Env {
   REST_RATE_LIMIT?: string;
   /** Optional best-effort REST puzzle-generation requests per minute; defaults to 10. */
   REST_GENERATE_RATE_LIMIT?: string;
-  /** Optional best-effort verification attempts per minute; defaults to 10. */
+  /** Optional per-isolate fallback for answer verification when VERIFY_RATE_LIMITER is not configured; defaults to 10/minute. */
   VERIFY_RATE_LIMIT?: string;
-  /** Optional best-effort puzzle-hint requests per minute; defaults to 10. */
+  /** Optional per-isolate fallback for puzzle hints when VERIFY_RATE_LIMITER is not configured; defaults to 10/minute. */
   HINT_RATE_LIMIT?: string;
-  /** Optional best-effort feedback submissions per minute; defaults to 10. */
+  /** Optional per-isolate fallback for feedback when VERIFY_RATE_LIMITER is not configured; defaults to 10/minute. */
   FEEDBACK_RATE_LIMIT?: string;
   /** Optional Cloudflare Rate Limiting binding for production-wide general REST enforcement. */
   REST_RATE_LIMITER?: { limit(options: { key: string }): Promise<{ success: boolean }> };
   /** Optional Cloudflare Rate Limiting binding for REST puzzle generation. */
   REST_GENERATE_RATE_LIMITER?: { limit(options: { key: string }): Promise<{ success: boolean }> };
-  /** Optional Cloudflare Rate Limiting binding for production-wide answer-verification enforcement. */
+  /** Shared Cloudflare Rate Limiting binding for answer verification, hints, and feedback; these operations fail closed if it errors. */
   VERIFY_RATE_LIMITER?: { limit(options: { key: string }): Promise<{ success: boolean }> };
   /** Optional Cloudflare binding that throttles unauthenticated MCP traffic before authentication. */
   MCP_PREAUTH_RATE_LIMITER?: { limit(options: { key: string }): Promise<{ success: boolean }> };
