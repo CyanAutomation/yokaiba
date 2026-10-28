@@ -83,6 +83,7 @@ export async function providerRateLimitDecision(
   request: Request,
   onProviderFailure: () => void,
   key = `${request.headers.get("cf-connecting-ip") ?? "anonymous"}:${new URL(request.url).pathname}`,
+  failClosedOnFailure = false,
 ): Promise<RateLimitDecision | undefined> {
   if (provider) {
     try {
@@ -90,6 +91,7 @@ export async function providerRateLimitDecision(
     } catch {
       onProviderFailure();
       console.error(JSON.stringify({ event: "rate_limit_provider_failure", path: new URL(request.url).pathname }));
+      if (failClosedOnFailure) return { limited: true };
     }
   }
   return undefined;
@@ -124,7 +126,7 @@ export async function restRateLimitDecision(
   const onProviderFailure = protectedPuzzleOperation
     ? onVerifyProviderFailure
     : puzzleGeneration ? onRestGenerateProviderFailure : onRestProviderFailure;
-  const providerDecision = await providerRateLimitDecision(provider, request, onProviderFailure);
+  const providerDecision = await providerRateLimitDecision(provider, request, onProviderFailure, undefined, protectedPuzzleOperation || puzzleGeneration);
   if (providerDecision) return providerDecision;
   const { limit, scope } = restRateLimitConfiguration(path, env);
   return asRateLimitDecision(rateLimited(request, limit, scope));

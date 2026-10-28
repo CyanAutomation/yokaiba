@@ -1,5 +1,8 @@
 import assert from "node:assert/strict";
 import test from "node:test";
+import { generatePuzzle } from "../src/generation/generator.js";
+import { issuePuzzleToken } from "../src/api/puzzle-token.js";
+import { tournamentOrderTemplate } from "../src/templates/tournament-order.js";
 import worker, { createRateLimiter, createWorker, GeneratedPuzzleCache } from "../worker/index.js";
 
 test("version and readiness expose deployed build and rate-limit configuration", async () => {
@@ -209,6 +212,84 @@ test("worker falls back to local REST rate limiting when the provider fails", as
     mcpPreAuthRateLimitProvider: "fallback", mcpRateLimitProvider: "fallback", mcpGenerateRateLimitProvider: "fallback",
     mcpPuzzleActionRateLimitProvider: "fallback", outcomeTelemetryProvider: "disabled",
   });
+});
+
+test("worker fails closed when configured shared quotas fail for expensive REST and MCP actions", async () => {
+  let localFallbackCalls = 0;
+  const isolatedWorker = createWorker({
+    rateLimiter: () => { localFallbackCalls += 1; return false; },
+  });
+  const providerFailure = { limit: async () => { throw new Error("provider unavailable"); } };
+  const restEnv = {
+    REST_GENERATE_RATE_LIMITER: providerFailure,
+    VERIFY_RATE_LIMITER: providerFailure,
+  };
+  const generate = await isolatedWorker.fetch(new Request("https://yokaiba.test/v1/puzzles/generate?templateId=tournament-order-v1&seed=test"), restEnv, {} as ExecutionContext);
+  const verify = await isolatedWorker.fetch(new Request("https://yokaiba.test/v1/puzzles/verify", {
+    method: "POST", headers: { "content-type": "application/json" }, body: "{}",
+  }), restEnv, {} as ExecutionContext);
+  assert.equal(generate.status, 429);
+  assert.equal(verify.status, 429);
+
+  const mcpRequest = (toolName: string) => new Request("https://yokaiba.test/mcp", {
+    method: "POST",
+    headers: { authorization: "Bearer secret", host: "yokaiba.test", "content-type": "application/json" },
+    body: JSON.stringify({ jsonrpc: "2.0", id: 1, method: "tools/call", params: { name: toolName, arguments: {} } }),
+  });
+  const mcpBaseEnv = {
+    API_KEY: "secret", MCP_ALLOWED_HOSTNAMES: "yokaiba.test",
+    MCP_PREAUTH_RATE_LIMITER: { limit: async () => ({ success: true }) },
+    MCP_RATE_LIMITER: { limit: async () => ({ success: true }) },
+  };
+  const mcpGenerate = await isolatedWorker.fetch(mcpRequest("generate_puzzle"), { ...mcpBaseEnv, MCP_GENERATE_RATE_LIMITER: providerFailure }, {} as ExecutionContext);
+  const mcpVerify = await isolatedWorker.fetch(mcpRequest("verify_puzzle_answer"), { ...mcpBaseEnv, MCP_PUZZLE_ACTION_RATE_LIMITER: providerFailure }, {} as ExecutionContext);
+  assert.equal(mcpGenerate.status, 429);
+  assert.equal(mcpVerify.status, 429);
+  assert.equal(localFallbackCalls, 0);
+  const readiness = await isolatedWorker.fetch(new Request("https://yokaiba.test/readyz"), {
+    ...restEnv,
+    MCP_GENERATE_RATE_LIMITER: providerFailure,
+    MCP_PUZZLE_ACTION_RATE_LIMITER: providerFailure,
+  }, {} as ExecutionContext);
+  const status = await readiness.json() as Record<string, unknown>;
+  assert.equal(status.generateRateLimitProvider, "failing");
+  assert.equal(status.verifyRateLimitProvider, "failing");
+  assert.equal(status.mcpGenerateRateLimitProvider, "failing");
+  assert.equal(status.mcpPuzzleActionRateLimitProvider, "failing");
+});
+
+test("worker applies dedicated MCP quotas to every costly call in a legacy batch", async () => {
+  let generationQuotaCalls = 0;
+  const isolatedWorker = createWorker({ rateLimiter: () => { throw new Error("local fallback should not run"); } });
+  const batch = ["first", "second"].map((seed, index) => ({
+    jsonrpc: "2.0",
+    id: index + 1,
+    method: "tools/call",
+    params: { name: "generate_puzzle", arguments: { templateId: "tournament-order-v1", seed } },
+  }));
+  const response = await isolatedWorker.fetch(new Request("https://yokaiba.test/mcp", {
+    method: "POST",
+    headers: {
+      authorization: "Bearer secret",
+      host: "yokaiba.test",
+      "content-type": "application/json",
+      accept: "application/json, text/event-stream",
+    },
+    body: JSON.stringify(batch),
+  }), {
+    API_KEY: "secret",
+    MCP_ALLOWED_HOSTNAMES: "yokaiba.test",
+    MCP_PREAUTH_RATE_LIMITER: { limit: async () => ({ success: true }) },
+    MCP_RATE_LIMITER: { limit: async () => ({ success: true }) },
+    MCP_GENERATE_RATE_LIMITER: { limit: async () => {
+      generationQuotaCalls += 1;
+      if (generationQuotaCalls === 1) return { success: true };
+      throw new Error("provider unavailable");
+    } },
+  }, {} as ExecutionContext);
+
+  assert.equal(response.status, 429);
+  assert.equal(generationQuotaCalls, 2);
 });
 
 test("worker allows supported CORS preflight headers", async () => {
@@ -651,13 +732,15 @@ test("worker limits static routes to GET and HEAD and suppresses HEAD bodies", a
 });
 
 test("worker writes only validated anonymous outcome fields to Analytics Engine", async () => {
+  const puzzleToken = await issuePuzzleToken(generatePuzzle(tournamentOrderTemplate, "worker-outcome-test"), "outcome-secret");
+  const assessedLevel = generatePuzzle(tournamentOrderTemplate, "worker-outcome-test").difficulty.level;
   const points: unknown[] = [];
   const isolatedWorker = createWorker();
   const response = await isolatedWorker.fetch(new Request("https://yokaiba.test/v1/events", {
     method: "POST",
     headers: { "content-type": "application/json" },
-    body: JSON.stringify({ schemaVersion: 1, event: "puzzle_completed", templateId: "tournament-order-v1", elapsedMs: 1200, hintsUsed: 2, mistakes: 0, seed: "never-store", playerId: "never-store" }),
-  }), { PUZZLE_OUTCOMES: { writeDataPoint: point => points.push(point) } }, {} as ExecutionContext);
+    body: JSON.stringify({ schemaVersion: 1, event: "puzzle_completed", puzzleToken, templateId: "tournament-order-v1", elapsedMs: 1200, hintsUsed: 2, mistakes: 0, seed: "never-store", playerId: "never-store" }),
+  }), { PUZZLE_TOKEN_SECRET: "outcome-secret", PUZZLE_OUTCOMES: { writeDataPoint: point => points.push(point) } }, {} as ExecutionContext);
 
   assert.equal(response.status, 202);
   assert.deepEqual(await response.json(), { accepted: true });
@@ -665,7 +748,7 @@ test("worker writes only validated anonymous outcome fields to Analytics Engine"
   assert.deepEqual(points[0], {
     indexes: ["tournament-order-v1"],
     blobs: ["puzzle_completed", "1", "unknown"],
-    doubles: [0, 0, 0, 1200, 2, 0, 56],
+    doubles: [0, assessedLevel, 0, 1200, 2, 0, 58],
   });
   assert.doesNotMatch(JSON.stringify(points), /never-store/);
 });
@@ -684,10 +767,12 @@ test("worker refuses outcome acceptance without a sink and reports its capabilit
 });
 
 test("worker reports outcome storage failures in readiness and rejects the event", async () => {
+  const tokenSecret = "outcome-secret";
+  const puzzleToken = await issuePuzzleToken(generatePuzzle(tournamentOrderTemplate, "worker-outcome-storage-failure"), tokenSecret);
   const isolatedWorker = createWorker();
   const response = await isolatedWorker.fetch(new Request("https://yokaiba.test/v1/events", {
-    method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ event: "puzzle_started", templateId: "tournament-order-v1" }),
-  }), { PUZZLE_OUTCOMES: { writeDataPoint: () => { throw new Error("storage unavailable"); } } }, {} as ExecutionContext);
+    method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ event: "puzzle_started", puzzleToken, templateId: "tournament-order-v1" }),
+  }), { PUZZLE_TOKEN_SECRET: tokenSecret, PUZZLE_OUTCOMES: { writeDataPoint: () => { throw new Error("storage unavailable"); } } }, {} as ExecutionContext);
   assert.equal(response.status, 503);
   assert.deepEqual(await response.json(), { error: { code: "storage_unavailable", message: "puzzle outcome storage is unavailable" } });
 
