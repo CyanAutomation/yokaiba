@@ -1,5 +1,6 @@
 import { waitForExpectedDeployment } from "./deployment-probe.mjs";
 import { readDeploymentConfig } from "./deployment-config.mjs";
+import { formatSmokeFailure, probePublicGeneration } from "./deployment-smoke-support.mjs";
 
 const { baseUrl, expectedBuildVersion, expectedBuildSha } = readDeploymentConfig(process.env);
 
@@ -39,23 +40,7 @@ if (!versionBody.generatorVersion || !versionBody.solverVersion) throw new Error
 
 const smokeSeed = `deployment-smoke-${expectedBuildSha}`;
 const smokeTemplateIds = ["tournament-order-v2", "tournament-order-v1"] as const;
-let puzzlePath: string | undefined;
-let puzzle: Response | undefined;
-for (const templateId of smokeTemplateIds) {
-  for (let attempt = 0; attempt < 5; attempt += 1) {
-    const candidateSeed = attempt === 0 ? smokeSeed : `${smokeSeed}-${attempt}`;
-    const candidatePath = `/v1/puzzles/generate?templateId=${templateId}&seed=${encodeURIComponent(candidateSeed)}`;
-    const response = await fetch(new URL(candidatePath, baseUrl));
-    if (response.ok) {
-      puzzlePath = candidatePath;
-      puzzle = response;
-      break;
-    }
-    if (response.status !== 500) throw new Error(`${candidatePath} returned ${response.status}`);
-  }
-  if (puzzle) break;
-}
-if (!puzzle) throw new Error("public generation failed for all deterministic deployment smoke seeds and templates");
+const { path: puzzlePath, response: puzzle } = await probePublicGeneration(baseUrl, smokeSeed, smokeTemplateIds);
 const etag = puzzle.headers.get("etag");
 const puzzleValue: unknown = await puzzle.json();
 const puzzleBody = asRecord(puzzleValue);
@@ -64,12 +49,10 @@ if (!puzzleBody || !Array.isArray(puzzleBody.clues) || "solution" in puzzleBody)
 }
 if (!etag) throw new Error("cacheable puzzle response did not include an ETag");
 
-if (!puzzlePath) throw new Error("puzzlePath is undefined before cache validation");
 const cached = await fetch(new URL(puzzlePath, baseUrl), { headers: { "if-none-match": etag } });
 if (cached.status !== 304) {
   const body = await cached.text();
-  const requestId = cached.headers.get("x-request-id") ?? "missing";
-  throw new Error(`cached puzzle request returned ${cached.status} (x-request-id: ${requestId}; body: ${JSON.stringify(body)})`);
+  throw new Error(formatSmokeFailure("cached puzzle request", cached, body));
 }
 if (cached.headers.get("etag") !== etag) throw new Error("cached puzzle response changed its ETag");
 

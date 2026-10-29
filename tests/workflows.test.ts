@@ -306,6 +306,7 @@ test("Cloudflare deployment runs typed scripts for version and deployment checks
   assert.doesNotMatch(versionStep, /\bnode\b/);
   assert.equal(getRunStep(deploy, "deploy", "Probe direct Worker deployment"), "npm run deployment:health");
   assert.match(smokeStep, /if ! npm run deployment:smoke; then/);
+  assert.match(smokeStep, /smoke response body, request ID, Cloudflare Ray ID, and Worker observability logs/);
   assert.match(smokeStep, /exit 1/);
   assert.equal(getRunStep(deploy, "deploy", "Contract-test deployed public API"), "npm run deployment:contract");
 
