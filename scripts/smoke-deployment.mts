@@ -38,20 +38,24 @@ if (versionBody.serviceVersion !== expectedBuildVersion || versionBody.buildSha 
 if (!versionBody.generatorVersion || !versionBody.solverVersion) throw new Error("version response is incomplete");
 
 const smokeSeed = `deployment-smoke-${expectedBuildSha}`;
+const smokeTemplateIds = ["tournament-order-v2", "tournament-order-v1"] as const;
 let puzzlePath: string | undefined;
 let puzzle: Response | undefined;
-for (let attempt = 0; attempt < 5; attempt += 1) {
-  const candidateSeed = attempt === 0 ? smokeSeed : `${smokeSeed}-${attempt}`;
-  const candidatePath = `/v1/puzzles/generate?templateId=tournament-order-v2&seed=${encodeURIComponent(candidateSeed)}`;
-  const response = await fetch(new URL(candidatePath, baseUrl));
-  if (response.ok) {
-    puzzlePath = candidatePath;
-    puzzle = response;
-    break;
+for (const templateId of smokeTemplateIds) {
+  for (let attempt = 0; attempt < 5; attempt += 1) {
+    const candidateSeed = attempt === 0 ? smokeSeed : `${smokeSeed}-${attempt}`;
+    const candidatePath = `/v1/puzzles/generate?templateId=${templateId}&seed=${encodeURIComponent(candidateSeed)}`;
+    const response = await fetch(new URL(candidatePath, baseUrl));
+    if (response.ok) {
+      puzzlePath = candidatePath;
+      puzzle = response;
+      break;
+    }
+    if (response.status !== 500) throw new Error(`${candidatePath} returned ${response.status}`);
   }
-  if (response.status !== 500) throw new Error(`${candidatePath} returned ${response.status}`);
+  if (puzzle) break;
 }
-if (!puzzle) throw new Error("public generation failed for all deterministic deployment smoke seeds");
+if (!puzzle) throw new Error("public generation failed for all deterministic deployment smoke seeds and templates");
 const etag = puzzle.headers.get("etag");
 const puzzleValue: unknown = await puzzle.json();
 const puzzleBody = asRecord(puzzleValue);
