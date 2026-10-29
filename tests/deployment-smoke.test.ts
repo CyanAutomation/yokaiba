@@ -8,6 +8,8 @@ test("conditional cache validation compares entity tags using HTTP weak comparis
   assert.equal(entityTagsMatchWeakly('W/"same-representation"', '"same-representation"'), true);
   assert.equal(entityTagsMatchWeakly('"same-representation"', 'W/"same-representation"'), true);
   assert.equal(entityTagsMatchWeakly('W/"different-representation"', '"same-representation"'), false);
+  assert.equal(entityTagsMatchWeakly('"W/abc"', '"abc"'), false);
+  assert.equal(entityTagsMatchWeakly('W/abc', 'abc'), false);
   assert.equal(entityTagsMatchWeakly(null, '"same-representation"'), false);
 });
 

@@ -20,7 +20,7 @@ export function formatSmokeFailure(path: string, response: Response, body: strin
 /** Compare entity tags using the weak comparison required for If-None-Match on GET. */
 export function entityTagsMatchWeakly(left: string | null, right: string | null): boolean {
   if (left === null || right === null) return false;
-  const opaqueTag = (tag: string) => tag.startsWith("W/") ? tag.slice(2) : tag;
+  const opaqueTag = (tag: string) => tag.startsWith('W/"') ? tag.slice(2) : tag;
   return opaqueTag(left) === opaqueTag(right);
 }
 
