@@ -7,7 +7,16 @@ import { parseGenerationQuery } from "./generation-query.js";
 import { badRequest, readJsonBody } from "./request-utils.js";
 import type { RestRouterOptions } from "./router-options.js";
 
-const GENERATED_PUZZLE_CACHE_CONTROL = "public, max-age=300, s-maxage=300, must-revalidate";
+const MAX_GENERATED_PUZZLE_CACHE_TTL_SECONDS = 300;
+const TOKEN_EXPIRY_SAFETY_SECONDS = 1;
+
+export function generatedPuzzleCacheControl(puzzleTokenSecret?: string, puzzleTokenTtlSeconds = DEFAULT_PUZZLE_TOKEN_TTL_SECONDS): string {
+  if (puzzleTokenSecret && puzzleTokenTtlSeconds <= TOKEN_EXPIRY_SAFETY_SECONDS) return "no-store";
+  const ttlSeconds = puzzleTokenSecret
+    ? Math.min(MAX_GENERATED_PUZZLE_CACHE_TTL_SECONDS, puzzleTokenTtlSeconds - TOKEN_EXPIRY_SAFETY_SECONDS)
+    : MAX_GENERATED_PUZZLE_CACHE_TTL_SECONDS;
+  return `public, max-age=${ttlSeconds}, s-maxage=${ttlSeconds}, must-revalidate`;
+}
 
 async function publicPuzzle(puzzle: GeneratedPuzzle, options: RestRouterOptions) {
   const { solution: _solution, spec, ...rest } = puzzle;
@@ -49,7 +58,7 @@ export async function generationRoute(
 
   try {
     return json(await publicPuzzle(generatePuzzleForRequest(template, seed, difficultyLevel, allowSeedFallback, undefined, difficultyModel ?? "v5"), options), 200,
-      request.method === "GET" ? { "cache-control": GENERATED_PUZZLE_CACHE_CONTROL } : undefined);
+      request.method === "GET" ? { "cache-control": generatedPuzzleCacheControl(options.puzzleTokenSecret, options.puzzleTokenTtlSeconds) } : undefined);
   } catch (error) {
     if (error instanceof DifficultyUnavailableError) return json({
       error: { code: "difficulty_unavailable", message: error.message },
@@ -57,7 +66,7 @@ export async function generationRoute(
       ...(error.requestedDifficultyLevel === undefined ? {} : { requestedDifficultyLevel: error.requestedDifficultyLevel }),
       availableDifficultyLevels: error.availableDifficultyLevels,
       ...(error.diagnostics ? { selectionDiagnostics: error.diagnostics } : {}),
-    }, 422, request.method === "GET" ? { "cache-control": GENERATED_PUZZLE_CACHE_CONTROL } : undefined);
+    }, 422, request.method === "GET" ? { "cache-control": "public, max-age=300, s-maxage=300, must-revalidate" } : undefined);
     return json({ error: { code: "generation_failed", message: "puzzle generation failed" } }, 500);
   }
 }

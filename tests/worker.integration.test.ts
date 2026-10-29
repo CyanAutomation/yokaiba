@@ -3,7 +3,7 @@ import test from "node:test";
 import { generatePuzzle } from "../src/generation/generator.js";
 import { issuePuzzleToken } from "../src/api/puzzle-token.js";
 import { tournamentOrderTemplate } from "../src/templates/tournament-order.js";
-import worker, { createRateLimiter, createWorker, GeneratedPuzzleCache } from "../worker/index.js";
+import worker, { createCachedPublicWorker, createRateLimiter, createWorker, GeneratedPuzzleCache } from "../worker/index.js";
 
 test("version and readiness expose deployed build and rate-limit configuration", async () => {
   const isolatedWorker = createWorker({ rateLimiter: () => false });
@@ -29,6 +29,7 @@ test("version and readiness expose deployed build and rate-limit configuration",
     mcpPreAuthRateLimitProvider: "configured", mcpRateLimitProvider: "configured", mcpGenerateRateLimitProvider: "configured",
     mcpPuzzleActionRateLimitProvider: "configured", outcomeTelemetryProvider: "configured",
   });
+  assert.equal(ready.headers.get("cache-control"), "no-store");
 });
 
 test("MCP rate limiting runs before authentication", async () => {
@@ -54,6 +55,7 @@ test("MCP rate limiting runs before authentication", async () => {
   assert.deepEqual(await secondUnauthorized.json(), {
     error: { code: "unauthorized", message: "A valid API key is required" },
   });
+  assert.equal(secondUnauthorized.headers.get("cache-control"), "no-store");
   const limited = await isolatedWorker.fetch(makeRequest(), env, {} as ExecutionContext);
   assert.equal(limited.status, 429);
   assert.deepEqual(await limited.clone().json(), {
@@ -567,6 +569,20 @@ test("worker memoizes deterministic GET generation within the local cache TTL", 
   assert.equal(generationCalls, 2);
 });
 
+test("worker does not cache tokenized puzzles when the configured token lifetime is one second", async () => {
+  const generatedPuzzleCache = new GeneratedPuzzleCache();
+  const isolatedWorker = createWorker({ generatedPuzzleCache });
+  const response = await isolatedWorker.fetch(new Request(
+    "https://yokaiba.test/v1/puzzles/generate?templateId=tournament-order-v1&seed=short-token-cache",
+  ), { PUZZLE_TOKEN_SECRET: "short-token-test-secret", PUZZLE_TOKEN_TTL_SECONDS: "1" }, {} as ExecutionContext);
+
+  assert.equal(response.status, 200);
+  assert.equal(response.headers.get("cache-control"), "no-store");
+  assert.equal(generatedPuzzleCache.size, 0);
+  const puzzle = await response.json() as { puzzleToken?: string };
+  assert.ok(puzzle.puzzleToken);
+});
+
 test("worker memoizes canonical generation queries and separates every generation input", async () => {
   let generationCalls = 0;
   const isolatedWorker = createWorker({
@@ -588,11 +604,39 @@ test("worker memoizes canonical generation queries and separates every generatio
     "templateId=tournament-order-v1&seed=other&difficultyLevel=4&allowSeedFallback=true",
     "templateId=tournament-order-v1&seed=canonical&difficultyLevel=5&allowSeedFallback=true",
     "templateId=tournament-order-v1&seed=canonical&difficultyLevel=4&allowSeedFallback=false",
+    "templateId=tournament-order-v1&seed=canonical&difficultyLevel=4&allowSeedFallback=true&difficultyModel=v4",
+    "templateId=tournament-order-v1&seed=canonical&difficultyLevel=4&allowSeedFallback=true&difficultyModel=compare",
   ];
   for (const [index, variant] of variants.entries()) {
     assert.deepEqual(await (await fetchGeneration(variant)).json(), { generationCalls: index + 2 });
   }
-  assert.equal(generationCalls, 5);
+  assert.equal(generationCalls, 7);
+});
+
+test("local generation cache hits do not repeat generation telemetry", async () => {
+  const originalLog = console.log;
+  const logs: string[] = [];
+  console.log = message => { logs.push(String(message)); };
+  try {
+    const isolatedWorker = createWorker({
+      rateLimiter: () => false,
+      generatePuzzleResponse: () => new Response(JSON.stringify({
+        templateId: "test-template",
+        difficulty: { level: 3, modelVersion: "test-model" },
+      }), { headers: { "content-type": "application/json" } }),
+    });
+    const request = () => new Request("https://yokaiba.test/v1/puzzles/generate?templateId=test-template&seed=cache-telemetry");
+    for (let index = 0; index < 2; index += 1) {
+      const waitUntilTasks: Promise<unknown>[] = [];
+      await isolatedWorker.fetch(request(), {}, { waitUntil: (task: Promise<unknown>) => { waitUntilTasks.push(task); } } as unknown as ExecutionContext);
+      await Promise.all(waitUntilTasks);
+    }
+  } finally {
+    console.log = originalLog;
+  }
+
+  assert.equal(logs.map(message => JSON.parse(message) as Record<string, unknown>)
+    .filter(record => record.event === "difficulty_generation").length, 1);
 });
 
 test("worker coalesces concurrent deterministic GET generation for the same cache key", async () => {
@@ -729,6 +773,50 @@ test("worker gives scenario discovery and version metadata explicit cache polici
 
   const version = await worker.fetch(new Request("https://yokaiba.test/v1/version"), {}, {} as ExecutionContext);
   assert.equal(version.headers.get("cache-control"), "no-cache");
+
+  const health = await worker.fetch(new Request("https://yokaiba.test/healthz"), {}, {} as ExecutionContext);
+  const readiness = await worker.fetch(new Request("https://yokaiba.test/readyz"), {}, {} as ExecutionContext);
+  assert.equal(health.headers.get("cache-control"), "no-store");
+  assert.equal(readiness.headers.get("cache-control"), "no-store");
+});
+
+test("cached public responses still pass through the gateway for fresh limits, CORS, IDs, and validators", async () => {
+  let rateLimitChecks = 0;
+  let cacheFetches = 0;
+  const etag = '"catalogue-v1"';
+  const isolatedWorker = createWorker({
+    rateLimiter: () => { rateLimitChecks += 1; return false; },
+    cachedPublicFetch: async request => {
+      cacheFetches += 1;
+      assert.equal(request.headers.has("origin"), false);
+      assert.equal(request.headers.has("if-none-match"), false);
+      return new Response("catalogue", { headers: { etag, "cache-control": "public, max-age=300" } });
+    },
+  });
+  const first = await isolatedWorker.fetch(new Request("https://yokaiba.test/v1/scenarios", {
+    headers: { origin: "https://game.example", "cf-connecting-ip": "192.0.2.201" },
+  }), { REST_ALLOWED_ORIGINS: "https://game.example" }, {} as ExecutionContext);
+  const second = await isolatedWorker.fetch(new Request("https://yokaiba.test/v1/scenarios", {
+    headers: { origin: "https://game.example", "if-none-match": etag, "cf-connecting-ip": "192.0.2.201" },
+  }), { REST_ALLOWED_ORIGINS: "https://game.example" }, {} as ExecutionContext);
+
+  assert.equal(first.status, 200);
+  assert.equal(first.headers.get("access-control-allow-origin"), "https://game.example");
+  assert.equal(second.status, 304);
+  assert.equal(second.headers.get("access-control-allow-origin"), "https://game.example");
+  assert.notEqual(first.headers.get("x-request-id"), second.headers.get("x-request-id"));
+  assert.equal(rateLimitChecks, 2);
+  assert.equal(cacheFetches, 2);
+});
+
+test("cached public entrypoint keeps invalid generation responses out of edge caches", async () => {
+  const cachedPublicWorker = createCachedPublicWorker();
+  const response = await cachedPublicWorker.fetch(new Request(
+    "https://yokaiba.test/v1/puzzles/generate?templateId=tournament-order-v1&seed=invalid&unknown=value",
+  ), {}, {} as ExecutionContext);
+
+  assert.equal(response.status, 400);
+  assert.equal(response.headers.get("cache-control"), "no-store");
 });
 
 test("worker directs the API root to the interactive documentation", async () => {
@@ -875,6 +963,8 @@ test("worker serves a static API documentation page with security controls", asy
     assert.match(contentSecurityPolicy, /(?:^|; )frame-ancestors 'none'(?:;|$)/);
     assert.equal(docs.headers.get("x-content-type-options"), "nosniff");
     assert.ok(docs.headers.get("x-request-id"));
+    assert.equal(docs.headers.get("cache-control"), "public, max-age=300, s-maxage=300, must-revalidate");
+    assert.match(docs.headers.get("etag") ?? "", /^"yokaiba-v1-[a-f0-9]{64}"$/);
 
     const docsDocument = await docs.text();
     assert.match(docs.headers.get("content-type") ?? "", /^text\/html; charset=utf-8$/);
@@ -883,6 +973,12 @@ test("worker serves a static API documentation page with security controls", asy
     assert.match(docsDocument, /href="\/openapi\/chatgpt-actions-v1\.yaml"/);
     assert.doesNotMatch(docsDocument, /swagger-ui|<script\b|unpkg\.com/i);
   }
+
+  const first = await worker.fetch(new Request("https://yokaiba.test/docs"), {}, {} as ExecutionContext);
+  const conditional = await worker.fetch(new Request("https://yokaiba.test/docs", {
+    headers: { "if-none-match": first.headers.get("etag")! },
+  }), {}, {} as ExecutionContext);
+  assert.equal(conditional.status, 304);
 });
 
 test("worker delegates OpenAPI requests to their canonical asset paths", async () => {
@@ -891,7 +987,7 @@ test("worker delegates OpenAPI requests to their canonical asset paths", async (
   const assets = {
     fetch: async (request: Request) => {
       requestedUrls.push(request.url);
-      return new Response(expectedBody, { headers: { "content-type": "text/yaml" } });
+      return new Response(expectedBody, { headers: { "content-type": "text/yaml", "cache-control": "no-store" } });
     },
   };
 
@@ -903,6 +999,8 @@ test("worker delegates OpenAPI requests to their canonical asset paths", async (
     );
     assert.equal(specification.status, 200);
     assert.equal(specification.headers.get("content-type"), "application/yaml; charset=utf-8");
+    assert.equal(specification.headers.get("cache-control"), "public, max-age=300, s-maxage=300, must-revalidate");
+    assert.match(specification.headers.get("etag") ?? "", /^"yokaiba-v1-[a-f0-9]{64}"$/);
     assert.equal(await specification.text(), expectedBody);
   }
   assert.deepEqual(requestedUrls, ["https://yokaiba.test/openapi/v1.yaml", "https://yokaiba.test/openapi/chatgpt-actions-v1.yaml"]);
