@@ -38,7 +38,7 @@ if (versionBody.serviceVersion !== expectedBuildVersion || versionBody.buildSha 
 if (!versionBody.generatorVersion || !versionBody.solverVersion) throw new Error("version response is incomplete");
 
 const smokeSeed = `deployment-smoke-${expectedBuildSha}`;
-let puzzlePath = "";
+let puzzlePath: string | undefined;
 let puzzle: Response | undefined;
 for (let attempt = 0; attempt < 5; attempt += 1) {
   const candidateSeed = attempt === 0 ? smokeSeed : `${smokeSeed}-${attempt}`;
@@ -60,6 +60,7 @@ if (!puzzleBody || !Array.isArray(puzzleBody.clues) || "solution" in puzzleBody)
 }
 if (!etag) throw new Error("cacheable puzzle response did not include an ETag");
 
+if (!puzzlePath) throw new Error("puzzlePath is undefined before cache validation");
 const cached = await fetch(new URL(puzzlePath, baseUrl), { headers: { "if-none-match": etag } });
 if (cached.status !== 304) {
   const body = await cached.text();
