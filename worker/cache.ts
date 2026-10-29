@@ -145,10 +145,10 @@ export async function generatedPuzzleCacheKey(
   dependencies: GeneratedPuzzleCacheKeyDependencies = {},
 ): Promise<string | undefined> {
   try {
-    const { templateId, seed, difficultyLevel, allowSeedFallback } = parseGenerationQuery(new URL(request.url));
+    const { templateId, seed, difficultyLevel, allowSeedFallback, difficultyModel } = parseGenerationQuery(new URL(request.url));
     // A positional tuple gives the identity a fixed ordering and makes explicit
     // that an absent fallback has the same semantics as `false`.
-    return JSON.stringify([templateId, seed, difficultyLevel ?? null, allowSeedFallback ?? false, await puzzleTokenNamespace(puzzleTokenSecret, dependencies)]);
+    return JSON.stringify([templateId, seed, difficultyLevel ?? null, allowSeedFallback ?? false, difficultyModel ?? "v5", await puzzleTokenNamespace(puzzleTokenSecret, dependencies)]);
   } catch {
     // Invalid generation requests are routed normally so the router can return
     // its canonical 400 response; they are not eligible for memoization.
@@ -164,9 +164,11 @@ export function cachedGeneratedPuzzle(cache: GeneratedPuzzleCache, key: string, 
 
 export async function cacheGeneratedPuzzle(cache: GeneratedPuzzleCache, key: string, response: Response, now: number): Promise<Response> {
   if (response.status !== 200 && response.status !== 422) return response;
+  const ttlMs = generatedPuzzleTtlMs(response);
+  if (ttlMs <= 0) return response;
   const body = await response.arrayBuffer();
   const entry: GeneratedPuzzleCacheEntry = {
-    expiresAt: now + GENERATED_PUZZLE_CACHE_TTL_MS,
+    expiresAt: now + Math.min(ttlMs, GENERATED_PUZZLE_CACHE_TTL_MS),
     status: response.status,
     statusText: response.statusText,
     headers: [...response.headers].map(([name, value]) => [name, value] as const),
@@ -175,6 +177,14 @@ export async function cacheGeneratedPuzzle(cache: GeneratedPuzzleCache, key: str
   };
   cache.set(key, entry);
   return responseFromGeneratedPuzzleSnapshot(entry);
+}
+
+function generatedPuzzleTtlMs(response: Response): number {
+  const cacheControl = response.headers.get("cache-control") ?? "";
+  if (/(?:^|,)\s*(?:no-store|no-cache)\b/i.test(cacheControl)) return 0;
+  const ages = [...cacheControl.matchAll(/(?:^|,)\s*(?:s-maxage|max-age)=(\d+)\b/gi)]
+    .map(match => Number(match[1]) * 1_000);
+  return ages.length === 0 ? GENERATED_PUZZLE_CACHE_TTL_MS : Math.min(...ages);
 }
 
 async function contentEtag(response: Response): Promise<string> {

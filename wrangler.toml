@@ -1,6 +1,23 @@
 name = "yokaiba"
-main = "worker/index.ts"
+main = "worker/main.ts"
 compatibility_date = "2026-08-29"
+
+[cache]
+enabled = true
+# Keep deployments isolated so changed generation behavior cannot reuse prior responses.
+cross_version_cache = false
+
+[exports.default]
+type = "worker"
+
+  [exports.default.cache]
+  enabled = false
+
+[exports.CachedPublic]
+type = "worker"
+
+  [exports.CachedPublic.cache]
+  enabled = true
 
 [assets]
 directory = "./public"
