@@ -38,8 +38,20 @@ if (versionBody.serviceVersion !== expectedBuildVersion || versionBody.buildSha 
 if (!versionBody.generatorVersion || !versionBody.solverVersion) throw new Error("version response is incomplete");
 
 const smokeSeed = `deployment-smoke-${expectedBuildSha}`;
-const puzzlePath = `/v1/puzzles/generate?templateId=tournament-order-v2&seed=${encodeURIComponent(smokeSeed)}`;
-const puzzle = await get(puzzlePath);
+let puzzlePath = "";
+let puzzle: Response | undefined;
+for (let attempt = 0; attempt < 5; attempt += 1) {
+  const candidateSeed = attempt === 0 ? smokeSeed : `${smokeSeed}-${attempt}`;
+  const candidatePath = `/v1/puzzles/generate?templateId=tournament-order-v2&seed=${encodeURIComponent(candidateSeed)}`;
+  const response = await fetch(new URL(candidatePath, baseUrl));
+  if (response.ok) {
+    puzzlePath = candidatePath;
+    puzzle = response;
+    break;
+  }
+  if (response.status !== 500) throw new Error(`${candidatePath} returned ${response.status}`);
+}
+if (!puzzle) throw new Error("public generation failed for all deterministic deployment smoke seeds");
 const etag = puzzle.headers.get("etag");
 const puzzleValue: unknown = await puzzle.json();
 const puzzleBody = asRecord(puzzleValue);
