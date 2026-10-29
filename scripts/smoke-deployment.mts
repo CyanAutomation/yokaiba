@@ -37,7 +37,7 @@ if (versionBody.serviceVersion !== expectedBuildVersion || versionBody.buildSha 
 }
 if (!versionBody.generatorVersion || !versionBody.solverVersion) throw new Error("version response is incomplete");
 
-const puzzlePath = "/v1/puzzles/generate?templateId=tournament-order-v1&seed=deployment-smoke";
+const puzzlePath = "/v1/puzzles/generate?templateId=tournament-order-v2&seed=first-puzzle";
 const puzzle = await get(puzzlePath);
 const etag = puzzle.headers.get("etag");
 const puzzleValue: unknown = await puzzle.json();
