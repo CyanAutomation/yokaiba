@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { readFile } from "node:fs/promises";
-import { probePublicGeneration } from "../scripts/deployment-smoke-support.mjs";
+import { formatSmokeFailure, probePublicGeneration } from "../scripts/deployment-smoke-support.mjs";
 
 test("deployment smoke probe uses a build-specific public generation seed", async () => {
   const smokeScript = await readFile(new URL("../scripts/smoke-deployment.mts", import.meta.url), "utf8");
@@ -24,6 +24,18 @@ test("public generation failures include the response body and Cloudflare Ray ID
   await assert.rejects(
     probePublicGeneration(new URL("https://example.workers.dev"), "smoke-sha", ["tournament-order-v2"], fetcher),
     /error code: 1101.*smoke-request-123.*a5222eb5ba037054-WAW/s,
+  );
+});
+
+test("conditional cache failures include the Cloudflare Ray ID", () => {
+  const response = new Response("cache validation failed", {
+    status: 502,
+    headers: { "cf-ray": "cache-ray-456", "x-request-id": "cache-request-123" },
+  });
+
+  assert.match(
+    formatSmokeFailure("cached puzzle request", response, "cache validation failed"),
+    /cached puzzle request returned 502.*cache-request-123.*cache-ray-456.*cache validation failed/,
   );
 });
 

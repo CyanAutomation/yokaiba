@@ -1,6 +1,6 @@
 import { waitForExpectedDeployment } from "./deployment-probe.mjs";
 import { readDeploymentConfig } from "./deployment-config.mjs";
-import { probePublicGeneration } from "./deployment-smoke-support.mjs";
+import { formatSmokeFailure, probePublicGeneration } from "./deployment-smoke-support.mjs";
 
 const { baseUrl, expectedBuildVersion, expectedBuildSha } = readDeploymentConfig(process.env);
 
@@ -52,8 +52,7 @@ if (!etag) throw new Error("cacheable puzzle response did not include an ETag");
 const cached = await fetch(new URL(puzzlePath, baseUrl), { headers: { "if-none-match": etag } });
 if (cached.status !== 304) {
   const body = await cached.text();
-  const requestId = cached.headers.get("x-request-id") ?? "missing";
-  throw new Error(`cached puzzle request returned ${cached.status} (x-request-id: ${requestId}; body: ${JSON.stringify(body)})`);
+  throw new Error(formatSmokeFailure("cached puzzle request", cached, body));
 }
 if (cached.headers.get("etag") !== etag) throw new Error("cached puzzle response changed its ETag");
 

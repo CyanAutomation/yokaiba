@@ -11,7 +11,7 @@ function clippedBody(body: string): string {
     : body;
 }
 
-function failureDetails(path: string, response: Response, body: string): string {
+export function formatSmokeFailure(path: string, response: Response, body: string): string {
   const requestId = response.headers.get("x-request-id") ?? "missing";
   const rayId = response.headers.get("cf-ray") ?? "missing";
   return `${path} returned ${response.status} (x-request-id: ${requestId}; cf-ray: ${rayId}; body: ${JSON.stringify(clippedBody(body))})`;
@@ -33,7 +33,7 @@ export async function probePublicGeneration(
       if (response.ok) return { path, response };
 
       const body = await response.text();
-      const details = failureDetails(path, response, body);
+      const details = formatSmokeFailure(path, response, body);
       if (response.status !== 500) throw new Error(details);
       failures.push(details);
     }
