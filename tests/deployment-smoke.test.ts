@@ -1,7 +1,17 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { readFile } from "node:fs/promises";
-import { formatSmokeFailure, probePublicGeneration } from "../scripts/deployment-smoke-support.mjs";
+import { entityTagsMatchWeakly, formatSmokeFailure, probePublicGeneration } from "../scripts/deployment-smoke-support.mjs";
+
+test("conditional cache validation compares entity tags using HTTP weak comparison", () => {
+  assert.equal(entityTagsMatchWeakly('"same-representation"', '"same-representation"'), true);
+  assert.equal(entityTagsMatchWeakly('W/"same-representation"', '"same-representation"'), true);
+  assert.equal(entityTagsMatchWeakly('"same-representation"', 'W/"same-representation"'), true);
+  assert.equal(entityTagsMatchWeakly('W/"different-representation"', '"same-representation"'), false);
+  assert.equal(entityTagsMatchWeakly('"W/abc"', '"abc"'), false);
+  assert.equal(entityTagsMatchWeakly('W/abc', 'abc'), false);
+  assert.equal(entityTagsMatchWeakly(null, '"same-representation"'), false);
+});
 
 test("deployment smoke probe uses a build-specific public generation seed", async () => {
   const smokeScript = await readFile(new URL("../scripts/smoke-deployment.mts", import.meta.url), "utf8");

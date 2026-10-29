@@ -17,6 +17,13 @@ export function formatSmokeFailure(path: string, response: Response, body: strin
   return `${path} returned ${response.status} (x-request-id: ${requestId}; cf-ray: ${rayId}; body: ${JSON.stringify(clippedBody(body))})`;
 }
 
+/** Compare entity tags using the weak comparison required for If-None-Match on GET. */
+export function entityTagsMatchWeakly(left: string | null, right: string | null): boolean {
+  if (left === null || right === null) return false;
+  const opaqueTag = (tag: string) => tag.startsWith('W/"') ? tag.slice(2) : tag;
+  return opaqueTag(left) === opaqueTag(right);
+}
+
 /** Probe deterministic public generation candidates and preserve diagnostics for failed attempts. */
 export async function probePublicGeneration(
   baseUrl: URL,
