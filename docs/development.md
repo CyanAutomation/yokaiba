@@ -40,7 +40,7 @@ The weekly external-link workflow checks the README's linked destinations with `
 
 ## Architecture
 
-- `worker/index.ts` is the Cloudflare Worker entry point. It dispatches REST and MCP requests, applies Worker-level controls, and serves the API docs and OpenAPI assets.
+- `worker/main.ts` is the Cloudflare Worker entry point. It keeps the default gateway uncached and exports a dedicated `CachedPublic` entrypoint for reusable public GET responses. `worker/index.ts` contains routing, rate limiting, local generation caching, and response handling.
 - `src/api/` contains REST routing and request handlers. `src/mcp/` registers the Streamable HTTP MCP tools.
 - `src/generation/` builds deterministic puzzles and difficulty evidence. `src/constraints/` and `src/domain/` provide the solver and puzzle model used by generation and answer actions.
 - `public/openapi/` contains the REST contracts served through the Worker asset binding.

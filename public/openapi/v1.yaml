@@ -427,7 +427,7 @@ components:
       description: Echoes an explicitly allowlisted browser origin; absent for other origins.
     CacheControl:
       schema: { type: string }
-      description: Endpoint-specific cache policy. Scenario and generated-puzzle responses are revalidated after five minutes; version metadata uses no-cache.
+      description: Endpoint-specific cache policy. Scenario and catalogue responses are revalidated after five minutes. Successful tokenized puzzle responses use at most five minutes and expire at least one second before the puzzle token; a one-second token lifetime disables caching. Version metadata uses no-cache, and health, readiness, and MCP responses use no-store.
     Etag:
       schema: { type: string }
       description: Content-derived validator for conditional GET requests.

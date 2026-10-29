@@ -23,7 +23,7 @@ import {
 export { createRateLimiter } from "./rate-limit.js";
 export type { RateLimitDecision, RateLimiter, RateLimitStore } from "./rate-limit.js";
 
-interface Env {
+export interface Env {
   /** Matches Budokon's API-key secret name and protects the MCP endpoint. */
   API_KEY?: string;
   /** Optional JSON object of client IDs to API keys for per-client MCP quotas. */
@@ -232,6 +232,7 @@ export interface WorkerOptions {
   generatedPuzzleCache?: GeneratedPuzzleCache;
   cacheKeyBuilder?: typeof generatedPuzzleCacheKey;
   generatePuzzleResponse?: (request: Request) => Response | Promise<Response>;
+  cachedPublicFetch?: (request: Request, ctx: ExecutionContext) => Promise<Response>;
 }
 import { GeneratedPuzzleCache, generatedPuzzleCacheKey, cachedGeneratedPuzzle, cacheGeneratedPuzzle, cachePublicGet } from "./cache.js";
 export { GeneratedPuzzleCache } from "./cache.js";
@@ -269,7 +270,7 @@ function docsResponse(): Response {
   return new Response(docsDocument, {
     headers: {
       "content-type": "text/html; charset=utf-8",
-      "cache-control": "no-store",
+      "cache-control": "public, max-age=300, s-maxage=300, must-revalidate",
       "content-security-policy": "default-src 'none'; style-src 'unsafe-inline'; base-uri 'none'; frame-ancestors 'none'",
       "referrer-policy": "no-referrer",
       "x-content-type-options": "nosniff",
@@ -286,7 +287,17 @@ async function staticAsset(request: Request, env: Env, assetPath: string, conten
   const headers = new Headers(asset.headers);
   headers.set("x-content-type-options", "nosniff");
   if (contentType) headers.set("content-type", contentType);
-  return new Response(asset.body, { status: asset.status, statusText: asset.statusText, headers });
+  headers.set("cache-control", asset.status === 200
+    ? "public, max-age=300, s-maxage=300, must-revalidate"
+    : "no-store");
+  return cachePublicGet(new Response(asset.body, { status: asset.status, statusText: asset.statusText, headers }), request);
+}
+
+function noStoreIfUnspecified(response: Response): Response {
+  if (response.headers.has("cache-control")) return response;
+  const headers = new Headers(response.headers);
+  headers.set("cache-control", "no-store");
+  return new Response(response.body, { status: response.status, statusText: response.statusText, headers });
 }
 
 function allowedOrigin(request: Request, hostnames: string[]) {
@@ -325,6 +336,7 @@ function configuredRestLimit(path: string, env: Env): string {
 }
 
 function finalizeResponse(response: Response, request: Request, env: Env, context: RequestContext): Response {
+  if (context.path === "/mcp" || !response.headers.has("cache-control")) response.headers.set("cache-control", "no-store");
   response.headers.set("x-request-id", context.requestId);
   if (context.restRequest) {
     const configuredLimit = configuredRestLimit(context.path, env);
@@ -416,9 +428,11 @@ async function staticRoute(path: string, request: Request, env: Env, build: Retu
   }
   let response: Response;
   if (path === "/") response = new Response(null, { status: 302, headers: { location: new URL("/docs", request.url).toString(), "cache-control": "no-store" } });
-  else if (path === "/healthz") response = json({ status: "ok", build });
-  else if (path === "/readyz") response = await readinessResponse(env, build, failures);
-  else if (path === "/docs" || path === "/docs/") response = docsResponse();
+  else if (path === "/healthz") response = json({ status: "ok", build }, 200, { "cache-control": "no-store" });
+  else if (path === "/readyz") {
+    response = await readinessResponse(env, build, failures);
+    response.headers.set("cache-control", "no-store");
+  } else if (path === "/docs" || path === "/docs/") response = await cachePublicGet(docsResponse(), request);
   else response = await staticAsset(request, env, path, "application/yaml; charset=utf-8");
   if (request.method === "HEAD") return new Response(null, { status: response.status, statusText: response.statusText, headers: response.headers });
   return response;
@@ -473,6 +487,7 @@ async function routeRestRequest(request: Request, path: string, env: Env, ctx: E
   let response: Response;
   if (!cacheKey) {
     response = await generateRestResponse(request, path, env, dependencies);
+    if (path === "/v1/puzzles/generate") observeDifficultyGeneration(response, ctx);
   } else {
     const cached = cachedGeneratedPuzzle(dependencies.cache, cacheKey, dependencies.clock());
     if (cached) {
@@ -480,12 +495,11 @@ async function routeRestRequest(request: Request, path: string, env: Env, ctx: E
     } else {
       let generation = dependencies.inFlight.get(cacheKey);
       if (!generation) {
-        generation = (async () => cacheGeneratedPuzzle(
-          dependencies.cache,
-          cacheKey,
-          await generateRestResponse(request, path, env, dependencies),
-          dependencies.clock(),
-        ))();
+        generation = (async () => {
+          const generated = await generateRestResponse(request, path, env, dependencies);
+          observeDifficultyGeneration(generated, ctx);
+          return cacheGeneratedPuzzle(dependencies.cache, cacheKey, generated, dependencies.clock());
+        })();
         dependencies.inFlight.set(cacheKey, generation);
       }
       try {
@@ -495,7 +509,6 @@ async function routeRestRequest(request: Request, path: string, env: Env, ctx: E
       }
     }
   }
-  if (path === "/v1/puzzles/generate") observeDifficultyGeneration(response, ctx);
   return cachePublicGet(response, request);
 }
 
@@ -615,8 +628,21 @@ async function dispatchWorkerRequest(
   context: RequestContext,
   dependencies: WorkerRuntimeDependencies,
 ): Promise<Response> {
-  const finish = (response: Response) => finalizeResponse(response, request, env, context);
+  const finish = (response: Response) => finalizeResponse(new Response(response.body, {
+    status: response.status,
+    statusText: response.statusText,
+    headers: new Headers(response.headers),
+  }), request, env, context);
   const build = buildInfo(env);
+  const cacheableStaticPath = path === "/docs" || path === "/docs/"
+    || path === "/openapi/v1.yaml" || path === "/openapi/chatgpt-actions-v1.yaml";
+  if (request.method === "GET" && cacheableStaticPath && dependencies.options.cachedPublicFetch) {
+    const cacheRequest = new Request(request);
+    cacheRequest.headers.delete("origin");
+    cacheRequest.headers.delete("if-none-match");
+    const cached = await dependencies.options.cachedPublicFetch(cacheRequest, ctx);
+    return finish(await cachePublicGet(cached, request));
+  }
   const staticResponse = await staticRoute(path, request, env, build, dependencies.failures);
   if (staticResponse) return finish(staticResponse);
   if (context.restRequest && request.method === "OPTIONS") return finish(corsPreflight(request, context.responseCorsHeaders));
@@ -628,6 +654,15 @@ async function dispatchWorkerRequest(
       () => { dependencies.failures.verify = true; });
     context.rateLimitScope = restRateLimitConfiguration(path, env).scope;
     if (context.rateLimitDecision.limited) return finish(tooManyRequests());
+  }
+
+  const cacheableRestPath = path === "/v1/puzzles/generate" || path === "/v1/scenarios" || path === "/v1/capabilities";
+  if (request.method === "GET" && cacheableRestPath && dependencies.options.cachedPublicFetch) {
+    const cacheRequest = new Request(request);
+    cacheRequest.headers.delete("origin");
+    cacheRequest.headers.delete("if-none-match");
+    const cached = await dependencies.options.cachedPublicFetch(cacheRequest, ctx);
+    return finish(await cachePublicGet(cached, request));
   }
 
   if (path === "/mcp") {
@@ -689,6 +724,33 @@ export function createWorker(options: WorkerOptions = {}) {
   return {
     fetch: (request: Request, env: Env, ctx: ExecutionContext) => handleWorkerRequest(request, env, ctx, dependencies),
   } satisfies ExportedHandler<Env>;
+}
+
+export function createCachedPublicWorker() {
+  const cache = new GeneratedPuzzleCache();
+  const inFlight = new Map<string, Promise<Response>>();
+  const failures: ProviderFailures = { rest: false, restGenerate: false, verify: false, mcpPreAuth: false, mcp: false, mcpGenerate: false, mcpPuzzleAction: false, outcomeTelemetry: false };
+  return {
+    fetch: (request: Request, env: Env, ctx: ExecutionContext): Promise<Response> => {
+      const path = new URL(request.url).pathname;
+      if (request.method !== "GET") return Promise.resolve(json({ error: { code: "method_not_allowed", message: "Method not allowed" } }, 405, { "cache-control": "no-store" }));
+      if (path === "/docs" || path === "/docs/") return cachePublicGet(docsResponse(), request);
+      if (path === "/openapi/v1.yaml" || path === "/openapi/chatgpt-actions-v1.yaml") {
+        return staticAsset(request, env, path, "application/yaml; charset=utf-8");
+      }
+      if (path === "/v1/puzzles/generate" || path === "/v1/scenarios" || path === "/v1/capabilities") {
+        return routeRestRequest(request, path, env, ctx, {
+          options: {},
+          cache,
+          inFlight,
+          clock: Date.now,
+          build: buildInfo(env),
+          failures,
+        }).then(noStoreIfUnspecified);
+      }
+      return Promise.resolve(json({ error: { code: "not_found", message: "Not found" } }, 404, { "cache-control": "no-store" }));
+    },
+  };
 }
 
 export default createWorker();

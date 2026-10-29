@@ -48,7 +48,7 @@ replay. The currently supported five-row templates are `open-division-v2`,
 `championship-bridge-v1`, and `championship-circuit-v2`; all use the IJF sequence `-60 kg`, `-66 kg`,
 `-73 kg`, `-81 kg`, `-90 kg`. `championship-bridge-v1` overlaps levels 8–9 with a five-row, three-category board so players can practise the Championship Circuit's board shape before entering its expert range.
 
-For browser games, use the cacheable GET form. Deterministic puzzle and scenario catalogue GET endpoints return `Cache-Control: public, max-age=300, s-maxage=300, must-revalidate`. Browsers and edge caches may serve a fresh stored response for up to 300 seconds; once it is stale, they must revalidate before reuse. `/v1/version` uses `Cache-Control: no-cache`, allowing clients to retain its ETag while always revalidating deployment metadata.
+For browser games, use the cacheable GET form. Deterministic puzzle and scenario catalogue GET endpoints are cached by Workers Cache and return `Cache-Control: public, max-age=300, s-maxage=300, must-revalidate`. Tokenized puzzle responses shorten that window to end at least one second before the configured puzzle-token expiry; a token lifetime of one second disables response caching. Browsers and edge caches must revalidate once a response is stale. `/v1/version` uses `Cache-Control: no-cache`, allowing clients to retain its ETag while always revalidating deployment metadata. Health, readiness, and authenticated MCP responses use `no-store`.
 
 ```js
 const baseUrl = "https://yokaiba.scheimann.workers.dev";
