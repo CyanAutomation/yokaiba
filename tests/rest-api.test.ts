@@ -8,9 +8,17 @@ import { tournamentOrderTemplate } from "../src/templates/tournament-order.js";
 import { createRestRouter } from "../src/api/router.js";
 import { generatePuzzle } from "../src/generation/generator.js";
 import { issuePuzzleToken } from "../src/api/puzzle-token.js";
+import { generatedPuzzleCacheControl } from "../src/api/generation-route.js";
 import { parseYamlDocument } from "./helpers/yaml.js";
 
 type OpenApiObject = Record<string, any>;
+
+test("generated puzzle cache freshness never outlives a configured token", () => {
+  assert.equal(generatedPuzzleCacheControl(undefined), "public, max-age=300, s-maxage=300, must-revalidate");
+  assert.equal(generatedPuzzleCacheControl("secret", 7 * 24 * 60 * 60), "public, max-age=300, s-maxage=300, must-revalidate");
+  assert.equal(generatedPuzzleCacheControl("secret", 300), "public, max-age=299, s-maxage=299, must-revalidate");
+  assert.equal(generatedPuzzleCacheControl("secret", 1), "no-store");
+});
 
 function parseOpenApiYaml(source: string): OpenApiObject {
   const parsed = parseYamlDocument(source);

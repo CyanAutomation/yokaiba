@@ -103,6 +103,32 @@ test("generated puzzle cache stores an immutable response snapshot through its T
   assert.equal(cache.has(key), false);
 });
 
+test("generated puzzle cache honors a shorter per-response expiry", async () => {
+  const cache = new GeneratedPuzzleCache();
+  await cacheGeneratedPuzzle(cache, "short-lived", new Response("tokenized", {
+    headers: { "cache-control": "public, max-age=1, s-maxage=1" },
+  }), 10_000);
+
+  assert.ok(cachedGeneratedPuzzle(cache, "short-lived", 10_999));
+  assert.equal(cachedGeneratedPuzzle(cache, "short-lived", 11_000), undefined);
+
+  await cacheGeneratedPuzzle(cache, "shared-short-lived", new Response("tokenized", {
+    headers: { "cache-control": "public, max-age=10, s-maxage=2" },
+  }), 20_000);
+  assert.ok(cachedGeneratedPuzzle(cache, "shared-short-lived", 21_999));
+  assert.equal(cachedGeneratedPuzzle(cache, "shared-short-lived", 22_000), undefined);
+});
+
+test("generated puzzle cache does not retain no-store responses", async () => {
+  const cache = new GeneratedPuzzleCache();
+  const response = await cacheGeneratedPuzzle(cache, "no-store", new Response("short token", {
+    headers: { "cache-control": "no-store" },
+  }), 10_000);
+
+  assert.equal(await response.text(), "short token");
+  assert.equal(cache.has("no-store"), false);
+});
+
 test("generated puzzle cache evicts least-recently-used bodies to meet its byte budget", async () => {
   const cache = new GeneratedPuzzleCache(10, 10);
   await cacheGeneratedPuzzle(cache, "oldest", new Response("1234"), 0);
@@ -173,6 +199,16 @@ test("generated puzzle cache keys canonicalize routing inputs", async () => {
   ]) assert.notEqual(await key(changed), canonical);
 
   assert.equal(await key("https://first.example/v1/puzzles/generate?templateId=template&seed=seed&difficultyLevel=invalid"), undefined);
+});
+
+test("generated puzzle cache keys distinguish difficulty models and normalize the default", async () => {
+  const key = (model?: string) => generatedPuzzleCacheKey(new Request(
+    `https://example.com/v1/puzzles/generate?templateId=template&seed=seed${model ? `&difficultyModel=${model}` : ""}`,
+  ), undefined);
+
+  assert.equal(await key(), await key("v5"));
+  assert.notEqual(await key("v4"), await key("v5"));
+  assert.notEqual(await key("compare"), await key("v5"));
 });
 
 test("generated puzzle cache keys namespace secrets without exposing them", async () => {

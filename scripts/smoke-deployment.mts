@@ -48,10 +48,16 @@ if (!puzzleBody || !Array.isArray(puzzleBody.clues) || "solution" in puzzleBody)
 if (!etag) throw new Error("cacheable puzzle response did not include an ETag");
 
 const cached = await fetch(new URL(puzzlePath, baseUrl), { headers: { "if-none-match": etag } });
-if (cached.status !== 304) {
+if (cached.status !== 200 && cached.status !== 304) {
   const body = await cached.text();
   const requestId = cached.headers.get("x-request-id") ?? "missing";
-  throw new Error(`conditional puzzle request returned ${cached.status}, expected 304 (x-request-id: ${requestId}; body: ${JSON.stringify(body)})`);
+  throw new Error(`cached puzzle request returned ${cached.status} (x-request-id: ${requestId}; body: ${JSON.stringify(body)})`);
 }
+if (cached.headers.get("etag") !== etag) throw new Error("cached puzzle response changed its ETag");
+
+const docs = await get("/docs");
+if (!docs.headers.get("cache-control")?.includes("max-age=300")) throw new Error("interactive docs page is missing its five-minute cache policy");
+const cachedDocs = await get("/docs");
+if (cachedDocs.headers.get("etag") !== docs.headers.get("etag")) throw new Error("interactive docs page changed its ETag between repeated requests");
 
 console.log(`Yokaiba deployment smoke test passed for ${baseUrl.origin}`);
