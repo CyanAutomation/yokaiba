@@ -75,7 +75,7 @@ jobs:
       - name: Smoke-test deployed public API
         run: |
           if ! npm run deployment:smoke; then
-            echo "::error::The freshly deployed Worker endpoint exposes the expected build, but the canonical endpoint does not. Check that CLOUDFLARE_DEPLOYMENT_URL and its route resolve to the yokaiba Worker in CLOUDFLARE_ACCOUNT_ID."
+            echo "::error::Canonical Worker health and build checks passed, but public API smoke checks failed. Review the smoke response body, request ID, Cloudflare Ray ID, and Worker observability logs."
             exit 1
           fi
         env:
