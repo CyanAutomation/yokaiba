@@ -1,6 +1,6 @@
 import { waitForExpectedDeployment } from "./deployment-probe.mjs";
 import { readDeploymentConfig } from "./deployment-config.mjs";
-import { formatSmokeFailure, probePublicGeneration } from "./deployment-smoke-support.mjs";
+import { entityTagsMatchWeakly, formatSmokeFailure, probePublicGeneration } from "./deployment-smoke-support.mjs";
 
 const { baseUrl, expectedBuildVersion, expectedBuildSha } = readDeploymentConfig(process.env);
 
@@ -54,7 +54,11 @@ if (cached.status !== 304) {
   const body = await cached.text();
   throw new Error(formatSmokeFailure("cached puzzle request", cached, body));
 }
-if (cached.headers.get("etag") !== etag) throw new Error("cached puzzle response changed its ETag");
+const cachedEtag = cached.headers.get("etag");
+if (!entityTagsMatchWeakly(etag, cachedEtag)) {
+  const details = `expected ETag ${etag}; received ${cachedEtag ?? "missing"}`;
+  throw new Error(formatSmokeFailure("cached puzzle response ETag", cached, details));
+}
 
 const docs = await get("/docs");
 if (!docs.headers.get("cache-control")?.includes("max-age=300")) throw new Error("interactive docs page is missing its five-minute cache policy");
