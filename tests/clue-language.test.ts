@@ -65,7 +65,8 @@ test("distance clues state how many positions apart the named competitors finish
     "The -60 kg competitor and the competitor on Tatami 2 were exactly three positions apart in the event order.");
 });
 
-test("v11 names event-order positions and retains between-count wording for paired review", () => {
+// Language contract: docs/difficulty-and-calibration.md#clue-wording-compatibility.
+test("v11 distance clues state position gaps and preserve saved paired-review wording", () => {
   assert.equal(CLUE_LANGUAGE_VERSION, "yokaiba-clue-prose-v11");
 
   const constraint = { kind: "distance", left: { category: "weight", value: "-60 kg" }, right: { category: "tatami", value: "Tatami 2" }, distance: 3 } as const;
