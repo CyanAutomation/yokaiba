@@ -5,6 +5,18 @@ export interface PublicGenerationProbeResult {
   response: Response;
 }
 
+export interface DeploymentSmokeCandidates {
+  seed: string;
+  templateIds: readonly ["tournament-order-v2", "tournament-order-v1"];
+}
+
+export function deploymentSmokeCandidates(buildSha: string): DeploymentSmokeCandidates {
+  return {
+    seed: `deployment-smoke-${buildSha}`,
+    templateIds: ["tournament-order-v2", "tournament-order-v1"],
+  };
+}
+
 function clippedBody(body: string): string {
   return body.length > MAX_FAILURE_BODY_LENGTH
     ? `${body.slice(0, MAX_FAILURE_BODY_LENGTH)}…`

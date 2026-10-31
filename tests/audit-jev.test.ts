@@ -65,7 +65,8 @@ const clue = (): AuditedClue => ({
   evaluationStatus: "pending",
 });
 
-test("audit constraint descriptions cover each supported relation", () => {
+// Semantic-review contract: docs/difficulty-and-calibration.md#logical-semantic-and-observed-difficulty.
+test("JEV review payload semantics describe every supported clue relation", () => {
   const term = { category: "weight", value: "-60 kg" };
   const other = { category: "tatami", value: "Tatami 1" };
   const cases: Array<[ClueConstraint, string]> = [

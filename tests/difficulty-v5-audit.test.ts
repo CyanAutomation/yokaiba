@@ -59,12 +59,20 @@ test("v5 audit summaries retain paired disagreement, target availability, and ou
   assert.match(markdown, /50\.0%/);
 });
 
-test("v5 audit clue metadata describes public constraints without serializing a solution", () => {
+test("v5 audit clue metadata contains only clue identity, relation, and categories", () => {
   const puzzle = generatePuzzle(tournamentOrderV2Template, "audit-clue-metadata");
   const metadata = clueMetadata(puzzle);
 
   assert.equal(metadata.length, puzzle.clues.length);
-  assert.ok(metadata.every(clue => clue.clueId.length > 0 && clue.kind.length > 0 && clue.categories.length > 0));
-  assert.equal("solution" in metadata[0]!, false);
-  assert.equal("value" in metadata[0]!, false);
+  for (const [index, clue] of puzzle.clues.entries()) {
+    const expectedCategories = "category" in clue.constraint
+      ? [clue.constraint.category]
+      : [clue.constraint.left.category, clue.constraint.right.category];
+    assert.deepEqual(metadata[index], {
+      clueId: clue.id,
+      kind: clue.constraint.kind,
+      categories: [...new Set(expectedCategories)].sort(),
+    });
+    assert.deepEqual(Object.keys(metadata[index]!).sort(), ["categories", "clueId", "kind"]);
+  }
 });

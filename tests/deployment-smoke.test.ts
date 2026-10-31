@@ -1,7 +1,8 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { readFile } from "node:fs/promises";
-import { entityTagsMatchWeakly, formatSmokeFailure, probePublicGeneration } from "../scripts/deployment-smoke-support.mjs";
+import { parse } from "smol-toml";
+import { deploymentSmokeCandidates, entityTagsMatchWeakly, formatSmokeFailure, probePublicGeneration } from "../scripts/deployment-smoke-support.mjs";
 
 test("conditional cache validation compares entity tags using HTTP weak comparison", () => {
   assert.equal(entityTagsMatchWeakly('"same-representation"', '"same-representation"'), true);
@@ -13,16 +14,11 @@ test("conditional cache validation compares entity tags using HTTP weak comparis
   assert.equal(entityTagsMatchWeakly(null, '"same-representation"'), false);
 });
 
-test("deployment smoke probe uses a build-specific public generation seed", async () => {
-  const smokeScript = await readFile(new URL("../scripts/smoke-deployment.mts", import.meta.url), "utf8");
-  const smokeSupport = await readFile(new URL("../scripts/deployment-smoke-support.mts", import.meta.url), "utf8");
-
-  assert.match(smokeScript, /const smokeSeed = `deployment-smoke-\$\{expectedBuildSha\}`;/);
-  assert.match(smokeScript, /const smokeTemplateIds = \["tournament-order-v2", "tournament-order-v1"\] as const;/);
-  assert.match(smokeScript, /probePublicGeneration\(baseUrl, smokeSeed, smokeTemplateIds\)/);
-  assert.match(smokeSupport, /const candidateSeed = attempt === 0 \? smokeSeed : `\$\{smokeSeed\}-\$\{attempt\}`;/);
-  assert.match(smokeSupport, /for \(let attempt = 0; attempt < 5; attempt \+= 1\)/);
-  assert.doesNotMatch(smokeScript, /seed=first-puzzle/);
+test("deployment smoke candidates use the released build identity and supported templates", () => {
+  assert.deepEqual(deploymentSmokeCandidates("abc123"), {
+    seed: "deployment-smoke-abc123",
+    templateIds: ["tournament-order-v2", "tournament-order-v1"],
+  });
 });
 
 test("public generation failures include the response body and Cloudflare Ray ID", async () => {
@@ -67,10 +63,12 @@ test("deployment smoke retries generation failures and returns the first success
 });
 
 test("Worker config enables invocation logs for deploy diagnostics", async () => {
-  const wrangler = await readFile(new URL("../wrangler.toml", import.meta.url), "utf8");
+  const wrangler = parse(await readFile(new URL("../wrangler.toml", import.meta.url), "utf8")) as {
+    observability?: { enabled?: boolean; logs?: { invocation_logs?: boolean } };
+  };
 
-  assert.match(wrangler, /\[observability\][\s\S]*?enabled\s*=\s*true/);
-  assert.match(wrangler, /\[observability\.logs\][\s\S]*?invocation_logs\s*=\s*true/);
+  assert.equal(wrangler.observability?.enabled, true);
+  assert.equal(wrangler.observability?.logs?.invocation_logs, true);
 });
 
 test("Worker config binds the puzzle outcome Analytics Engine dataset", async () => {
