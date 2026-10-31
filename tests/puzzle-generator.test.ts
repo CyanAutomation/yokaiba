@@ -520,31 +520,30 @@ test("solver honours limits while retaining deterministic exhaustive results", (
 });
 
 // Profiling contract: docs/development.md#solver-internals documents deterministic injected timing.
-test("diagnostic solver telemetry reports search work with deterministic elapsed time", () => {
+test("solver telemetry reports reproducible search work and constraint checks", () => {
   const clue: Clue = {
     id: "aki-cat",
     constraint: { kind: "matches", subject: "Aki", category: "pet", value: "Cat" },
     text: "Aki has Cat.",
   };
-  let currentTime = 1_000;
-  const advancingClock = () => {
-    const reading = currentTime;
-    currentTime += 25;
-    return reading;
+  const runConstrained = () => {
+    let currentTime = 1_000;
+    const advancingClock = () => {
+      const reading = currentTime;
+      currentTime += 25;
+      return reading;
+    };
+    return solveWithTelemetry(solverFixtureSpec, [clue], 2, advancingClock);
   };
-  const constrained = solveWithTelemetry(solverFixtureSpec, [clue], 2, advancingClock);
-  const unconstrained = solveWithTelemetry(solverFixtureSpec, [], 2, advancingClock);
+  const constrained = runConstrained();
+  const replay = runConstrained();
+  const unconstrained = solveWithTelemetry(solverFixtureSpec, [], 2, () => 1_000);
 
   assert.equal(constrained.solutions.length, 2);
-  for (const result of [constrained, unconstrained]) {
-    assert.ok(Number.isInteger(result.telemetry.nodesVisited));
-    assert.ok(result.telemetry.nodesVisited >= 0);
-    assert.ok(Number.isInteger(result.telemetry.constraintChecks));
-    assert.ok(result.telemetry.constraintChecks >= 0);
-    assert.ok(result.telemetry.nodesVisited > 0, "a nontrivial solve must report search work");
-    assert.equal(result.telemetry.elapsedMs, 25);
-  }
+  assert.deepEqual(constrained.telemetry, replay.telemetry);
+  assert.ok(constrained.telemetry.nodesVisited > 0, "a nontrivial solve must report search work");
   assert.ok(constrained.telemetry.constraintChecks > 0, "a constrained solve must evaluate constraints");
+  assert.equal(constrained.telemetry.elapsedMs, 25);
   assert.equal(unconstrained.telemetry.constraintChecks, 0, "a solve without clues has no constraints to evaluate");
   assert.ok(constrained.solutions.every(solution => satisfiesConstraint(solverFixtureSpec, solution, clue.constraint)));
 });

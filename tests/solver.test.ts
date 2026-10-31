@@ -18,7 +18,8 @@ test("solver handles the maximum supported row count", () => {
   assert.equal(countSolutions(fiveRows, [], 200), 120);
 });
 
-test("solver rejects a grid one row above the supported maximum", () => {
+// Solver contract: docs/development.md#solver-internals.
+test("solver rejects grids above the documented five-row maximum", () => {
   const values = Array.from({ length: MAX_SUPPORTED_ROWS + 1 }, (_, index) => String(index + 1));
   const tooManyRows: PuzzleTemplate = {
     id: "too-many-rows",
