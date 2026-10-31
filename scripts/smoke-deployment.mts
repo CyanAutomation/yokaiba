@@ -1,6 +1,6 @@
 import { waitForExpectedDeployment } from "./deployment-probe.mjs";
 import { readDeploymentConfig } from "./deployment-config.mjs";
-import { entityTagsMatchWeakly, formatSmokeFailure, probePublicGeneration } from "./deployment-smoke-support.mjs";
+import { deploymentSmokeCandidates, entityTagsMatchWeakly, formatSmokeFailure, probePublicGeneration } from "./deployment-smoke-support.mjs";
 
 const { baseUrl, expectedBuildVersion, expectedBuildSha } = readDeploymentConfig(process.env);
 
@@ -38,9 +38,8 @@ if (versionBody.serviceVersion !== expectedBuildVersion || versionBody.buildSha 
 }
 if (!versionBody.generatorVersion || !versionBody.solverVersion) throw new Error("version response is incomplete");
 
-const smokeSeed = `deployment-smoke-${expectedBuildSha}`;
-const smokeTemplateIds = ["tournament-order-v2", "tournament-order-v1"] as const;
-const { path: puzzlePath, response: puzzle } = await probePublicGeneration(baseUrl, smokeSeed, smokeTemplateIds);
+const smokeCandidates = deploymentSmokeCandidates(expectedBuildSha);
+const { path: puzzlePath, response: puzzle } = await probePublicGeneration(baseUrl, smokeCandidates.seed, smokeCandidates.templateIds);
 const etag = puzzle.headers.get("etag");
 const puzzleValue: unknown = await puzzle.json();
 const puzzleBody = asRecord(puzzleValue);

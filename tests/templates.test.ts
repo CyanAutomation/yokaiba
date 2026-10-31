@@ -5,6 +5,7 @@ import { championshipCircuitTemplate } from "../src/templates/championship-circu
 import { openDivisionTemplate } from "../src/templates/open-division.js";
 import { tournamentOrderTemplate } from "../src/templates/tournament-order.js";
 import { tournamentOrderV2Template } from "../src/templates/tournament-order-v2.js";
+import { IJF_SENIOR_MENS_WEIGHT_CLASSES } from "../src/domain/ijf-weight-classes.js";
 
 test("versioned tournament templates share the board while retaining generation metadata", () => {
   assert.deepEqual(tournamentOrderTemplate.categories, tournamentOrderV2Template.categories);
@@ -22,11 +23,16 @@ test("championship templates share their board structure and keep different resu
   assert.deepEqual(championshipCircuitTemplate.metadata?.difficultyCalibration.levelRange, [9, 12]);
 });
 
-test("every template provides a usable weight-division category", () => {
+// Template contract: docs/difficulty-and-calibration.md#clue-wording-compatibility.
+test("every template publishes ordered, valid IJF weight divisions", () => {
   for (const template of [tournamentOrderTemplate, tournamentOrderV2Template, championshipBridgeTemplate, championshipCircuitTemplate, openDivisionTemplate]) {
     const weight = template.categories.find(category => category.id === "weight");
     assert.ok(weight, `${template.id} must expose a weight category`);
-    assert.ok(weight.label.trim().length > 0, `${template.id} must label its weight category`);
+    assert.equal(weight.label, "Weight division", `${template.id} must use the public category label`);
+    assert.equal(weight.ordered, true, `${template.id} must retain competition order`);
     assert.ok(weight.values.length > 0, `${template.id} must publish weight divisions`);
+    assert.ok(weight.values.every(value => IJF_SENIOR_MENS_WEIGHT_CLASSES.includes(value as typeof IJF_SENIOR_MENS_WEIGHT_CLASSES[number])),
+      `${template.id} must use valid IJF weight divisions`);
+    assert.equal(new Set(weight.values).size, weight.values.length, `${template.id} must not repeat weight divisions`);
   }
 });
