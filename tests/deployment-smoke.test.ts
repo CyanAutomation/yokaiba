@@ -72,3 +72,9 @@ test("Worker config enables invocation logs for deploy diagnostics", async () =>
   assert.match(wrangler, /\[observability\][\s\S]*?enabled\s*=\s*true/);
   assert.match(wrangler, /\[observability\.logs\][\s\S]*?invocation_logs\s*=\s*true/);
 });
+
+test("Worker config binds the puzzle outcome Analytics Engine dataset", async () => {
+  const wrangler = await readFile(new URL("../wrangler.toml", import.meta.url), "utf8");
+
+  assert.match(wrangler, /\[\[analytics_engine_datasets\]\]\s+binding\s*=\s*"PUZZLE_OUTCOMES"\s+dataset\s*=\s*"yokaiba_puzzle_outcomes"/);
+});
