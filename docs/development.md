@@ -2,7 +2,7 @@
 
 ## Prerequisites
 
-- Node.js 24.x. The supported range is declared in `package.json`, and `.nvmrc` supplies the version used by CI and local version managers.
+- Node.js 26.x. The supported range is declared in `package.json`, and `.nvmrc` supplies the version used by CI and local version managers.
 - npm, which is bundled with Node.js.
 
 Install and start the local Cloudflare Worker:
