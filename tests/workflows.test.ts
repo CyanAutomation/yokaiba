@@ -23,13 +23,17 @@ test("Node.js version is pinned consistently for local development, package inst
     packages?: Record<string, { engines?: { node?: string } }>;
   };
 
-  assert.equal(readFileSync(new URL("../.nvmrc", import.meta.url), "utf8").trim(), "24");
-  assert.equal(packageJson.engines?.node, ">=24 <25");
+  assert.equal(readFileSync(new URL("../.nvmrc", import.meta.url), "utf8").trim(), "26");
+  assert.equal(packageJson.engines?.node, ">=26 <27");
   assert.equal(packageLock.packages?.[""]?.engines?.node, packageJson.engines?.node);
 
-  for (const name of ["validate-reusable.yml", "deploy-cloudflare.yml"]) {
+  for (const [name, jobName] of [
+    ["validate-reusable.yml", "validate"],
+    ["deploy-cloudflare.yml", "deploy"],
+    ["docs-links.yml", "links"],
+  ]) {
     const workflow = readWorkflow(name);
-    const setupNode = getJob(workflow, name === "validate-reusable.yml" ? "validate" : "deploy").steps
+    const setupNode = getJob(workflow, jobName).steps
       .find((step: Workflow) => String(step.uses).startsWith("actions/setup-node@")) as Workflow | undefined;
 
     assert.equal(setupNode?.with?.["node-version-file"], ".nvmrc", `${name} must use the repository Node.js pin`);
