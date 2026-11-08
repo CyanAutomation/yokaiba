@@ -49,7 +49,7 @@ The response includes the puzzle specification and clues, plus replay metadata. 
 
 ## Run locally
 
-Requirements: Node.js 24.x and npm. The repository pins the Node.js major version in `.nvmrc`. From the repository root:
+Requirements: Node.js 26.x and npm. The repository pins the Node.js major version in `.nvmrc`. From the repository root:
 
 ```sh
 npm ci
@@ -72,7 +72,7 @@ This first result does not require secrets. Local answer verification and hints 
 
 ## Develop and contribute
 
-The repository uses Node.js 24.x, pinned by `.nvmrc` and declared in `package.json`. Validate a change locally with:
+The repository uses Node.js 26.x, pinned by `.nvmrc` and declared in `package.json`. Validate a change locally with:
 
 ```sh
 npm run docs:check
