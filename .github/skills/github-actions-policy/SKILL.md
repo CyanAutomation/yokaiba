@@ -9,7 +9,7 @@ Use this skill for changes under .github/workflows, .github/dependabot.yml, or .
 
 ## Preserve repository controls
 
-- Reuse the shared validation workflow where appropriate. It runs actionlint, docs checks, typecheck, and tests.
+- Reuse the shared validation workflow where appropriate. It runs actionlint, docs checks, typecheck, build, and tests.
 - Keep runner images explicitly versioned and third-party actions pinned to full commit SHAs with readable release comments. Keep the actionlint image pinned by digest.
 - Keep permissions minimal, disable persisted checkout credentials unless needed, and scope secrets to the job or protected environment that uses them.
 - Production deployment must remain restricted to main and the protected production environment. Keep the build version/SHA checks and canonical endpoint smoke and contract checks.
