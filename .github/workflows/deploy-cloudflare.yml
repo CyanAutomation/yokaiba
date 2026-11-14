@@ -22,7 +22,7 @@ jobs:
     # Production releases must always use the protected default branch.
     if: github.ref == 'refs/heads/main'
     needs: validate
-    environment: production
+    environment: cloudflare
     runs-on: ubuntu-24.04
     timeout-minutes: 15
 
@@ -47,7 +47,7 @@ jobs:
       - name: Validate deployment credentials
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
-          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ vars.CLOUDFLARE_ACCOUNT_ID }}
         run: |
           if [ -z "$CLOUDFLARE_API_TOKEN" ] || [ -z "$CLOUDFLARE_ACCOUNT_ID" ]; then
             echo "Required Cloudflare deployment credentials are not configured."
@@ -58,7 +58,7 @@ jobs:
         id: deploy
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
-          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ vars.CLOUDFLARE_ACCOUNT_ID }}
           WRANGLER_OUTPUT_FILE_PATH: ${{ runner.temp }}/wrangler-deploy-output.json
           BUILD_VERSION: ${{ steps.build.outputs.version }}
           BUILD_SHA: ${{ github.sha }}
