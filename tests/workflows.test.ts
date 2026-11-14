@@ -353,6 +353,39 @@ test("pull requests and main deployments share one validation workflow", () => {
   assert.equal(getJob(deploy, "deploy").steps.some((step: Workflow) => step.run === "npm test" || step.run === "npm run typecheck"), false);
 });
 
+test("pull requests review dependency changes with read-only permissions", () => {
+  const workflow = readWorkflow("validate.yml");
+  const job = getJob(workflow, "dependency-review");
+  const review = job.steps.find((step: Workflow) => step.name === "Review dependency changes") as Workflow | undefined;
+
+  assert.ok(workflow.on.pull_request);
+  assert.deepEqual(workflow.on.pull_request.branches, ["main"]);
+  assert.equal(workflow.on.push, undefined);
+  assert.deepEqual(job.permissions, { contents: "read" });
+  assert.equal(job["runs-on"], "ubuntu-24.04");
+  assert.equal(review?.uses, "actions/dependency-review-action@a1d282b36b6f3519aa1f3fc636f609c47dddb294");
+  assert.equal(review?.with?.["fail-on-severity"], "high");
+});
+
+test("shared validation runs the production TypeScript build", () => {
+  const shared = readWorkflow("validate-reusable.yml");
+  const steps = getJob(shared, "validate").steps as Workflow[];
+
+  assert.ok(steps.some(step => step.run === "npm run build"));
+});
+
+test("Kaseki health checks document their pinned upstream commit", () => {
+  for (const name of ["kaseki-dry.yaml", "kaseki-docs.yaml"]) {
+    const source = readFileSync(new URL(`../.github/workflows/${name}`, import.meta.url), "utf8");
+
+    assert.match(
+      source,
+      /uses: CyanAutomation\/kaseki-agent\/\.github\/actions\/verify-controller-health@30db5d15e117b8d8de13eb66766d48cf6b7d618b # ci: add shared health probe action \(2026-10-07\)/,
+      `${name} must preserve the readable note for its pinned commit`,
+    );
+  }
+});
+
 test("Dependabot updates GitHub Actions, npm, and the actionlint Docker base weekly", () => {
   const dependabot = parseYamlDocument(readFileSync(new URL("../.github/dependabot.yml", import.meta.url), "utf8"));
   const ecosystems = (dependabot.updates as Workflow[]).map(update => update["package-ecosystem"]);

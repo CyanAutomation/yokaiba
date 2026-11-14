@@ -58,7 +58,7 @@ jobs:
           }
 
       - name: Verify controller health
-        uses: CyanAutomation/kaseki-agent/.github/actions/verify-controller-health@30db5d15e117b8d8de13eb66766d48cf6b7d618b
+        uses: CyanAutomation/kaseki-agent/.github/actions/verify-controller-health@30db5d15e117b8d8de13eb66766d48cf6b7d618b # ci: add shared health probe action (2026-10-07)
         with:
           base-url: ${{ vars.KASEKI_BASE_URL }}
 
