@@ -35,7 +35,7 @@
     "smol-toml": "^1.9.1",
     "tsx": "^4.20.0",
     "typescript": "^7.0.2",
-    "wrangler": "^4.155.0",
+    "wrangler": "^4.160.0",
     "yaml": "^2.8.1"
   },
   "engines": {
