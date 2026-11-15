@@ -19,6 +19,7 @@ Use this skill for changes to src/api, src/mcp, public/openapi, API documentatio
 - Public generation, hints, and verification must not return a hidden solution or answer placement.
 - Keep puzzle-token signing, expiry, key rotation, and fingerprint verification consistent across REST and MCP flows.
 - Keep REST authentication, MCP authentication, host allowlists, and rate limits distinct; do not weaken them to make a test pass.
+- Keep `/v1/events` and `/v1/feedback` distinct. Events are versioned, anonymous, self-reported calibration telemetry written to Analytics Engine; feedback is idempotent player rating data stored in D1. Both derive puzzle identity from a verified v4 token, but neither proves that a player completed a puzzle. Follow the [feedback and telemetry lifecycle skill](../feedback-data-lifecycle/SKILL.md) for data-path changes.
 - Update the OpenAPI contracts, API usage docs, and relevant route/tool tests whenever a public schema or behavior changes.
 
 ## Test-first workflow
