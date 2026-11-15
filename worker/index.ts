@@ -21,7 +21,7 @@ import {
   type RateLimitStore,
 } from "./rate-limit.js";
 export { createRateLimiter } from "./rate-limit.js";
-export type { RateLimitDecision, RateLimiter, RateLimitStore } from "./rate-limit.js";
+export type { RateLimiter, RateLimitStore } from "./rate-limit.js";
 
 export interface Env {
   /** Matches Budokon's API-key secret name and protects the MCP endpoint. */
@@ -544,7 +544,7 @@ async function authenticatedMcpPrincipal(request: Request, env: Env, finish: (re
   return `api-key:${await apiKeyFingerprint(authenticatedApiKey)}`;
 }
 
-async function routeMcpRequest(request: Request, env: Env, dependencies: McpRequestDependencies): Promise<Response> {
+async function applyMcpPreAuthLimit(request: Request, env: Env, dependencies: McpRequestDependencies): Promise<Response | undefined> {
   const preAuthDecision = await resolveMcpRateLimit(
     request,
     env.MCP_PREAUTH_RATE_LIMITER,
@@ -553,10 +553,15 @@ async function routeMcpRequest(request: Request, env: Env, dependencies: McpRequ
     dependencies.rateLimited,
     () => { dependencies.failures.mcpPreAuth = true; },
   );
-  if (dependencies.setRateLimit("mcp-preauth", preAuthDecision)) return dependencies.finish(tooManyRequests());
+  return dependencies.setRateLimit("mcp-preauth", preAuthDecision) ? dependencies.finish(tooManyRequests()) : undefined;
+}
 
-  const principal = await authenticatedMcpPrincipal(request, env, dependencies.finish);
-  if (principal instanceof Response) return principal;
+async function applyMcpPrincipalLimit(
+  request: Request,
+  principal: string,
+  env: Env,
+  dependencies: McpRequestDependencies,
+): Promise<Response | undefined> {
   const principalLimit = await resolveMcpRateLimit(
     request,
     env.MCP_RATE_LIMITER,
@@ -566,36 +571,63 @@ async function routeMcpRequest(request: Request, env: Env, dependencies: McpRequ
     () => { dependencies.failures.mcp = true; },
     `${principal}:mcp`,
   );
-  if (dependencies.setRateLimit("mcp", principalLimit)) return dependencies.finish(tooManyRequests());
+  return dependencies.setRateLimit("mcp", principalLimit) ? dependencies.finish(tooManyRequests()) : undefined;
+}
 
-  for (const toolName of await mcpToolNames(request)) {
-    if (toolName === "generate_puzzle") {
-      const generationLimit = await resolveMcpRateLimit(
-        request,
-        env.MCP_GENERATE_RATE_LIMITER,
-        env.MCP_GENERATE_RATE_LIMIT ?? "10",
-        "mcp-generate",
-        dependencies.rateLimited,
-        () => { dependencies.failures.mcpGenerate = true; },
-        `${principal}:generate_puzzle`,
-        true,
-      );
-      if (dependencies.setRateLimit("mcp-generate", generationLimit)) return dependencies.finish(tooManyRequests());
-    }
-    if (toolName === "verify_puzzle_answer" || toolName === "get_puzzle_hint") {
-      const actionLimit = await resolveMcpRateLimit(
-        request,
-        env.MCP_PUZZLE_ACTION_RATE_LIMITER,
-        env.MCP_PUZZLE_ACTION_RATE_LIMIT ?? "10",
-        "mcp-puzzle-action",
-        dependencies.rateLimited,
-        () => { dependencies.failures.mcpPuzzleAction = true; },
-        `${principal}:${toolName}`,
-        true,
-      );
-      if (dependencies.setRateLimit("mcp-puzzle-action", actionLimit)) return dependencies.finish(tooManyRequests());
-    }
+async function applyMcpToolLimit(
+  request: Request,
+  toolName: string,
+  principal: string,
+  env: Env,
+  dependencies: McpRequestDependencies,
+): Promise<Response | undefined> {
+  if (toolName === "generate_puzzle") {
+    const decision = await resolveMcpRateLimit(
+      request,
+      env.MCP_GENERATE_RATE_LIMITER,
+      env.MCP_GENERATE_RATE_LIMIT ?? "10",
+      "mcp-generate",
+      dependencies.rateLimited,
+      () => { dependencies.failures.mcpGenerate = true; },
+      `${principal}:generate_puzzle`,
+      true,
+    );
+    return dependencies.setRateLimit("mcp-generate", decision) ? dependencies.finish(tooManyRequests()) : undefined;
   }
+  if (toolName !== "verify_puzzle_answer" && toolName !== "get_puzzle_hint") return undefined;
+  const decision = await resolveMcpRateLimit(
+    request,
+    env.MCP_PUZZLE_ACTION_RATE_LIMITER,
+    env.MCP_PUZZLE_ACTION_RATE_LIMIT ?? "10",
+    "mcp-puzzle-action",
+    dependencies.rateLimited,
+    () => { dependencies.failures.mcpPuzzleAction = true; },
+    `${principal}:${toolName}`,
+    true,
+  );
+  return dependencies.setRateLimit("mcp-puzzle-action", decision) ? dependencies.finish(tooManyRequests()) : undefined;
+}
+
+async function applyMcpToolLimits(request: Request, principal: string, env: Env, dependencies: McpRequestDependencies): Promise<Response | undefined> {
+  for (const toolName of await mcpToolNames(request)) {
+    const rejection = await applyMcpToolLimit(request, toolName, principal, env, dependencies);
+    if (rejection) return rejection;
+  }
+  return undefined;
+}
+
+async function routeMcpRequest(request: Request, env: Env, dependencies: McpRequestDependencies): Promise<Response> {
+  const preAuthRejection = await applyMcpPreAuthLimit(request, env, dependencies);
+  if (preAuthRejection) return preAuthRejection;
+
+  const principal = await authenticatedMcpPrincipal(request, env, dependencies.finish);
+  if (principal instanceof Response) return principal;
+
+  const principalRejection = await applyMcpPrincipalLimit(request, principal, env, dependencies);
+  if (principalRejection) return principalRejection;
+
+  const toolRejection = await applyMcpToolLimits(request, principal, env, dependencies);
+  if (toolRejection) return toolRejection;
   return dependencies.finish(await createYokaibaMcpHandler(templates, {
     puzzleTokenSecret: env.PUZZLE_TOKEN_SECRET,
     puzzleTokenPreviousSecrets: env.PUZZLE_TOKEN_SECRET ? previousPuzzleTokenSecrets(env) : [],
@@ -620,6 +652,78 @@ function invalidUrlResponse(request: Request, startedAt: number, requestId: stri
   return response;
 }
 
+const STATIC_CACHE_PATHS = new Set(["/docs", "/docs/", "/openapi/v1.yaml", "/openapi/chatgpt-actions-v1.yaml"]);
+const REST_CACHE_PATHS = new Set(["/v1/puzzles/generate", "/v1/scenarios", "/v1/capabilities"]);
+
+function requestFinalizer(request: Request, env: Env, context: RequestContext): (response: Response) => Response {
+  return response => finalizeResponse(new Response(response.body, {
+    status: response.status,
+    statusText: response.statusText,
+    headers: new Headers(response.headers),
+  }), request, env, context);
+}
+
+async function tryCachedPublicGet(
+  request: Request,
+  path: string,
+  cacheablePaths: ReadonlySet<string>,
+  ctx: ExecutionContext,
+  options: WorkerOptions,
+  finish: (response: Response) => Response,
+): Promise<Response | undefined> {
+  if (request.method !== "GET" || !cacheablePaths.has(path) || !options.cachedPublicFetch) return undefined;
+  const cacheRequest = new Request(request);
+  cacheRequest.headers.delete("origin");
+  cacheRequest.headers.delete("if-none-match");
+  const cached = await options.cachedPublicFetch(cacheRequest, ctx);
+  return finish(await cachePublicGet(cached, request));
+}
+
+async function applyRestRequestLimit(
+  request: Request,
+  path: string,
+  env: Env,
+  context: RequestContext,
+  dependencies: WorkerRuntimeDependencies,
+  finish: (response: Response) => Response,
+): Promise<Response | undefined> {
+  if (!context.restRequest) return undefined;
+  context.rateLimitDecision = await restRateLimitDecision(dependencies.rateLimited, request, env,
+    () => { dependencies.failures.rest = true; },
+    () => { dependencies.failures.restGenerate = true; },
+    () => { dependencies.failures.verify = true; });
+  context.rateLimitScope = restRateLimitConfiguration(path, env).scope;
+  return context.rateLimitDecision.limited ? finish(tooManyRequests()) : undefined;
+}
+
+function mcpRequestDependencies(
+  context: RequestContext,
+  dependencies: WorkerRuntimeDependencies,
+  finish: (response: Response) => Response,
+): McpRequestDependencies {
+  return {
+    rateLimited: dependencies.rateLimited,
+    failures: dependencies.failures,
+    finish,
+    setRateLimit: (scope, decision) => {
+      context.rateLimitScope = scope;
+      context.rateLimitDecision = decision;
+      return decision.limited;
+    },
+  };
+}
+
+function restRequestDependencies(dependencies: WorkerRuntimeDependencies, build: ReturnType<typeof buildInfo>): RestRequestDependencies {
+  return {
+    options: dependencies.options,
+    cache: dependencies.cache,
+    inFlight: dependencies.inFlight,
+    clock: dependencies.clock,
+    build,
+    failures: dependencies.failures,
+  };
+}
+
 async function dispatchWorkerRequest(
   request: Request,
   path: string,
@@ -628,63 +732,23 @@ async function dispatchWorkerRequest(
   context: RequestContext,
   dependencies: WorkerRuntimeDependencies,
 ): Promise<Response> {
-  const finish = (response: Response) => finalizeResponse(new Response(response.body, {
-    status: response.status,
-    statusText: response.statusText,
-    headers: new Headers(response.headers),
-  }), request, env, context);
+  const finish = requestFinalizer(request, env, context);
   const build = buildInfo(env);
-  const cacheableStaticPath = path === "/docs" || path === "/docs/"
-    || path === "/openapi/v1.yaml" || path === "/openapi/chatgpt-actions-v1.yaml";
-  if (request.method === "GET" && cacheableStaticPath && dependencies.options.cachedPublicFetch) {
-    const cacheRequest = new Request(request);
-    cacheRequest.headers.delete("origin");
-    cacheRequest.headers.delete("if-none-match");
-    const cached = await dependencies.options.cachedPublicFetch(cacheRequest, ctx);
-    return finish(await cachePublicGet(cached, request));
-  }
+  const cachedStatic = await tryCachedPublicGet(request, path, STATIC_CACHE_PATHS, ctx, dependencies.options, finish);
+  if (cachedStatic) return cachedStatic;
+
   const staticResponse = await staticRoute(path, request, env, build, dependencies.failures);
   if (staticResponse) return finish(staticResponse);
   if (context.restRequest && request.method === "OPTIONS") return finish(corsPreflight(request, context.responseCorsHeaders));
 
-  if (context.restRequest) {
-    context.rateLimitDecision = await restRateLimitDecision(dependencies.rateLimited, request, env,
-      () => { dependencies.failures.rest = true; },
-      () => { dependencies.failures.restGenerate = true; },
-      () => { dependencies.failures.verify = true; });
-    context.rateLimitScope = restRateLimitConfiguration(path, env).scope;
-    if (context.rateLimitDecision.limited) return finish(tooManyRequests());
-  }
+  const limited = await applyRestRequestLimit(request, path, env, context, dependencies, finish);
+  if (limited) return limited;
 
-  const cacheableRestPath = path === "/v1/puzzles/generate" || path === "/v1/scenarios" || path === "/v1/capabilities";
-  if (request.method === "GET" && cacheableRestPath && dependencies.options.cachedPublicFetch) {
-    const cacheRequest = new Request(request);
-    cacheRequest.headers.delete("origin");
-    cacheRequest.headers.delete("if-none-match");
-    const cached = await dependencies.options.cachedPublicFetch(cacheRequest, ctx);
-    return finish(await cachePublicGet(cached, request));
-  }
+  const cachedRest = await tryCachedPublicGet(request, path, REST_CACHE_PATHS, ctx, dependencies.options, finish);
+  if (cachedRest) return cachedRest;
 
-  if (path === "/mcp") {
-    return routeMcpRequest(request, env, {
-      rateLimited: dependencies.rateLimited,
-      failures: dependencies.failures,
-      finish,
-      setRateLimit: (scope, decision) => {
-        context.rateLimitScope = scope;
-        context.rateLimitDecision = decision;
-        return decision.limited;
-      },
-    });
-  }
-  return finish(await routeRestRequest(request, path, env, ctx, {
-    options: dependencies.options,
-    cache: dependencies.cache,
-    inFlight: dependencies.inFlight,
-    clock: dependencies.clock,
-    build,
-    failures: dependencies.failures,
-  }));
+  if (path === "/mcp") return routeMcpRequest(request, env, mcpRequestDependencies(context, dependencies, finish));
+  return finish(await routeRestRequest(request, path, env, ctx, restRequestDependencies(dependencies, build)));
 }
 
 async function handleWorkerRequest(request: Request, env: Env, ctx: ExecutionContext, dependencies: WorkerRuntimeDependencies): Promise<Response> {

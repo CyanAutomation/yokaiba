@@ -7,6 +7,7 @@ import { DIFFICULTY_BANDS_V5, DIFFICULTY_MODEL_V5, type DifficultyProfileV1 } fr
 import { isIjfSeniorMensWeightClass } from "../domain/ijf-weight-classes.js";
 import { renderClues } from "./clue-text.js";
 import { random, shuffled } from "./rng.js";
+import { v5ClueWeight } from "./v5-clue-weight.js";
 
 export const GENERATOR_VERSION = "yokaiba-generator-v6";
 /** Version of the built-in solver used when callers do not provide one. */
@@ -134,6 +135,41 @@ function sameRowAndDistanceCandidates(
   return candidates;
 }
 
+function crossCategoryPairCandidates(
+  leftCategory: PuzzleTemplate["categories"][number],
+  rightCategory: PuzzleTemplate["categories"][number],
+  solution: Solution,
+): Clue[] {
+  const candidates: Clue[] = [];
+  const leftAssignment = solution.assignments[leftCategory.id]!;
+  const rightAssignment = solution.assignments[rightCategory.id]!;
+  for (let leftRow = 0; leftRow < leftAssignment.length; leftRow += 1) {
+    for (let rightRow = 0; rightRow < rightAssignment.length; rightRow += 1) {
+      if (leftRow === rightRow) continue;
+      const earlier = leftRow < rightRow
+        ? { category: leftCategory.id, value: leftAssignment[leftRow]! }
+        : { category: rightCategory.id, value: rightAssignment[rightRow]! };
+      const later = leftRow < rightRow
+        ? { category: rightCategory.id, value: rightAssignment[rightRow]! }
+        : { category: leftCategory.id, value: leftAssignment[leftRow]! };
+      const id = `${leftCategory.id}-${leftRow}-${rightCategory.id}-${rightRow}`;
+      candidates.push({
+        id: `before-cross-${id}`,
+        constraint: { kind: "before", left: earlier, right: later },
+        text: "",
+      });
+      if (Math.abs(leftRow - rightRow) === 1) {
+        candidates.push({
+          id: `adjacent-cross-${id}`,
+          constraint: { kind: "adjacent", left: earlier, right: later },
+          text: "",
+        });
+      }
+    }
+  }
+  return candidates;
+}
+
 /** Relate values from different grids by their position in the tournament order. */
 function crossCategoryOrderCandidates(
   categories: readonly PuzzleTemplate["categories"][number][],
@@ -142,34 +178,7 @@ function crossCategoryOrderCandidates(
   const candidates: Clue[] = [];
   for (let leftIndex = 0; leftIndex < categories.length; leftIndex += 1) {
     for (let rightIndex = leftIndex + 1; rightIndex < categories.length; rightIndex += 1) {
-      const leftCategory = categories[leftIndex]!;
-      const rightCategory = categories[rightIndex]!;
-      const leftAssignment = solution.assignments[leftCategory.id]!;
-      const rightAssignment = solution.assignments[rightCategory.id]!;
-      for (let leftRow = 0; leftRow < leftAssignment.length; leftRow += 1) {
-        for (let rightRow = 0; rightRow < rightAssignment.length; rightRow += 1) {
-          if (leftRow === rightRow) continue;
-          const earlier = leftRow < rightRow
-            ? { category: leftCategory.id, value: leftAssignment[leftRow]! }
-            : { category: rightCategory.id, value: rightAssignment[rightRow]! };
-          const later = leftRow < rightRow
-            ? { category: rightCategory.id, value: rightAssignment[rightRow]! }
-            : { category: leftCategory.id, value: leftAssignment[leftRow]! };
-          const id = `${leftCategory.id}-${leftRow}-${rightCategory.id}-${rightRow}`;
-          candidates.push({
-            id: `before-cross-${id}`,
-            constraint: { kind: "before", left: earlier, right: later },
-            text: "",
-          });
-          if (Math.abs(leftRow - rightRow) === 1) {
-            candidates.push({
-              id: `adjacent-cross-${id}`,
-              constraint: { kind: "adjacent", left: earlier, right: later },
-              text: "",
-            });
-          }
-        }
-      }
+      candidates.push(...crossCategoryPairCandidates(categories[leftIndex]!, categories[rightIndex]!, solution));
     }
   }
   return candidates;
@@ -283,60 +292,6 @@ function prioritizeForDifficulty(candidates: readonly Clue[], difficultyLevel: G
     clueWeight(left.constraint.kind, difficultyLevel, strategy) - clueWeight(right.constraint.kind, difficultyLevel, strategy));
 }
 
-function v5ClueWeight(clue: Clue, level: DifficultyLevel, strategy: number, rowCount: number): number {
-  const kind = clue.constraint.kind;
-  if (level >= 11 && (kind === "before" || kind === "adjacent")
-    && clue.constraint.left.category !== clue.constraint.right.category) return -6 + (strategy % 6);
-  if (level >= 3 && level <= 5) {
-    const anchorRow = strategy % rowCount;
-    if (kind === "matches") {
-      const row = /(?:^|-)matches-.+-([0-9]+)$/.exec(clue.id)?.[1];
-      return row !== undefined && Number(row) === anchorRow ? 0 : 36;
-    }
-    if (kind === "notMatches") return 30;
-    if (level === 3) return kind === "before" || kind === "distance" ? 6 : kind === "sameRow" ? 8 : kind === "adjacent" ? 12 : 18;
-    if (level === 4) return kind === "sameRow" || kind === "adjacent" ? 6 : kind === "before" ? 12 : 18;
-    return kind === "sameRow" ? 6 : kind === "distance" ? 9 : kind === "before" ? 12 : kind === "adjacent" ? 18 : 24;
-  }
-  const family = kind === "matches" ? 0 : kind === "notMatches" ? 1 : kind === "before" ? 2
-    : kind === "adjacent" ? 3 : kind === "sameRow" ? 4 : 5;
-  const preferences: readonly (readonly number[])[] = [
-    [0, 1, 5, 4, 3, 6],  // Level 1: direct facts and exclusions form easy starts.
-    [1, 0, 4, 3, 2, 5],  // Level 2: slightly more use of a small number of relations.
-    [1, 0, 3, 2, 4, 5],
-    [1, 0, 4, 3, 2, 5],
-    [1, 0, 2, 3, 4, 5],
-    [5, 4, 2, 3, 0, 1],
-    [3, 2, 1, 3, 0, 4],
-    [4, 3, 2, 3, 0, 1],
-    [5, 4, 2, 3, 1, 0],  // Level 9: exact-distance and same-row relations lead.
-    [4, 5, 2, 3, 1, 0],  // Level 10: distance and same-row relations lead.
-    [5, 4, 1, 3, 2, 0],  // Level 11: exact-distance clues lead, then ordering.
-    [5, 4, 3, 2, 1, 0],  // Level 12: lead with exact-distance and cross-category row links.
-  ];
-  let rank = preferences[level - 1]![family]!;
-  if (level >= 6) {
-    // Explore three deterministic clue-family profiles on harder boards. The
-    // first preserves the calibrated order; the others vary the priority among
-    // relation families while keeping the target-specific relation families
-    // ahead of direct facts.
-    const profile = Math.floor(strategy / 4) % 3;
-    const alternativeOrders = level <= 8
-      ? [
-        [5, 4, 1, 2, 3, 0], // exact cross-category relations lead, with exclusions before ordering
-        [4, 5, 2, 1, 3, 0], // same-row and distance relations lead in the reverse order
-      ]
-      : [
-        [5, 2, 4, 1, 3, 0], // distance, ordering, and same-row links lead
-        [4, 5, 2, 1, 3, 0], // same-row, distance, then ordering and exclusions
-      ];
-    if (profile > 0) rank = alternativeOrders[profile - 1]!.indexOf(family);
-  }
-  // Six stable rotations keep equal-rank clue ordering reproducible while
-  // giving candidate search useful structural variety.
-  return rank * 6 + ((family + strategy) % 6);
-}
-
 function prioritizeForV5(candidates: readonly Clue[], difficultyLevel: DifficultyLevel | undefined, next: () => number, strategy = 0): Clue[] {
   const shuffledCandidates = shuffled(candidates, next);
   if (difficultyLevel === undefined) return shuffledCandidates;
@@ -346,6 +301,73 @@ function prioritizeForV5(candidates: readonly Clue[], difficultyLevel: Difficult
   return shuffledCandidates.sort((left, right) =>
     v5ClueWeight(left, difficultyLevel, strategy, rowCount)
     - v5ClueWeight(right, difficultyLevel, strategy, rowCount));
+}
+
+function createClueCandidates(template: PuzzleTemplate, solution: Solution, next: () => number, options: GenerationOptions): Clue[] {
+  return [
+    ...directCandidates(template, solution, next),
+    ...relationalCandidates(template, solution, next),
+    ...(options.difficultyModel === "v5" && (options.difficultyLevel ?? 0) >= 11
+      ? crossCategoryOrderCandidates(generationDimensions(template).categories, solution)
+      : []),
+  ];
+}
+
+interface UniqueClueStart {
+  selected: Clue[];
+  nextCandidate: number;
+  needsHumanSolvingClues: boolean;
+}
+
+function findUniqueClueStart(
+  template: PuzzleTemplate,
+  candidates: readonly Clue[],
+  solver: PuzzleSolver,
+  useV5: boolean,
+): UniqueClueStart {
+  const selected: Clue[] = [];
+  for (let index = 0; index < candidates.length; index += 1) {
+    if (solver.countSolutions(template, selected, 2) !== 1) {
+      selected.push(candidates[index]!);
+      continue;
+    }
+    const needsHumanSolvingClues = useV5 && !evaluateHumanDeductionTraceV5(template, selected).solved;
+    return { selected, nextCandidate: index, needsHumanSolvingClues };
+  }
+  if (solver.countSolutions(template, selected, 2) !== 1) throw new Error("candidate pool did not establish uniqueness");
+  return { selected, nextCandidate: candidates.length, needsHumanSolvingClues: false };
+}
+
+function addHumanSolvingClues(
+  template: PuzzleTemplate,
+  selected: Clue[],
+  candidates: readonly Clue[],
+  startAt: number,
+): void {
+  let supplementalClues = 0;
+  for (let index = startAt; index < candidates.length; index += 1) {
+    if (evaluateHumanDeductionTraceV5(template, selected).solved || supplementalClues >= V5_SUPPLEMENTAL_CLUE_LIMIT) break;
+    selected.push(candidates[index]!);
+    supplementalClues += 1;
+  }
+}
+
+function removeRedundantClues(template: PuzzleTemplate, selected: Clue[], solver: PuzzleSolver, useV5: boolean): void {
+  for (let index = selected.length - 1; index >= 0; index -= 1) {
+    const without = selected.filter((_clue, candidateIndex) => candidateIndex !== index);
+    const remainsUnique = solver.countSolutions(template, without, 2) === 1;
+    const remainsHumanSolvable = !useV5 || evaluateHumanDeductionTraceV5(template, without).solved;
+    if (remainsUnique && remainsHumanSolvable) selected.splice(index, 1);
+  }
+}
+
+function selectPuzzleClues(template: PuzzleTemplate, candidates: readonly Clue[], solver: PuzzleSolver, useV5: boolean): Clue[] {
+  const start = findUniqueClueStart(template, candidates, solver, useV5);
+  const selected = [...start.selected];
+  if (start.needsHumanSolvingClues) addHumanSolvingClues(template, selected, candidates, start.nextCandidate);
+  if (solver.countSolutions(template, selected, 2) !== 1) throw new Error("candidate pool did not establish uniqueness");
+  removeRedundantClues(template, selected, solver, useV5);
+  return selected;
 }
 
 /**
@@ -359,44 +381,13 @@ export function generatePuzzle(template: PuzzleTemplate, seed: string, solver: P
   validateTemplate(template);
   const next = random(`${template.id}:${seed}`);
   const solution = makeSolution(template, next);
-  const selected: Clue[] = [];
-  const clueCandidates = [
-    ...directCandidates(template, solution, next),
-    ...relationalCandidates(template, solution, next),
-    ...(options.difficultyModel === "v5" && (options.difficultyLevel ?? 0) >= 11
-      ? crossCategoryOrderCandidates(generationDimensions(template).categories, solution)
-      : []),
-  ];
+  const clueCandidates = createClueCandidates(template, solution, next, options);
   const strategyRandom = random(`${template.id}:${seed}:strategy:${options.strategy ?? 0}`);
   const candidates = options.difficultyModel === "v5"
     ? prioritizeForV5(clueCandidates, options.difficultyLevel, strategyRandom, options.strategy ?? 0)
     : prioritizeForDifficulty(clueCandidates, options.difficultyLevel, strategyRandom, options.strategy ?? 0);
   const useV5 = options.difficultyModel === "v5";
-  let uniquenessEstablished = false;
-  let supplementalClues = 0;
-  for (const clue of candidates) {
-    if (uniquenessEstablished) {
-      if (evaluateHumanDeductionTraceV5(template, selected).solved || supplementalClues >= V5_SUPPLEMENTAL_CLUE_LIMIT) break;
-      selected.push(clue);
-      supplementalClues += 1;
-      continue;
-    }
-    if (solver.countSolutions(template, selected, 2) === 1) {
-      uniquenessEstablished = true;
-      if (!useV5 || evaluateHumanDeductionTraceV5(template, selected).solved) break;
-      if (supplementalClues >= V5_SUPPLEMENTAL_CLUE_LIMIT) break;
-      selected.push(clue);
-      supplementalClues += 1;
-      continue;
-    }
-    selected.push(clue);
-  }
-  if (solver.countSolutions(template, selected, 2) !== 1) throw new Error("candidate pool did not establish uniqueness");
-  for (let index = selected.length - 1; index >= 0; index -= 1) {
-    const without = selected.filter((_clue, candidateIndex) => candidateIndex !== index);
-    if (solver.countSolutions(template, without, 2) === 1
-      && (!useV5 || evaluateHumanDeductionTraceV5(template, without).solved)) selected.splice(index, 1);
-  }
+  const selected = selectPuzzleClues(template, candidates, solver, useV5);
   const profile = options.difficultyModel ? assessDifficultyProfileV5(template, selected) : undefined;
   const legacyDifficulty = profile?.legacy ?? assessPuzzleDifficulty(template, selected);
   const difficulty = useV5 && profile ? difficultyForV5(profile) : legacyDifficulty;
@@ -456,6 +447,104 @@ function v5CandidateRank(puzzle: GeneratedPuzzle, requestedDifficultyLevel: Diff
   return Math.abs(assessment.score - midpoint) + depthShortfall * 3 + accessibilityPenalty + cascadePenalty - diversityCredit;
 }
 
+type CandidateScoreRange = NonNullable<DifficultyUnavailableError["diagnostics"]>["candidateScoreRange"];
+
+interface V5CandidateSelection {
+  readonly requestedLevel: DifficultyLevel;
+  readonly minimumLevel: DifficultyLevel;
+  readonly maximumLevel: DifficultyLevel;
+  readonly observedLevels: Set<DifficultyLevel>;
+  best?: GeneratedPuzzle;
+  bestRank: number;
+  eligibleCandidates: number;
+  strategiesAttempted: number;
+  minimumScore: number;
+  maximumScore: number;
+  completeCandidates: number;
+  incompleteCandidates: number;
+}
+
+function createV5CandidateSelection(
+  requestedLevel: DifficultyLevel,
+  minimumLevel: DifficultyLevel,
+  maximumLevel: DifficultyLevel,
+): V5CandidateSelection {
+  return {
+    requestedLevel,
+    minimumLevel,
+    maximumLevel,
+    observedLevels: new Set(),
+    bestRank: Number.POSITIVE_INFINITY,
+    eligibleCandidates: 0,
+    strategiesAttempted: 0,
+    minimumScore: Number.POSITIVE_INFINITY,
+    maximumScore: Number.NEGATIVE_INFINITY,
+    completeCandidates: 0,
+    incompleteCandidates: 0,
+  };
+}
+
+function observeV5Candidate(selection: V5CandidateSelection, candidate: GeneratedPuzzle, strategy: number): void {
+  const logical = candidate.difficultyProfile!.logical;
+  if (logical.inDifficultyBand && logical.status === "complete"
+    && logical.level >= selection.minimumLevel && logical.level <= selection.maximumLevel) {
+    selection.observedLevels.add(logical.level);
+  }
+  selection.minimumScore = Math.min(selection.minimumScore, logical.score);
+  selection.maximumScore = Math.max(selection.maximumScore, logical.score);
+  if (logical.status === "complete") selection.completeCandidates += 1;
+  else selection.incompleteCandidates += 1;
+  if (!logical.inDifficultyBand || logical.level !== selection.requestedLevel || logical.status !== "complete") return;
+
+  selection.eligibleCandidates += 1;
+  const rank = v5CandidateRank(candidate, selection.requestedLevel);
+  if (selection.best && !(rank < selection.bestRank)) return;
+  selection.bestRank = rank;
+  selection.best = { ...candidate, requestedDifficultyLevel: selection.requestedLevel, generationStrategy: strategy };
+}
+
+function v5CandidateScoreRange(selection: V5CandidateSelection): NonNullable<CandidateScoreRange> | undefined {
+  if (!selection.strategiesAttempted) return undefined;
+  return {
+    minimum: selection.minimumScore,
+    maximum: selection.maximumScore,
+    complete: selection.completeCandidates,
+    incomplete: selection.incompleteCandidates,
+  };
+}
+
+function selectedV5Candidate(selection: V5CandidateSelection, strategyLimit: number): GeneratedPuzzle {
+  const best = selection.best!;
+  return {
+    ...best,
+    selectionDiagnostics: {
+      modelVersion: DIFFICULTY_MODEL_V5,
+      strategyBudget: strategyLimit,
+      strategiesAttempted: selection.strategiesAttempted,
+      eligibleCandidates: selection.eligibleCandidates,
+      selectedScore: best.difficultyProfile!.logical.score,
+      selectedRankDistance: Number(selection.bestRank.toFixed(3)),
+      candidateScoreRange: v5CandidateScoreRange(selection)!,
+    },
+  };
+}
+
+function v5UnavailableError(templateId: string, seed: string, selection: V5CandidateSelection): DifficultyUnavailableError {
+  return new DifficultyUnavailableError(
+    templateId,
+    seed,
+    selection.requestedLevel,
+    [...selection.observedLevels].sort((left, right) => left - right),
+    {
+      modelVersion: DIFFICULTY_MODEL_V5,
+      strategiesAttempted: selection.strategiesAttempted,
+      eligibleCandidates: selection.eligibleCandidates,
+      reason: "no_candidate_in_band",
+      candidateScoreRange: v5CandidateScoreRange(selection),
+    },
+  );
+}
+
 /** Search a strict, deterministic strategy budget and retain the best in-band v5 candidate. */
 export function generatePuzzleAtDifficultyV5(
   template: PuzzleTemplate,
@@ -470,72 +559,18 @@ export function generatePuzzleAtDifficultyV5(
       modelVersion: DIFFICULTY_MODEL_V5, strategiesAttempted: 0, eligibleCandidates: 0, reason: "no_candidate_in_band",
     });
   }
-  const observedLevels = new Set<DifficultyLevel>();
-  let best: GeneratedPuzzle | undefined;
-  let bestRank = Number.POSITIVE_INFINITY;
-  let eligibleCandidates = 0;
-  let strategiesAttempted = 0;
-  let minimumScore = Number.POSITIVE_INFINITY;
-  let maximumScore = Number.NEGATIVE_INFINITY;
-  let completeCandidates = 0;
-  let incompleteCandidates = 0;
+  const selection = createV5CandidateSelection(difficultyLevel, minimumLevel, maximumLevel);
   for (let strategy = 0; strategy < strategyLimit; strategy += 1) {
-    strategiesAttempted += 1;
+    selection.strategiesAttempted += 1;
     const candidate = generatePuzzle(template, seed, solver, {
       difficultyLevel,
       difficultyModel: "v5",
       strategy,
     });
-    const logical = candidate.difficultyProfile!.logical;
-    if (logical.inDifficultyBand && logical.status === "complete"
-      && logical.level >= minimumLevel && logical.level <= maximumLevel) observedLevels.add(logical.level);
-    minimumScore = Math.min(minimumScore, logical.score);
-    maximumScore = Math.max(maximumScore, logical.score);
-    if (logical.status === "complete") completeCandidates += 1;
-    else incompleteCandidates += 1;
-    if (!logical.inDifficultyBand || logical.level !== difficultyLevel || logical.status !== "complete") continue;
-    eligibleCandidates += 1;
-    const rank = v5CandidateRank(candidate, difficultyLevel);
-    if (!best || rank < bestRank) {
-      bestRank = rank;
-      best = { ...candidate, requestedDifficultyLevel: difficultyLevel, generationStrategy: strategy };
-    }
+    observeV5Candidate(selection, candidate, strategy);
   }
-  if (best) return {
-    ...best,
-    selectionDiagnostics: {
-      modelVersion: DIFFICULTY_MODEL_V5,
-      strategyBudget: strategyLimit,
-      strategiesAttempted,
-      eligibleCandidates,
-      selectedScore: best.difficultyProfile!.logical.score,
-      selectedRankDistance: Number(bestRank.toFixed(3)),
-      candidateScoreRange: {
-        minimum: minimumScore,
-        maximum: maximumScore,
-        complete: completeCandidates,
-        incomplete: incompleteCandidates,
-      },
-    },
-  };
-  throw new DifficultyUnavailableError(
-    template.id,
-    seed,
-    difficultyLevel,
-    [...observedLevels].sort((left, right) => left - right),
-    {
-      modelVersion: DIFFICULTY_MODEL_V5,
-      strategiesAttempted,
-      eligibleCandidates,
-      reason: "no_candidate_in_band",
-      candidateScoreRange: strategiesAttempted ? {
-        minimum: minimumScore,
-        maximum: maximumScore,
-        complete: completeCandidates,
-        incomplete: incompleteCandidates,
-      } : undefined,
-    },
-  );
+  if (selection.best) return selectedV5Candidate(selection, strategyLimit);
+  throw v5UnavailableError(template.id, seed, selection);
 }
 
 function generateV5Progressive(template: PuzzleTemplate, seed: string, solver: PuzzleSolver): GeneratedPuzzle {
@@ -582,6 +617,100 @@ export function generateProgressivePuzzle(template: PuzzleTemplate, seed: string
   return generatePuzzleAtDifficulty(template, seed, puzzle.difficulty.level, solver);
 }
 
+function generateLegacyRequest(
+  template: PuzzleTemplate,
+  seed: string,
+  difficultyLevel: DifficultyLevel | undefined,
+  allowSeedFallback: boolean,
+  solver: PuzzleSolver,
+): GeneratedPuzzle {
+  if (difficultyLevel === undefined) return generateProgressivePuzzle(template, seed, solver);
+  return allowSeedFallback
+    ? generatePuzzleAtDifficultyWithFallback(template, seed, difficultyLevel, solver)
+    : generatePuzzleAtDifficulty(template, seed, difficultyLevel, solver);
+}
+
+function generateComparisonRequest(
+  template: PuzzleTemplate,
+  seed: string,
+  difficultyLevel: DifficultyLevel | undefined,
+  allowSeedFallback: boolean,
+  solver: PuzzleSolver,
+): GeneratedPuzzle {
+  const legacy = generateLegacyRequest(template, seed, difficultyLevel, allowSeedFallback, solver);
+  const difficultyProfile = assessDifficultyProfileV5(template, legacy.clues);
+  return { ...legacy, difficultyModel: "compare", difficultyProfile };
+}
+
+function sumOptionalCounts(previous: number | undefined, current: number | undefined): number {
+  return (previous ?? 0) + (current ?? 0);
+}
+
+function mergeCandidateScoreRanges(previous: CandidateScoreRange, current: CandidateScoreRange): CandidateScoreRange {
+  if (current === undefined) return previous;
+  if (previous === undefined) return current;
+  return {
+    minimum: Math.min(previous.minimum, current.minimum),
+    maximum: Math.max(previous.maximum, current.maximum),
+    complete: previous.complete + current.complete,
+    incomplete: previous.incomplete + current.incomplete,
+  };
+}
+
+function mergeV5UnavailableError(
+  templateId: string,
+  seed: string,
+  difficultyLevel: DifficultyLevel,
+  fallbackSeedsAttempted: number,
+  previous: DifficultyUnavailableError | undefined,
+  current: DifficultyUnavailableError,
+): DifficultyUnavailableError {
+  const previousDiagnostics = previous?.diagnostics;
+  const currentDiagnostics = current.diagnostics;
+  return new DifficultyUnavailableError(templateId, seed, difficultyLevel, current.availableDifficultyLevels, {
+    modelVersion: DIFFICULTY_MODEL_V5,
+    strategiesAttempted: sumOptionalCounts(previousDiagnostics?.strategiesAttempted, currentDiagnostics?.strategiesAttempted),
+    eligibleCandidates: sumOptionalCounts(previousDiagnostics?.eligibleCandidates, currentDiagnostics?.eligibleCandidates),
+    reason: "no_candidate_in_band",
+    fallbackSeedsAttempted,
+    candidateScoreRange: mergeCandidateScoreRanges(previousDiagnostics?.candidateScoreRange, currentDiagnostics?.candidateScoreRange),
+  });
+}
+
+function generateV5TargetWithFallback(
+  template: PuzzleTemplate,
+  seed: string,
+  difficultyLevel: DifficultyLevel,
+  solver: PuzzleSolver,
+): GeneratedPuzzle {
+  let unavailable: DifficultyUnavailableError | undefined;
+  let fallbackSeedsAttempted = 0;
+  for (let attempt = 0; attempt <= V5_FALLBACK_SEED_LIMIT; attempt += 1) {
+    fallbackSeedsAttempted += 1;
+    const candidateSeed = fallbackSeed(seed, attempt);
+    try {
+      const candidate = generatePuzzleAtDifficultyV5(template, candidateSeed, difficultyLevel, solver, v5StrategyLimit(template));
+      return { ...candidate, requestedSeed: seed, ...(attempt > 0 ? { seedFallbackAttempt: attempt } : {}) };
+    } catch (error) {
+      if (!(error instanceof DifficultyUnavailableError)) throw error;
+      unavailable = mergeV5UnavailableError(template.id, seed, difficultyLevel, fallbackSeedsAttempted, unavailable, error);
+    }
+  }
+  throw unavailable ?? new DifficultyUnavailableError(template.id, seed, difficultyLevel);
+}
+
+function generateV5Request(
+  template: PuzzleTemplate,
+  seed: string,
+  difficultyLevel: DifficultyLevel | undefined,
+  allowSeedFallback: boolean,
+  solver: PuzzleSolver,
+): GeneratedPuzzle {
+  if (difficultyLevel === undefined) return generateV5Progressive(template, seed, solver);
+  if (!allowSeedFallback) return generatePuzzleAtDifficultyV5(template, seed, difficultyLevel, solver);
+  return generateV5TargetWithFallback(template, seed, difficultyLevel, solver);
+}
+
 /** Apply the same progressive/default and explicit-target policy for every transport. */
 export function generatePuzzleForRequest(
   template: PuzzleTemplate,
@@ -591,55 +720,9 @@ export function generatePuzzleForRequest(
   solver: PuzzleSolver = exhaustivePuzzleSolver,
   difficultyModel: "v4" | "v5" | "compare" = DEFAULT_DIFFICULTY_MODEL,
 ): GeneratedPuzzle {
-  if (difficultyModel === "compare") {
-    const legacy = difficultyLevel === undefined
-      ? generateProgressivePuzzle(template, seed, solver)
-      : allowSeedFallback
-        ? generatePuzzleAtDifficultyWithFallback(template, seed, difficultyLevel, solver)
-        : generatePuzzleAtDifficulty(template, seed, difficultyLevel, solver);
-    const difficultyProfile = assessDifficultyProfileV5(template, legacy.clues);
-    return { ...legacy, difficultyModel: "compare", difficultyProfile };
-  }
-  if (difficultyModel === "v5") {
-    if (difficultyLevel !== undefined) {
-      if (!allowSeedFallback) return generatePuzzleAtDifficultyV5(template, seed, difficultyLevel, solver);
-      let unavailable: DifficultyUnavailableError | undefined;
-      let fallbackSeedsAttempted = 0;
-      for (let attempt = 0; attempt <= V5_FALLBACK_SEED_LIMIT; attempt += 1) {
-        fallbackSeedsAttempted += 1;
-        const candidateSeed = fallbackSeed(seed, attempt);
-        try {
-          const candidate = generatePuzzleAtDifficultyV5(template, candidateSeed, difficultyLevel, solver, v5StrategyLimit(template));
-          return { ...candidate, requestedSeed: seed, ...(attempt > 0 ? { seedFallbackAttempt: attempt } : {}) };
-        } catch (error) {
-          if (!(error instanceof DifficultyUnavailableError)) throw error;
-          unavailable = new DifficultyUnavailableError(template.id, seed, difficultyLevel, error.availableDifficultyLevels, {
-            modelVersion: DIFFICULTY_MODEL_V5,
-            strategiesAttempted: (unavailable?.diagnostics?.strategiesAttempted ?? 0) + (error.diagnostics?.strategiesAttempted ?? 0),
-            eligibleCandidates: (unavailable?.diagnostics?.eligibleCandidates ?? 0) + (error.diagnostics?.eligibleCandidates ?? 0),
-            reason: "no_candidate_in_band",
-            fallbackSeedsAttempted,
-            candidateScoreRange: error.diagnostics?.candidateScoreRange === undefined
-              ? unavailable?.diagnostics?.candidateScoreRange
-              : unavailable?.diagnostics?.candidateScoreRange === undefined
-                ? error.diagnostics.candidateScoreRange
-                : {
-                  minimum: Math.min(unavailable.diagnostics.candidateScoreRange.minimum, error.diagnostics.candidateScoreRange.minimum),
-                  maximum: Math.max(unavailable.diagnostics.candidateScoreRange.maximum, error.diagnostics.candidateScoreRange.maximum),
-                  complete: unavailable.diagnostics.candidateScoreRange.complete + error.diagnostics.candidateScoreRange.complete,
-                  incomplete: unavailable.diagnostics.candidateScoreRange.incomplete + error.diagnostics.candidateScoreRange.incomplete,
-                },
-          });
-        }
-      }
-      throw unavailable ?? new DifficultyUnavailableError(template.id, seed, difficultyLevel);
-    }
-    return generateV5Progressive(template, seed, solver);
-  }
-  const legacy = difficultyLevel === undefined ? generateProgressivePuzzle(template, seed, solver) : allowSeedFallback
-    ? generatePuzzleAtDifficultyWithFallback(template, seed, difficultyLevel, solver)
-    : generatePuzzleAtDifficulty(template, seed, difficultyLevel, solver);
-  return { ...legacy, difficultyModel: "v4" };
+  if (difficultyModel === "compare") return generateComparisonRequest(template, seed, difficultyLevel, allowSeedFallback, solver);
+  if (difficultyModel === "v5") return generateV5Request(template, seed, difficultyLevel, allowSeedFallback, solver);
+  return { ...generateLegacyRequest(template, seed, difficultyLevel, allowSeedFallback, solver), difficultyModel: "v4" };
 }
 
 function satisfiesRequestedDifficulty(puzzle: GeneratedPuzzle, difficultyLevel: DifficultyLevel, requiresHumanSolve: boolean): boolean {

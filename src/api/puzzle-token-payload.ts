@@ -50,29 +50,44 @@ function hasValidDifficulty(value: unknown): value is DifficultyLevel | undefine
   return value === undefined || (typeof value === "number" && Number.isInteger(value) && value >= 1 && value <= 12);
 }
 
-function isPuzzleTokenPayload(value: unknown): value is VerifiedPuzzleTokenPayload {
-  if (!value || typeof value !== "object" || Array.isArray(value)) return false;
-  const payload = value as Record<string, unknown>;
-  if (!hasTokenTextFields(payload) || !hasValidDifficulty(payload.requestedDifficultyLevel)
-    || !(payload.difficultyModel === undefined || payload.difficultyModel === "v4" || payload.difficultyModel === "v5" || payload.difficultyModel === "compare")) return false;
-  if (payload.version === 3) return Number.isSafeInteger(payload.issuedAt)
-    && Number.isSafeInteger(payload.expiresAt)
-    && (payload.expiresAt as number) > (payload.issuedAt as number)
-    && (payload.expiresAt as number) - (payload.issuedAt as number) <= MAX_PUZZLE_TOKEN_TTL_SECONDS;
+function hasValidDifficultyModel(value: unknown): boolean {
+  return value === undefined || value === "v4" || value === "v5" || value === "compare";
+}
+
+function hasValidExpiryWindow(payload: Record<string, unknown>): boolean {
+  if (!Number.isSafeInteger(payload.issuedAt) || !Number.isSafeInteger(payload.expiresAt)) return false;
+  const issuedAt = payload.issuedAt as number;
+  const expiresAt = payload.expiresAt as number;
+  return expiresAt > issuedAt && expiresAt - issuedAt <= MAX_PUZZLE_TOKEN_TTL_SECONDS;
+}
+
+function hasValidLegacyClaims(payload: Record<string, unknown>): boolean {
+  return payload.version === 3 && hasValidExpiryWindow(payload);
+}
+
+function hasValidOptionalCounter(value: unknown): boolean {
+  return value === undefined || (Number.isSafeInteger(value) && (value as number) >= 0);
+}
+
+function hasValidCurrentClaims(payload: Record<string, unknown>): boolean {
   return payload.version === 4
-    && typeof payload.requestedSeed === "string"
-    && payload.requestedSeed.trim().length > 0
+    && nonEmptyString(payload.requestedSeed)
     && typeof payload.puzzleFingerprint === "string"
     && /^[a-f0-9]{64}$/.test(payload.puzzleFingerprint)
     && typeof payload.assessedDifficultyLevel === "number"
     && hasValidDifficulty(payload.assessedDifficultyLevel)
     && nonEmptyString(payload.difficultyModelVersion)
-    && (payload.generationStrategy === undefined || (Number.isSafeInteger(payload.generationStrategy) && (payload.generationStrategy as number) >= 0))
-    && (payload.seedFallbackAttempt === undefined || (Number.isSafeInteger(payload.seedFallbackAttempt) && (payload.seedFallbackAttempt as number) >= 0))
-    && Number.isSafeInteger(payload.issuedAt)
-    && Number.isSafeInteger(payload.expiresAt)
-    && (payload.expiresAt as number) > (payload.issuedAt as number)
-    && (payload.expiresAt as number) - (payload.issuedAt as number) <= MAX_PUZZLE_TOKEN_TTL_SECONDS;
+    && hasValidOptionalCounter(payload.generationStrategy)
+    && hasValidOptionalCounter(payload.seedFallbackAttempt)
+    && hasValidExpiryWindow(payload);
+}
+
+function isPuzzleTokenPayload(value: unknown): value is VerifiedPuzzleTokenPayload {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return false;
+  const payload = value as Record<string, unknown>;
+  if (!hasTokenTextFields(payload) || !hasValidDifficulty(payload.requestedDifficultyLevel)
+    || !hasValidDifficultyModel(payload.difficultyModel)) return false;
+  return hasValidLegacyClaims(payload) || hasValidCurrentClaims(payload);
 }
 
 export function decodePuzzleTokenPayload(encodedPayload: string): VerifiedPuzzleTokenPayload | undefined {

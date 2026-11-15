@@ -63,7 +63,6 @@ export function assessPuzzleDifficulty(spec: PuzzleSpec, clues: readonly Clue[],
     },
   };
 }
-
 const clamp100 = (value: number) => Math.max(0, Math.min(100, value));
 const round = (value: number) => Math.round(clamp100(value));
 
@@ -217,11 +216,4 @@ export function difficultyForV5(profile: DifficultyProfileV1): Difficulty {
       solver: profile.legacy.evidence.solver,
     },
   };
-}
-
-export function withDifficultyProfile(spec: PuzzleSpec, clues: readonly Clue[]): { profile: DifficultyProfileV1; v5Difficulty: Difficulty } {
-  const profile = assessDifficultyProfileV5(spec, clues);
-  // `difficulty` keeps the legacy evidence shape while selection is gated by
-  // the v5 logical assessment. Detailed v5 metrics and trace remain alongside it.
-  return { profile, v5Difficulty: difficultyForV5(profile) };
 }

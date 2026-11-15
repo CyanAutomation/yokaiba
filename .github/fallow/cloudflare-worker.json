@@ -1,0 +1,19 @@
+{
+  "version": 1,
+  "name": "cloudflare-worker-runtime",
+  "description": "Keep Node-only filesystem and process APIs out of Cloudflare Worker runtime modules.",
+  "rules": [
+    {
+      "id": "no-node-runtime-apis",
+      "kind": "banned-import",
+      "specifiers": [
+        "node:fs",
+        "node:fs/promises",
+        "node:process",
+        "node:child_process"
+      ],
+      "zones": ["worker-runtime"],
+      "message": "Use Cloudflare bindings or Web APIs in Worker runtime code."
+    }
+  ]
+}
