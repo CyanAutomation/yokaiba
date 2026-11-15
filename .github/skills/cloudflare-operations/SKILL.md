@@ -17,6 +17,9 @@ Start with [Operations and deployment](../../../docs/operations-and-deployment.m
 - A migration with --remote and npm run deploy affect external production resources. Run them only when the user explicitly asks for that operation.
 - Keep secrets in the documented Worker secret or protected GitHub environment. Do not print credentials while diagnosing configuration.
 - Preserve distinct provider bindings for rate limits and telemetry. Check readiness provider fields; a top-level ready status does not mean every optional provider is enabled or healthy.
+- Trace the request path through `worker/main.ts`, `worker/entrypoint.ts`, and `worker/index.ts` before changing gateway, cache, or rate-limit behavior. The default gateway applies request controls and forwards eligible public GETs to `CachedPublic`; keep writes, health/readiness, and MCP responses out of shared caches.
+- Preserve cache freshness constraints: tokenized puzzle responses must expire from cache before the signed token expires, local generation cache keys must include the token-secret digest namespace, and deployments must not reuse cache entries across Worker versions.
+- Treat Analytics Engine outcomes as sampled aggregate telemetry and D1 feedback as the authoritative idempotent record. See the [feedback and telemetry lifecycle skill](../feedback-data-lifecycle/SKILL.md) when changing either data path.
 - Keep the deployment checks for build version and SHA, direct Worker health, canonical URL health, public response redaction, cache behavior, and deployed API contract.
 
 ## Validate operational changes
