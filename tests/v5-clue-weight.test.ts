@@ -65,3 +65,11 @@ test("v5 clue weights preserve deterministic expert profiles and cross-category 
   }
   assert.equal(v5ClueWeight(clue("before", "before-expert", "color", "color"), 11, 4, 5), 6);
 });
+
+test("v5 anchor-row matching handles repeated and malformed clue ID markers", () => {
+  const repeatedMarkers = `candidate-${"matches-".repeat(256)}color-row-0`;
+
+  assert.equal(v5ClueWeight(clue("matches", repeatedMarkers), 3, 0, 4), 0);
+  assert.equal(v5ClueWeight(clue("matches", "matches--0"), 3, 0, 4), 36);
+  assert.equal(v5ClueWeight(clue("matches", "xmatches-color-row-0"), 3, 0, 4), 36);
+});
