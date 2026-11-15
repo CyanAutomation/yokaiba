@@ -335,6 +335,7 @@ test("validation checkout does not persist its read-only GitHub token", () => {
   const checkout = getJob(validate, "validate").steps.find((step: Workflow) => String(step.uses).startsWith("actions/checkout@")) as Workflow | undefined;
 
   assert.equal(checkout?.with?.["persist-credentials"], false);
+  assert.equal(checkout?.with?.["fetch-depth"], 0, "Fallow's new-only audit needs the base commit in the checkout");
 });
 
 test("pull requests and main deployments share one validation workflow", () => {
