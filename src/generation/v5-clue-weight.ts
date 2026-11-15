@@ -62,12 +62,31 @@ function beginnerLevelFiveWeight(kind: ClueKind): number {
   return kind === "adjacent" ? 18 : 24;
 }
 
+function anchorRowFromClueId(clueId: string): number | undefined {
+  let rowStart = clueId.length;
+  while (rowStart > 0) {
+    const digit = clueId.charCodeAt(rowStart - 1);
+    if (digit < 48 || digit > 57) break;
+    rowStart -= 1;
+  }
+  const rowSeparator = rowStart - 1;
+  if (rowStart === clueId.length || rowSeparator < 0 || clueId[rowSeparator] !== "-") return undefined;
+
+  const marker = "matches-";
+  for (let markerStart = 0; markerStart + marker.length < rowSeparator; markerStart += 1) {
+    if (!clueId.startsWith(marker, markerStart)) continue;
+    if (markerStart > 0 && clueId[markerStart - 1] !== "-") continue;
+    return Number(clueId.slice(rowStart));
+  }
+  return undefined;
+}
+
 function beginnerAnchorWeight(clue: Clue, level: DifficultyLevel, strategy: number, rowCount: number): number | undefined {
   if (level < 3 || level > 5) return undefined;
   const kind = clue.constraint.kind;
   if (kind === "matches") {
-    const row = /(?:^|-)matches-.+-([0-9]+)$/.exec(clue.id)?.[1];
-    return row !== undefined && Number(row) === strategy % rowCount ? 0 : 36;
+    const row = anchorRowFromClueId(clue.id);
+    return row !== undefined && row === strategy % rowCount ? 0 : 36;
   }
   if (kind === "notMatches") return 30;
   if (level === 3) return beginnerLevelThreeWeight(kind);
