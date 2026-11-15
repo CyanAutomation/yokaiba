@@ -1,6 +1,6 @@
 import type { GeneratedPuzzle } from "../domain/types.js";
 
-export const PUZZLE_FINGERPRINT_VERSION = 1;
+const PUZZLE_FINGERPRINT_VERSION = 1;
 
 export function selectedDifficultyModel(puzzle: Pick<GeneratedPuzzle, "difficultyModel" | "difficulty">): "v4" | "v5" | "compare" {
   return puzzle.difficultyModel ?? (puzzle.difficulty.modelVersion.endsWith("v5") ? "v5" : "v4");

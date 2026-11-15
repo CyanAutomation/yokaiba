@@ -3,7 +3,7 @@ import { base64UrlEncode, isValidTokenSignature, signTokenPayload, tokenSecretLi
 import { puzzleFingerprint, selectedDifficultyModel } from "./puzzle-fingerprint.js";
 import { decodePuzzleTokenPayload, MAX_PUZZLE_TOKEN_TTL_SECONDS, type PuzzleTokenPayload, type VerifiedPuzzleTokenPayload } from "./puzzle-token-payload.js";
 export { MAX_PUZZLE_TOKEN_TTL_SECONDS } from "./puzzle-token-payload.js";
-export type { PuzzleTokenPayload, VerifiedPuzzleTokenPayload } from "./puzzle-token-payload.js";
+export type { VerifiedPuzzleTokenPayload } from "./puzzle-token-payload.js";
 
 const encoder = new TextEncoder();
 export const DEFAULT_PUZZLE_TOKEN_TTL_SECONDS = 7 * 24 * 60 * 60;

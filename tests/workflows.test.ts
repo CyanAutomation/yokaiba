@@ -374,6 +374,17 @@ test("shared validation runs the production TypeScript build", () => {
   assert.ok(steps.some(step => step.run === "npm run build"));
 });
 
+test("shared validation audits changed code after collecting test coverage", () => {
+  const shared = readWorkflow("validate-reusable.yml");
+  const steps = getJob(shared, "validate").steps as Workflow[];
+  const coverageIndex = steps.findIndex(step => step.run === "npm run test:coverage");
+  const auditIndex = steps.findIndex(step => step.name === "Audit changed code with Fallow");
+
+  assert.ok(coverageIndex >= 0, "validation must collect Istanbul coverage");
+  assert.ok(auditIndex > coverageIndex, "Fallow must run after coverage is available");
+  assert.equal(steps[auditIndex]?.run, "npm run fallow:audit -- --coverage coverage/coverage-final.json --format compact --quiet");
+});
+
 test("Kaseki health checks document their pinned upstream commit", () => {
   for (const name of ["kaseki-dry.yaml", "kaseki-docs.yaml"]) {
     const source = readFileSync(new URL(`../.github/workflows/${name}`, import.meta.url), "utf8");

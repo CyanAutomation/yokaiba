@@ -1,0 +1,12 @@
+{
+  "minimumVersion": "3.39.0",
+  "rules": {
+    "policy-violation": "error"
+  },
+  "boundaries": {
+    "zones": [
+      { "name": "worker-runtime", "patterns": ["worker/**"] }
+    ]
+  },
+  "rulePacks": [".github/fallow/cloudflare-worker.json"]
+}
