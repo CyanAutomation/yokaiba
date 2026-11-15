@@ -20,6 +20,9 @@
     "deployment:health": "tsx scripts/health-deployment.mts",
     "deployment:smoke": "tsx scripts/smoke-deployment.mts",
     "deployment:contract": "tsx scripts/contract-deployment.mts",
+    "fallow:health": "fallow health --report-only",
+    "fallow:audit": "fallow audit --gate new-only",
+    "fallow:policy": "fallow dead-code --config .github/fallow/policy-config.json --policy-violations --format compact --quiet",
     "deploy": "wrangler deploy"
   },
   "dependencies": {

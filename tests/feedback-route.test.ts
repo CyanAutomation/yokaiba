@@ -84,6 +84,33 @@ test("feedback rejects invalid values, unsigned identity claims, and excessive p
   assert.equal(oversized.status, 400);
 });
 
+test("feedback enforces strict optional fields and gameplay counter boundaries", async () => {
+  const token = await issuePuzzleToken(generatePuzzle(tournamentOrderTemplate, "feedback-boundary-validation"), secret);
+  const invalidSubmissions = [
+    submission(token, { reason: null }),
+    submission(token, { outcome: "abandoned" }),
+    submission(token, { idempotencyKey: "not-a-uuid" }),
+    submission(token, { smartMarkingEnabled: "true" }),
+    submission(token, { hintsUsed: 101 }),
+    submission(token, { mistakes: -1 }),
+    submission(token, { elapsedMs: 86_400_001 }),
+    submission(token, { unexpected: "field" }),
+  ];
+
+  for (const body of invalidSubmissions) {
+    const response = await feedbackRoute(await post(body), templateMap, secret, () => "inserted");
+    assert.equal(response.status, 400);
+  }
+
+  const boundary = await feedbackRoute(await post(submission(token, {
+    hintsUsed: 100,
+    mistakes: 100,
+    elapsedMs: 86_400_000,
+    smartMarkingEnabled: false,
+  })), templateMap, secret, () => "inserted");
+  assert.equal(boundary.status, 202);
+});
+
 test("feedback requires a valid, unexpired v4 signed puzzle token", async () => {
   const puzzle = generatePuzzle(tournamentOrderTemplate, "feedback-token-validation");
   const token = await issuePuzzleToken(puzzle, secret);

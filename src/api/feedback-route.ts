@@ -3,9 +3,9 @@ import { json } from "./json-response.js";
 import { badRequest, readJsonBody } from "./request-utils.js";
 import { verifyPuzzleToken, type PuzzleTokenSecrets } from "./puzzle-token.js";
 
-export const FEEDBACK_RATINGS = ["too_easy", "just_right", "too_hard"] as const;
-export const FEEDBACK_REASONS = ["difficult_to_start", "confusing_clues", "too_many_deductions", "took_too_long", "other"] as const;
-export const FEEDBACK_OUTCOMES = ["completed", "in_progress"] as const;
+const FEEDBACK_RATINGS = ["too_easy", "just_right", "too_hard"] as const;
+const FEEDBACK_REASONS = ["difficult_to_start", "confusing_clues", "too_many_deductions", "took_too_long", "other"] as const;
+const FEEDBACK_OUTCOMES = ["completed", "in_progress"] as const;
 
 export type FeedbackRating = typeof FEEDBACK_RATINGS[number];
 export type FeedbackReason = typeof FEEDBACK_REASONS[number];
@@ -68,42 +68,78 @@ function boundedInteger(value: unknown, name: string, minimum: number, maximum: 
   return value;
 }
 
-function parseSubmission(value: unknown): ParsedSubmission {
-  const body = record(value);
+function assertKnownFeedbackFields(body: Record<string, unknown>): void {
   const unexpected = Object.keys(body).find(key => !FEEDBACK_FIELDS.has(key));
   if (unexpected) throw new TypeError("request body contains an unknown field");
-  if (typeof body.puzzleToken !== "string" || body.puzzleToken.trim().length === 0 || body.puzzleToken.length > MAX_PUZZLE_TOKEN_LENGTH) {
+}
+
+function parsePuzzleToken(value: unknown): string {
+  if (typeof value !== "string" || value.trim().length === 0 || value.length > MAX_PUZZLE_TOKEN_LENGTH) {
     throw new TypeError("puzzleToken must be a bounded non-empty string");
   }
-  if (typeof body.rating !== "string" || !FEEDBACK_RATINGS.includes(body.rating as FeedbackRating)) {
+  return value;
+}
+
+function parseRating(value: unknown): FeedbackRating {
+  if (typeof value !== "string" || !FEEDBACK_RATINGS.includes(value as FeedbackRating)) {
     throw new TypeError("rating must be too_easy, just_right, or too_hard");
   }
-  if (body.reason !== undefined && (typeof body.reason !== "string" || !FEEDBACK_REASONS.includes(body.reason as FeedbackReason))) {
+  return value as FeedbackRating;
+}
+
+function parseReason(value: unknown, rating: FeedbackRating): FeedbackReason | null {
+  if (value === undefined) return null;
+  if (typeof value !== "string" || !FEEDBACK_REASONS.includes(value as FeedbackReason)) {
     throw new TypeError("reason is not supported");
   }
-  if (body.rating !== "too_hard" && body.reason !== undefined) throw new TypeError("reason is only allowed with too_hard");
-  if (typeof body.outcome !== "string" || !FEEDBACK_OUTCOMES.includes(body.outcome as FeedbackOutcome)) {
+  if (rating !== "too_hard") throw new TypeError("reason is only allowed with too_hard");
+  return value as FeedbackReason;
+}
+
+function parseOutcome(value: unknown): FeedbackOutcome {
+  if (typeof value !== "string" || !FEEDBACK_OUTCOMES.includes(value as FeedbackOutcome)) {
     throw new TypeError("outcome must be completed or in_progress");
   }
-  if (typeof body.idempotencyKey !== "string" || !IDEMPOTENCY_KEY_PATTERN.test(body.idempotencyKey)) {
+  return value as FeedbackOutcome;
+}
+
+function parseIdempotencyKey(value: unknown): string {
+  if (typeof value !== "string" || !IDEMPOTENCY_KEY_PATTERN.test(value)) {
     throw new TypeError("idempotencyKey must be a UUID v4");
   }
+  return value;
+}
+
+function parseElapsedTime(value: unknown): number | null {
+  return value === undefined ? null : boundedInteger(value, "elapsedMs", 0, MAX_ELAPSED_MS);
+}
+
+function parseSmartMarking(value: unknown): boolean | null {
+  if (value === undefined) return null;
+  if (typeof value !== "boolean") throw new TypeError("smartMarkingEnabled must be a boolean");
+  return value;
+}
+
+function parseSubmission(value: unknown): ParsedSubmission {
+  const body = record(value);
+  assertKnownFeedbackFields(body);
+  const puzzleToken = parsePuzzleToken(body.puzzleToken);
+  const rating = parseRating(body.rating);
+  const reason = parseReason(body.reason, rating);
+  const outcome = parseOutcome(body.outcome);
+  const idempotencyKey = parseIdempotencyKey(body.idempotencyKey);
   const hintsUsed = boundedInteger(body.hintsUsed, "hintsUsed", 0, MAX_GAMEPLAY_COUNT);
   const mistakes = boundedInteger(body.mistakes, "mistakes", 0, MAX_GAMEPLAY_COUNT);
-  const elapsedMs = body.elapsedMs === undefined ? null : boundedInteger(body.elapsedMs, "elapsedMs", 0, MAX_ELAPSED_MS);
-  if (body.smartMarkingEnabled !== undefined && typeof body.smartMarkingEnabled !== "boolean") {
-    throw new TypeError("smartMarkingEnabled must be a boolean");
-  }
   return {
-    puzzleToken: body.puzzleToken,
-    rating: body.rating as FeedbackRating,
-    reason: body.reason as FeedbackReason | undefined ?? null,
-    outcome: body.outcome as FeedbackOutcome,
-    idempotencyKey: body.idempotencyKey,
+    puzzleToken,
+    rating,
+    reason,
+    outcome,
+    idempotencyKey,
     hintsUsed,
     mistakes,
-    elapsedMs,
-    smartMarkingEnabled: typeof body.smartMarkingEnabled === "boolean" ? body.smartMarkingEnabled : null,
+    elapsedMs: parseElapsedTime(body.elapsedMs),
+    smartMarkingEnabled: parseSmartMarking(body.smartMarkingEnabled),
   };
 }
 
