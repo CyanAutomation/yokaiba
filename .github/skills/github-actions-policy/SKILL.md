@@ -13,6 +13,8 @@ Use this skill for changes under .github/workflows, .github/dependabot.yml, or .
 - Keep runner images explicitly versioned and third-party actions pinned to full commit SHAs with readable release comments. Keep the actionlint image pinned by digest.
 - Keep permissions minimal, disable persisted checkout credentials unless needed, and scope secrets to the job or protected environment that uses them.
 - Production deployment must remain restricted to main and the protected production environment. Keep the build version/SHA checks and canonical endpoint smoke and contract checks.
+- Keep the CodeQL workflow's JavaScript/TypeScript language selection, `security-extended` query suite, minimal job permissions, pinned action SHAs, and PR, main, scheduled, and manual triggers aligned with repository policy.
+- Keep Dependency Review on pull requests and fail on high-severity dependency changes; dependency changes should be reviewed through the lockfile and Dependabot update path.
 - Kaseki jobs must remain main-only, use the approved exact HTTPS controller origin, serialize against each other, and validate terminal run status within the documented timeout. Do not add a public fallback URL or expose controller response bodies containing sensitive data.
 - Keep Dependabot coverage for GitHub Actions, npm packages, and the actionlint image.
 
