@@ -42,7 +42,7 @@ function rowsForTerm(categoryId: string, value: string, baseCategory: string, ba
   return cells.flatMap((cell, row) => cell.has(value) ? [row] : []);
 }
 
-export function removeTermFromRows(categoryId: string, value: string, disallowedRows: Set<number>, baseCategory: string, possible: PossibleRows): boolean {
+function removeTermFromRows(categoryId: string, value: string, disallowedRows: Set<number>, baseCategory: string, possible: PossibleRows): boolean {
   if (categoryId === baseCategory) return false;
   const cells = possible.get(categoryId)!;
   let changed = false;

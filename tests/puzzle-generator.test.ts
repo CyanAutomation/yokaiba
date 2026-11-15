@@ -377,6 +377,25 @@ test("targeted difficulty never substitutes a different seed", () => {
   assert.throws(() => generatePuzzleAtDifficulty(twoRowTemplate, "strict-seed", 5), DifficultyUnavailableError);
 });
 
+test("v5 seed fallback aggregates failed strategy diagnostics across every attempted seed", () => {
+  const twoRowTemplate: PuzzleTemplate = {
+    id: "two-row-v5-fallback", title: "Two row", baseCategory: "person",
+    categories: [
+      { id: "person", label: "Person", values: ["Aki", "Ben"] },
+      { id: "color", label: "Color", values: ["Red", "Blue"] },
+    ],
+  };
+
+  assert.throws(() => generatePuzzleForRequest(twoRowTemplate, "strict-v5-fallback", 12, true, undefined, "v5"), error => {
+    assert.ok(error instanceof DifficultyUnavailableError);
+    assert.equal(error.diagnostics?.fallbackSeedsAttempted, 3);
+    assert.equal(error.diagnostics?.strategiesAttempted, 36);
+    assert.equal(error.diagnostics?.eligibleCandidates, 0);
+    assert.ok((error.diagnostics?.candidateScoreRange?.complete ?? 0) > 0);
+    return true;
+  });
+});
+
 test("seed fallback keeps the requested seed when it already meets the target", () => {
   const requestedSeed = "codex-audit-20260930-b4c2";
   const puzzle = generatePuzzleAtDifficultyWithFallback(openDivisionTemplate, requestedSeed, 5);

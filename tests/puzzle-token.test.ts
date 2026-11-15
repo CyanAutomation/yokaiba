@@ -52,6 +52,44 @@ test("token payload decoding validates the wire format before returning claims",
   })), undefined);
 });
 
+test("v4 token payload decoding validates every generation-specific claim", () => {
+  const validPayload = {
+    version: 4,
+    templateId: "test-template",
+    seed: "generated-seed",
+    requestedSeed: "requested-seed",
+    generatorVersion: "yokaiba-generator-v6",
+    solverVersion: "yokaiba-exhaustive-v1",
+    puzzleFingerprint: "a".repeat(64),
+    assessedDifficultyLevel: 4,
+    difficultyModelVersion: "yokaiba-difficulty-v5",
+    difficultyModel: "v5",
+    generationStrategy: 0,
+    seedFallbackAttempt: 0,
+    issuedAt: 100,
+    expiresAt: 200,
+  };
+  const encode = (value: unknown) => encodeBase64Url(encoder.encode(JSON.stringify(value)));
+
+  assert.deepEqual(decodePuzzleTokenPayload(encode(validPayload)), validPayload);
+
+  for (const invalid of [
+    { ...validPayload, requestedSeed: "  " },
+    { ...validPayload, puzzleFingerprint: "A".repeat(64) },
+    { ...validPayload, puzzleFingerprint: "a".repeat(63) },
+    { ...validPayload, assessedDifficultyLevel: 13 },
+    { ...validPayload, difficultyModelVersion: "" },
+    { ...validPayload, generationStrategy: -1 },
+    { ...validPayload, generationStrategy: 1.5 },
+    { ...validPayload, seedFallbackAttempt: -1 },
+    { ...validPayload, seedFallbackAttempt: Number.MAX_SAFE_INTEGER + 1 },
+    { ...validPayload, expiresAt: 100 },
+    { ...validPayload, expiresAt: 101 + MAX_PUZZLE_TOKEN_TTL_SECONDS },
+  ]) {
+    assert.equal(decodePuzzleTokenPayload(encode(invalid)), undefined);
+  }
+});
+
 async function signPayload(payload: unknown, signingSecret = secret): Promise<string> {
   const encodedPayload = encodeBase64Url(encoder.encode(JSON.stringify(payload)));
   const key = await crypto.subtle.importKey("raw", encoder.encode(signingSecret), { name: "HMAC", hash: "SHA-256" }, false, ["sign"]);

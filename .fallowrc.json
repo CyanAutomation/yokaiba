@@ -1,0 +1,39 @@
+{
+  "minimumVersion": "3.39.0",
+  "rules": {
+    "boundary-violation": "error",
+    "policy-violation": "off"
+  },
+  "audit": {
+    "gate": "new-only",
+    "worsened": "warn"
+  },
+  "boundaries": {
+    "zones": [
+      { "name": "domain", "patterns": ["src/domain/**"] },
+      { "name": "constraints", "patterns": ["src/constraints/**"] },
+      { "name": "templates", "patterns": ["src/templates/**"] },
+      { "name": "generation", "patterns": ["src/generation/**"] },
+      { "name": "catalogue", "patterns": ["src/catalogue.ts"] },
+      { "name": "api", "patterns": ["src/api/**"] },
+      { "name": "mcp", "patterns": ["src/mcp/**"] },
+      { "name": "worker", "patterns": ["worker/**"] },
+      { "name": "public-api", "patterns": ["src/index.ts"] },
+      { "name": "scripts", "patterns": ["scripts/**"] },
+      { "name": "tests", "patterns": ["tests/**"] }
+    ],
+    "rules": [
+      { "from": "domain", "allowTypeOnly": ["generation"] },
+      { "from": "constraints", "allow": ["domain"] },
+      { "from": "templates", "allow": ["domain"] },
+      { "from": "generation", "allow": ["domain", "constraints"] },
+      { "from": "catalogue", "allow": ["domain"] },
+      { "from": "api", "allow": ["domain", "generation", "catalogue"] },
+      { "from": "mcp", "allow": ["domain", "generation", "api", "catalogue"] },
+      { "from": "worker", "allow": ["domain", "constraints", "templates", "generation", "catalogue", "api", "mcp"] },
+      { "from": "public-api", "allow": ["domain", "constraints", "templates", "generation", "catalogue", "api", "mcp"] },
+      { "from": "scripts", "allow": ["domain", "constraints", "templates", "generation", "catalogue", "api", "mcp", "public-api"] },
+      { "from": "tests", "allow": ["domain", "constraints", "templates", "generation", "catalogue", "api", "mcp", "worker", "scripts", "public-api"] }
+    ]
+  }
+}

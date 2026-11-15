@@ -335,6 +335,7 @@ test("validation checkout does not persist its read-only GitHub token", () => {
   const checkout = getJob(validate, "validate").steps.find((step: Workflow) => String(step.uses).startsWith("actions/checkout@")) as Workflow | undefined;
 
   assert.equal(checkout?.with?.["persist-credentials"], false);
+  assert.equal(checkout?.with?.["fetch-depth"], 0, "Fallow's new-only audit needs the base commit in the checkout");
 });
 
 test("pull requests and main deployments share one validation workflow", () => {
@@ -372,6 +373,17 @@ test("shared validation runs the production TypeScript build", () => {
   const steps = getJob(shared, "validate").steps as Workflow[];
 
   assert.ok(steps.some(step => step.run === "npm run build"));
+});
+
+test("shared validation audits changed code after collecting test coverage", () => {
+  const shared = readWorkflow("validate-reusable.yml");
+  const steps = getJob(shared, "validate").steps as Workflow[];
+  const coverageIndex = steps.findIndex(step => step.run === "npm run test:coverage");
+  const auditIndex = steps.findIndex(step => step.name === "Audit changed code with Fallow");
+
+  assert.ok(coverageIndex >= 0, "validation must collect Istanbul coverage");
+  assert.ok(auditIndex > coverageIndex, "Fallow must run after coverage is available");
+  assert.equal(steps[auditIndex]?.run, "npm run fallow:audit -- --coverage coverage/coverage-final.json --format compact --quiet");
 });
 
 test("Kaseki health checks document their pinned upstream commit", () => {

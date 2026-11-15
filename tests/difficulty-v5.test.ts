@@ -5,7 +5,7 @@ import { evaluateHumanDeductionTraceV5 } from "../src/generation/human-deduction
 import { assessPuzzleDifficultyV5 } from "../src/generation/difficulty-assessment.js";
 import { DIFFICULTY_BANDS_V5, DIFFICULTY_MODEL_V5 } from "../src/generation/difficulty-profile.js";
 import { DifficultyUnavailableError, generatePuzzle, generatePuzzleAtDifficultyV5, generatePuzzleForRequest } from "../src/generation/generator.js";
-import type { Clue, PuzzleTemplate } from "../src/domain/types.js";
+import type { Clue, GeneratedPuzzle, PuzzleTemplate } from "../src/domain/types.js";
 import { tournamentOrderV2Template } from "../src/templates/tournament-order-v2.js";
 import { championshipCircuitTemplate } from "../src/templates/championship-circuit.js";
 
@@ -24,6 +24,18 @@ const clues: Clue[] = [
   { id: "match-aki-red", text: "Aki wore red.", constraint: { kind: "matches", subject: "Aki", category: "color", value: "Red" } },
   { id: "same-red-cat", text: "Red and Cat belong together.", constraint: { kind: "sameRow", left: { category: "color", value: "Red" }, right: { category: "pet", value: "Cat" } } },
 ];
+
+function assertCompleteSelectionDiagnostics(diagnostics: NonNullable<GeneratedPuzzle["selectionDiagnostics"]>): void {
+  assert.equal(diagnostics.strategiesAttempted, diagnostics.strategyBudget);
+  assert.ok(diagnostics.candidateScoreRange);
+  assert.equal(
+    diagnostics.candidateScoreRange.complete + diagnostics.candidateScoreRange.incomplete,
+    diagnostics.strategiesAttempted,
+  );
+  assert.ok(diagnostics.eligibleCandidates <= diagnostics.candidateScoreRange.complete);
+  assert.ok(Number.isFinite(diagnostics.selectedRankDistance));
+  assert.ok(diagnostics.candidateScoreRange.complete > 0);
+}
 
 test("v5 deduction trace records a deterministic prerequisite chain without consulting a solution", () => {
   const first = evaluateHumanDeductionTraceV5(spec, clues);
@@ -181,7 +193,7 @@ test("v5 target selection reports in-band candidates and measured score gaps", (
   assert.equal(selected.difficultyProfile?.logical.level, 3);
   assert.ok(selected.difficultyProfile!.logical.score >= levelThreeBand.minimumScore);
   assert.equal(selected.selectionDiagnostics?.modelVersion, DIFFICULTY_MODEL_V5);
-  assert.ok((selected.selectionDiagnostics?.candidateScoreRange?.complete ?? 0) > 0);
+  assertCompleteSelectionDiagnostics(selected.selectionDiagnostics!);
   assert.equal(replayed.generationStrategy, selected.generationStrategy);
   assert.deepEqual(replayed.selectionDiagnostics, selected.selectionDiagnostics);
   assert.deepEqual(replayed.clues, selected.clues);
