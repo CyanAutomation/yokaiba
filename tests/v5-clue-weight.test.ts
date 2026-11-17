@@ -50,5 +50,7 @@ test("v5 expert strategies rotate relational priorities and favor cross-category
   assert.ok(weight("distance", 9, 4) < weight("sameRow", 9, 4));
   assert.ok(weight("sameRow", 9, 8) < weight("distance", 9, 8));
 
-  assert.ok(weight("before", 11, 4, "pet") < weight("before", 11, 4));
+  const sameCategoryBeforeWeight = weight("before", 11, 4);
+  assert.ok(sameCategoryBeforeWeight >= 0);
+  assert.ok(weight("before", 11, 4, "pet") < sameCategoryBeforeWeight);
 });
