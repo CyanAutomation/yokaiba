@@ -444,8 +444,11 @@ test("dense-board fallback respects its configured derived-seed attempt budget",
 });
 
 test("expert target generation favors relational deductions over direct facts", () => {
-  const puzzle = generatePuzzle(championshipCircuitTemplate, "expert-relational", undefined, { difficultyLevel: 12, strategy: 0 });
+  const puzzle = generatePuzzleAtDifficulty(championshipCircuitTemplate, "expert-relational", 12);
 
+  assert.equal(puzzle.requestedDifficultyLevel, 12);
+  assert.equal(puzzle.difficulty.level, 12);
+  assert.equal(puzzle.difficulty.evidence.humanSolve.solved, true);
   assert.equal(countSolutions(puzzle.spec, puzzle.clues, 2), 1);
   assert.ok(puzzle.clues.every(clue => clue.constraint.kind !== "matches"));
   assert.ok(puzzle.clues.some(clue => clue.constraint.kind === "sameRow" || clue.constraint.kind === "distance"));

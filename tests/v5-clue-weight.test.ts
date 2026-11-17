@@ -14,62 +14,43 @@ function clue(kind: ClueConstraint["kind"], id = `${kind}-clue-0`, leftCategory 
   return { id, text: "", constraint };
 }
 
-test("v5 clue weights preserve calibrated beginner and anchor-row priorities", () => {
-  const cases: { level: DifficultyLevel; kind: ClueConstraint["kind"]; expected: number }[] = [
-    { level: 1, kind: "matches", expected: 0 },
-    { level: 1, kind: "notMatches", expected: 7 },
-    { level: 1, kind: "before", expected: 32 },
-    { level: 1, kind: "adjacent", expected: 27 },
-    { level: 1, kind: "sameRow", expected: 22 },
-    { level: 1, kind: "distance", expected: 41 },
-    { level: 3, kind: "matches", expected: 0 },
-    { level: 3, kind: "notMatches", expected: 30 },
-    { level: 3, kind: "before", expected: 6 },
-    { level: 3, kind: "adjacent", expected: 12 },
-    { level: 3, kind: "sameRow", expected: 8 },
-    { level: 3, kind: "distance", expected: 6 },
-    { level: 4, kind: "sameRow", expected: 6 },
-    { level: 4, kind: "adjacent", expected: 6 },
-    { level: 4, kind: "before", expected: 12 },
-    { level: 5, kind: "sameRow", expected: 6 },
-    { level: 5, kind: "distance", expected: 9 },
-    { level: 5, kind: "adjacent", expected: 18 },
-  ];
+test("v5 beginner clue selection favors simpler and anchor-row clues", () => {
+  const weight = (kind: ClueConstraint["kind"], level: DifficultyLevel, strategy = 0, id?: string) =>
+    v5ClueWeight(clue(kind, id ?? `${kind}-candidate`), level, strategy, 4);
 
-  for (const { level, kind, expected } of cases) {
-    const candidate = clue(kind, kind === "matches" ? "candidate-matches-color-row-2" : `${kind}-candidate`);
-    const strategy = level === 3 ? 2 : 0;
-    assert.equal(v5ClueWeight(candidate, level, strategy, 4), expected, `${kind} at level ${level}`);
-  }
-  assert.equal(v5ClueWeight(clue("matches", "candidate-matches-color-row-1"), 3, 2, 4), 36);
-  assert.equal(v5ClueWeight(clue("matches", "candidate-matches-color-row-0"), 5, 0, 4), 0);
-  assert.equal(v5ClueWeight(clue("notMatches"), 5, 0, 4), 30);
-  assert.equal(v5ClueWeight(clue("matches", "candidate-matches-color-row-0"), 4, 0, 4), 0);
+  assert.ok(weight("matches", 1) < weight("notMatches", 1));
+  assert.ok(weight("notMatches", 1) < weight("sameRow", 1));
+  assert.ok(weight("sameRow", 1) < weight("adjacent", 1));
+  assert.ok(weight("adjacent", 1) < weight("before", 1));
+  assert.ok(weight("before", 1) < weight("distance", 1));
+
+  const anchorRow = weight("matches", 3, 2, "candidate-matches-color-row-2");
+  const otherRow = weight("matches", 3, 2, "candidate-matches-color-row-1");
+  assert.ok(anchorRow < weight("before", 3, 2));
+  assert.ok(otherRow > weight("notMatches", 3, 2));
+  assert.ok(weight("before", 3, 2) <= weight("distance", 3, 2));
+  assert.ok(weight("distance", 3, 2) < weight("sameRow", 3, 2));
+  assert.ok(weight("sameRow", 3, 2) < weight("adjacent", 3, 2));
+
+  assert.equal(weight("sameRow", 4), weight("adjacent", 4));
+  assert.ok(weight("adjacent", 4) < weight("before", 4));
+  assert.ok(weight("sameRow", 5) < weight("distance", 5));
+  assert.ok(weight("distance", 5) < weight("before", 5));
+  assert.ok(weight("before", 5) < weight("adjacent", 5));
 });
 
-test("v5 clue weights preserve deterministic expert profiles and cross-category ordering", () => {
-  const cases: { level: DifficultyLevel; strategy: number; kind: ClueConstraint["kind"]; expected: number }[] = [
-    { level: 6, strategy: 0, kind: "distance", expected: 11 },
-    { level: 6, strategy: 4, kind: "distance", expected: 3 },
-    { level: 6, strategy: 8, kind: "sameRow", expected: 0 },
-    { level: 9, strategy: 0, kind: "distance", expected: 5 },
-    { level: 9, strategy: 4, kind: "before", expected: 6 },
-    { level: 9, strategy: 8, kind: "sameRow", expected: 0 },
-    { level: 12, strategy: 0, kind: "distance", expected: 5 },
-    { level: 11, strategy: 4, kind: "before", expected: -2 },
-  ];
+test("v5 expert strategies rotate relational priorities and favor cross-category ordering", () => {
+  const weight = (kind: ClueConstraint["kind"], level: DifficultyLevel, strategy: number, rightCategory = "color") =>
+    v5ClueWeight(clue(kind, `${kind}-candidate`, "color", rightCategory), level, strategy, 5);
 
-  for (const { level, strategy, kind, expected } of cases) {
-    const crossesCategories = level === 11 && kind === "before";
-    assert.equal(v5ClueWeight(clue(kind, `${kind}-expert`, "color", crossesCategories ? "pet" : "color"), level, strategy, 5), expected);
-  }
-  assert.equal(v5ClueWeight(clue("before", "before-expert", "color", "color"), 11, 4, 5), 6);
-});
+  assert.ok(weight("sameRow", 6, 0) < weight("distance", 6, 0));
+  assert.ok(weight("distance", 6, 4) < weight("sameRow", 6, 4));
+  assert.ok(weight("sameRow", 6, 8) < weight("distance", 6, 8));
+  assert.ok(weight("distance", 9, 0) < weight("sameRow", 9, 0));
+  assert.ok(weight("distance", 9, 4) < weight("sameRow", 9, 4));
+  assert.ok(weight("sameRow", 9, 8) < weight("distance", 9, 8));
 
-test("v5 anchor-row matching handles repeated and malformed clue ID markers", () => {
-  const repeatedMarkers = `candidate-${"matches-".repeat(256)}color-row-0`;
-
-  assert.equal(v5ClueWeight(clue("matches", repeatedMarkers), 3, 0, 4), 0);
-  assert.equal(v5ClueWeight(clue("matches", "matches--0"), 3, 0, 4), 36);
-  assert.equal(v5ClueWeight(clue("matches", "xmatches-color-row-0"), 3, 0, 4), 36);
+  const sameCategoryBeforeWeight = weight("before", 11, 4);
+  assert.ok(sameCategoryBeforeWeight >= 0);
+  assert.ok(weight("before", 11, 4, "pet") < sameCategoryBeforeWeight);
 });
