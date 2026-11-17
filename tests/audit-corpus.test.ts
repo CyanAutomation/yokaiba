@@ -10,6 +10,7 @@ import {
   fallbackAttemptPercentiles,
   type DifficultyAuditRecord,
 } from "../src/generation/audit.js";
+import type { Difficulty, GeneratedPuzzle } from "../src/domain/types.js";
 import { DifficultyUnavailableError, generatePuzzleForRequest } from "../src/generation/generator.js";
 import { tournamentOrderV2Template } from "../src/templates/tournament-order-v2.js";
 import { tournamentOrderTemplate } from "../src/templates/tournament-order.js";
@@ -18,6 +19,31 @@ import { openDivisionTemplate } from "../src/templates/open-division.js";
 const fourRowOpenDivisionAuditFixture = {
   ...openDivisionTemplate,
   categories: openDivisionTemplate.categories.map(category => ({ ...category, values: category.values.slice(0, 4) })),
+};
+
+function generatedPuzzleFixture(level: Difficulty["level"], clueCount = 3, seedFallbackAttempt?: number): GeneratedPuzzle {
+  // Audit aggregation reads only these fields; avoid running the puzzle generator for report-shape tests.
+  return {
+    difficulty: {
+      level,
+      modelVersion: "yokaiba-difficulty-v5",
+      evidence: { humanSolve: { solved: true } },
+    },
+    clues: Array.from({ length: clueCount }, () => ({})),
+    ...(seedFallbackAttempt === undefined ? {} : { seedFallbackAttempt }),
+  } as unknown as GeneratedPuzzle;
+}
+
+const singleLevelTargetAuditTemplate = {
+  ...tournamentOrderV2Template,
+  metadata: {
+    ...tournamentOrderV2Template.metadata!,
+    difficultyCalibration: {
+      ...tournamentOrderV2Template.metadata!.difficultyCalibration,
+      scoreThresholds: [],
+      levelRange: [1, 1] as [Difficulty["level"], Difficulty["level"]],
+    },
+  },
 };
 
 // Audit report and calibration contract: docs/difficulty-and-calibration.md#difficulty-audit-and-calibration.
@@ -212,7 +238,7 @@ test("targeted audit summarizes diagnostics and alternate levels for unavailable
   });
 });
 
-test("targeted audit ignores malformed alternate difficulty levels in diagnostics", () => {
+test("targeted audit retains valid alternate levels and filters out-of-range diagnostics", () => {
   const result = auditTargetedDifficultyLevel(tournamentOrderV2Template, 1, {
     sampleSize: 1,
     generateTargeted: (template, seed, level) => {
@@ -220,74 +246,92 @@ test("targeted audit ignores malformed alternate difficulty levels in diagnostic
         template.id,
         seed,
         level,
-        [0, 13] as unknown as DifficultyAuditRecord["level"][],
+        [2, 0, 13] as unknown as DifficultyAuditRecord["level"][],
       );
     },
   });
 
-  assert.deepEqual(result.level.unavailableDiagnostics?.availableDifficultyCounts, Array<number>(12).fill(0));
+  const expectedCounts = Array<number>(12).fill(0);
+  expectedCounts[1] = 1;
+  assert.deepEqual(result.level.unavailableDiagnostics?.availableDifficultyCounts, expectedCounts);
 });
 
-test("targeted audit reports the fallback count and attempt percentiles for a replayable seed", () => {
+test("targeted audit reports fallback usage and nearest-rank attempt percentiles", () => {
+  const attempts = [2, 1, 2, 1] as const;
+  let sampleIndex = 0;
   const result = auditTargetedDifficultyLevel(openDivisionTemplate, 5, {
-    sampleSize: 2,
-    seedPrefix: "difficulty-v5-audit-target-open-division-v2-5",
+    sampleSize: attempts.length,
+    generateTargeted: () => generatedPuzzleFixture(5, 3, attempts[sampleIndex++]!),
   });
 
   assert.equal(result.modelVersion, "yokaiba-difficulty-v5");
-  assert.equal(result.level.generated + (result.level.unavailable ?? 0), 2);
-  assert.ok(result.level.fallback.used <= result.level.generated);
-  assert.ok(result.level.fallback.maximumAttempt <= 2);
+  assert.equal(result.level.generated, attempts.length);
+  assert.deepEqual(result.level.fallback, {
+    used: attempts.length,
+    maximumAttempt: 2,
+    attempts: { p50: 1, p95: 2 },
+  });
 });
 
-test("difficulty audit reports each progressive sample in order", () => {
-  const templateId = tournamentOrderV2Template.id;
-  const progress: unknown[] = [];
-
-  auditDifficultyCorpus(tournamentOrderV2Template, {
+test("distribution and targeted audits report progress after each sample", () => {
+  const puzzle = generatedPuzzleFixture(2);
+  const distributionProgress: unknown[] = [];
+  const distribution = auditDifficultyCorpus(tournamentOrderV2Template, {
     sampleSize: 2,
     seedPrefix: "progressive-progress",
-    onProgress: event => progress.push(event),
+    generator: () => puzzle,
+    onProgress: event => distributionProgress.push(event),
   });
 
-  assert.deepEqual(progress, [
-    { phase: "difficulty", templateId, completed: 1, total: 2 },
-    { phase: "difficulty", templateId, completed: 2, total: 2 },
+  assert.equal(distribution.generated, 2);
+  assert.deepEqual(distributionProgress, [
+    { phase: "difficulty", templateId: tournamentOrderV2Template.id, completed: 1, total: 2 },
+    { phase: "difficulty", templateId: tournamentOrderV2Template.id, completed: 2, total: 2 },
   ]);
-});
 
-test("targeted audit reports each sample in order for every advertised level", () => {
-  const templateId = tournamentOrderV2Template.id;
-  const progress: unknown[] = [];
-
-  auditTargetedDifficultyCorpus(tournamentOrderV2Template, {
+  const targetedProgress: unknown[] = [];
+  const targetedLevels: Difficulty["level"][] = [];
+  const targeted = auditTargetedDifficultyCorpus(tournamentOrderV2Template, {
     sampleSize: 2,
-    seedPrefix: "targeted-progress",
-    onProgress: event => progress.push(event),
+    generateTargeted: (_template, _seed, level) => {
+      targetedLevels.push(level);
+      return puzzle;
+    },
+    onProgress: event => targetedProgress.push(event),
   });
 
-  assert.deepEqual(progress, [1, 2, 3, 4].flatMap(requestedDifficultyLevel => [
-    { phase: "targeted", templateId, requestedDifficultyLevel, completed: 1, total: 2 },
-    { phase: "targeted", templateId, requestedDifficultyLevel, completed: 2, total: 2 },
+  assert.deepEqual(targetedLevels, [1, 1, 2, 2, 3, 3, 4, 4]);
+  assert.deepEqual(targetedProgress, [1, 2, 3, 4].flatMap(requestedDifficultyLevel => [
+    { phase: "targeted", templateId: tournamentOrderV2Template.id, requestedDifficultyLevel, completed: 1, total: 2 },
+    { phase: "targeted", templateId: tournamentOrderV2Template.id, requestedDifficultyLevel, completed: 2, total: 2 },
   ]));
+  assert.ok(targeted.levels.every(level => level.generated === 2));
 });
 
-test("a single-seed distribution audit reports its generated puzzle's statistics", () => {
-  const report = auditDifficultyCorpus(tournamentOrderTemplate, { seedPrefix: "audit-integration", sampleSize: 1 });
+test("a single generated puzzle maps to exact distribution report statistics", () => {
+  const puzzle = generatedPuzzleFixture(3, 7);
+  const report = auditDifficultyCorpus(tournamentOrderTemplate, {
+    seedPrefix: "audit-integration",
+    sampleSize: 1,
+    generator: () => puzzle,
+  });
+  const levelCounts = Array<number>(12).fill(0);
+  levelCounts[2] = 1;
 
-  assert.equal(report.templateId, tournamentOrderTemplate.id);
-  assert.equal(report.sampleSize, 1);
-  assert.equal(report.generated, 1);
-  assert.equal(report.unavailable, 0);
-  assert.equal(report.modelVersion, "yokaiba-difficulty-v5");
-  assert.equal(report.levelCounts.reduce((total, count) => total + count, 0), report.generated);
-  assert.equal(report.humanTrace.complete + report.humanTrace.incomplete, report.generated);
-  assert.ok(report.clues.minimum > 0);
-  assert.equal(report.clues.minimum, report.clues.maximum);
-  assert.equal(report.clues.average, report.clues.minimum);
+  assert.deepEqual(report, {
+    templateId: tournamentOrderTemplate.id,
+    modelVersion: "yokaiba-difficulty-v5",
+    sampleSize: 1,
+    generated: 1,
+    unavailable: 0,
+    seedPrefix: "audit-integration",
+    levelCounts,
+    humanTrace: { complete: 1, incomplete: 0 },
+    clues: { average: 7, minimum: 7, maximum: 7 },
+  });
 });
 
-test("audit defaults use template sample size and documented seed prefixes", () => {
+test("audits default to the template calibration sample size", () => {
   const templateWithOneSampleDefault = {
     ...tournamentOrderV2Template,
     metadata: {
@@ -298,12 +342,29 @@ test("audit defaults use template sample size and documented seed prefixes", () 
       },
     },
   };
-  const distribution = auditDifficultyCorpus(templateWithOneSampleDefault);
-  const targeted = auditTargetedDifficultyLevel(templateWithOneSampleDefault, 1);
+  const puzzle = generatedPuzzleFixture(1);
+  const distribution = auditDifficultyCorpus(templateWithOneSampleDefault, { generator: () => puzzle });
+  const targeted = auditTargetedDifficultyLevel(templateWithOneSampleDefault, 1, { generateTargeted: () => puzzle });
 
   assert.equal(distribution.sampleSize, 1);
-  assert.equal(distribution.seedPrefix, "difficulty-audit");
-  assert.equal(targeted.level.generated + (targeted.level.unavailable ?? 0), 1);
+  assert.equal(distribution.generated, 1);
+  assert.equal(targeted.level.generated, 1);
+  assert.equal(targeted.level.unavailable, 0);
+});
+
+test("targeted corpus audit uses the supplied generator at every advertised level", () => {
+  const generatedLevels: Difficulty["level"][] = [];
+  const unavailable = new Error("injected targeted generation failure");
+
+  assert.throws(() => auditTargetedDifficultyCorpus(singleLevelTargetAuditTemplate, {
+    sampleSize: 1,
+    generateTargeted: (_template, _seed, level) => {
+      generatedLevels.push(level);
+      throw unavailable;
+    },
+  }), error => error === unavailable);
+
+  assert.deepEqual(generatedLevels, [1]);
 });
 
 test("targeted corpus audits generate and assess each advertised course level", () => {

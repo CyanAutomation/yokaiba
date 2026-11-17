@@ -336,7 +336,12 @@ export function fallbackAttemptPercentiles(attempts: readonly number[]): { p50: 
  * browser course. This is deliberately separate from the distribution audit:
  * a normal generator sample cannot prove that a requested level is deliverable.
  */
-export function auditTargetedDifficultyCorpus(template: PuzzleTemplate, options: { sampleSize?: number; seedPrefix?: string; onProgress?: DifficultyAuditProgressCallback } = {}): TargetedDifficultyCorpusAudit {
+export function auditTargetedDifficultyCorpus(template: PuzzleTemplate, options: {
+  sampleSize?: number;
+  seedPrefix?: string;
+  onProgress?: DifficultyAuditProgressCallback;
+  generateTargeted?: TargetedPuzzleGenerator;
+} = {}): TargetedDifficultyCorpusAudit {
   const sampleSize = options.sampleSize ?? template.metadata?.difficultyCalibration.corpus.sampleSize ?? 1_000;
   const seedPrefix = options.seedPrefix ?? "targeted-difficulty-audit";
   if (!Number.isInteger(sampleSize) || sampleSize < 1) throw new RangeError("sampleSize must be a positive integer");
@@ -344,7 +349,7 @@ export function auditTargetedDifficultyCorpus(template: PuzzleTemplate, options:
   const results = Array.from({ length: maximumLevel - minimumLevel + 1 }, (_value, offset) => auditTargetedDifficultyLevel(
     template,
     (minimumLevel + offset) as Difficulty["level"],
-    { sampleSize, seedPrefix, onProgress: options.onProgress },
+    { sampleSize, seedPrefix, onProgress: options.onProgress, generateTargeted: options.generateTargeted },
   ));
   const modelVersion = results[0]?.modelVersion ?? DEFAULT_DIFFICULTY_MODEL_VERSION;
   const levels = results.map(result => result.level);
