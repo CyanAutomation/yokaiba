@@ -44,6 +44,7 @@ jobs:
           node-version-file: .nvmrc
 
       - name: Validate Soyuz URL
+        shell: bash
         run: node --experimental-strip-types scripts/validate-soyuz-url.ts
 
       - name: Submit DRY sweep to Soyuz
