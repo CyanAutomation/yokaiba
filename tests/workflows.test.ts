@@ -141,7 +141,10 @@ test("Soyuz URL validation accepts only the approved origin", () => {
     ["kaseki-dry.yaml", "dry_sweep"],
     ["kaseki-docs.yaml", "docs_sweep"],
   ]) {
-    assert.match(getRunStep(readWorkflow(name), jobName, "Validate Soyuz URL"), /scripts\/validate-soyuz-url\.ts/);
+    const validationStep = getJob(readWorkflow(name), jobName).steps.find((step: Workflow) => step.name === "Validate Soyuz URL") as Workflow | undefined;
+    assert.ok(validationStep, `${name} must define the Soyuz URL validation step`);
+    assert.equal(validationStep.shell, "bash", `${name} must declare the validation shell`);
+    assert.match(validationStep.run, /scripts\/validate-soyuz-url\.ts/);
   }
 });
 
