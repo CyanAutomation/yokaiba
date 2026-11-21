@@ -1,9 +1,9 @@
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
-import { existsSync, mkdtempSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
-import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { readFileSync } from "node:fs";
 import test from "node:test";
+import { validateSoyuzRunId } from "../scripts/validate-soyuz-run-id.js";
+import { validateSoyuzBaseUrl } from "../scripts/validate-soyuz-url.js";
 import { parseYamlDocument } from "./helpers/yaml.js";
 
 // Workflow behavior contracts are documented in docs/operations-and-deployment.md#github-workflow-policy.
@@ -31,6 +31,8 @@ test("Node.js version is pinned consistently for local development, package inst
     ["validate-reusable.yml", "validate"],
     ["deploy-cloudflare.yml", "deploy"],
     ["docs-links.yml", "links"],
+    ["kaseki-dry.yaml", "dry_sweep"],
+    ["kaseki-docs.yaml", "docs_sweep"],
   ]) {
     const workflow = readWorkflow(name);
     const setupNode = getJob(workflow, jobName).steps
@@ -53,94 +55,14 @@ function getRunStep(workflow: Workflow, jobName: string, stepName: string): stri
   return step.run as string;
 }
 
-function validateControllerUrl(script: string, url: string) {
-  return spawnSync("bash", ["--noprofile", "--norc", "-e", "-u", "-o", "pipefail", "-c", script], {
-    encoding: "utf8",
-    env: { PATH: process.env.PATH ?? "/usr/bin:/bin", KASEKI_BASE_URL: url },
-  });
-}
-
-function runKasekiPoll(script: string, status: string, timeoutSeconds: number) {
-  const directory = mkdtempSync(join(tmpdir(), "kaseki-poll-test-"));
-  const bin = join(directory, "bin");
-  const outputPath = join(directory, "github-output");
-  mkdirSync(bin);
-  writeFileSync(join(bin, "curl"), "#!/bin/sh\nexit 0\n", { mode: 0o700 });
-  writeFileSync(join(bin, "jq"), "#!/bin/sh\nprintf '%s\\n' \"$KASEKI_TEST_STATUS\"\n", { mode: 0o700 });
-
-  try {
-    const result = spawnSync("bash", ["--noprofile", "--norc", "-e", "-u", "-o", "pipefail", "-c", script], {
-      encoding: "utf8",
-      timeout: 5_000,
-      env: {
-        PATH: `${bin}:${process.env.PATH ?? "/usr/bin:/bin"}`,
-        KASEKI_API_TOKEN: "test-token",
-        KASEKI_BASE_URL: "https://kaseki-tunnel.scheimann.xyz",
-        RUN_ID: "test-run",
-        GITHUB_OUTPUT: outputPath,
-        KASEKI_TEST_STATUS: status,
-        KASEKI_POLL_TIMEOUT_SECONDS: String(timeoutSeconds),
-      },
-    });
-    if (result.error) throw result.error;
-    return {
-      ...result,
-      githubOutput: existsSync(outputPath) ? readFileSync(outputPath, "utf8") : "",
-    };
-  } finally {
-    rmSync(directory, { recursive: true, force: true });
-  }
-}
-
-function runKasekiIdempotencyKey(script: string, inputs: { repository: string; workflow: string; runId: string }): string {
-  const assignment = script.match(/^[ \t]*idempotency_key="\$\([\s\S]*?^[ \t]*\)"/m)?.[0];
-  assert.ok(assignment, "submission step must derive an idempotency key");
-
-  const directory = mkdtempSync(join(tmpdir(), "kaseki-idempotency-test-"));
-  const bin = join(directory, "bin");
-  mkdirSync(bin);
-  writeFileSync(join(bin, "uuidgen"), [
-    "#!/bin/sh",
-    "[ \"$#\" -eq 5 ] || exit 2",
-    "[ \"$1\" = '--sha1' ] && [ \"$2\" = '--namespace' ] && [ \"$3\" = '@dns' ] && [ \"$4\" = '--name' ] || exit 2",
-    "printf '%s\\n' \"$5\"",
-    "",
-  ].join("\n"), { mode: 0o700 });
-
-  try {
-    const result = spawnSync("bash", ["--noprofile", "--norc", "-e", "-u", "-o", "pipefail", "-c", [
-      "set -euo pipefail",
-      assignment,
-      "printf '%s\\n' \"$idempotency_key\"",
-      "",
-    ].join("\n")], {
-      encoding: "utf8",
-      env: {
-        PATH: `${bin}:${process.env.PATH ?? "/usr/bin:/bin"}`,
-        GITHUB_REPOSITORY: inputs.repository,
-        GITHUB_WORKFLOW: inputs.workflow,
-        GITHUB_RUN_ID: inputs.runId,
-      },
-    });
-    if (result.error) throw result.error;
-    assert.equal(result.status, 0, result.stderr);
-    return result.stdout.trim();
-  } finally {
-    rmSync(directory, { recursive: true, force: true });
-  }
-}
-
-function assertKasekiTokenScope(workflow: Workflow, jobName: string): void {
+function assertSoyuzTokenScope(workflow: Workflow, jobName: string): void {
   const currentJob = getJob(workflow, jobName);
-  assert.equal(currentJob.env?.KASEKI_API_TOKEN, undefined, `${jobName} must not expose the token job-wide`);
+  assert.equal(currentJob.environment, "soyuz", `${jobName} must use the Soyuz environment`);
+  assert.equal(currentJob.env?.SOYUZ_SUBMISSION_API_TOKEN, undefined, `${jobName} must not expose the token job-wide`);
   const tokenSteps = currentJob.steps.filter((step: Workflow) =>
-    step.env?.KASEKI_API_TOKEN === "${{ secrets.KASEKI_API_TOKEN }}",
+    step.env?.SOYUZ_SUBMISSION_API_TOKEN === "${{ secrets.SOYUZ_SUBMISSION_API_TOKEN }}",
   );
-  assert.deepEqual(tokenSteps.map((step: Workflow) => step.id ?? step.name), [
-    "Verify gateway connectivity and authentication",
-    "submit",
-    "wait",
-  ]);
+  assert.deepEqual(tokenSteps.map((step: Workflow) => step.id), ["submit"]);
 }
 
 // Workflow policy: docs/operations-and-deployment.md#github-workflow-policy.
@@ -164,18 +86,20 @@ test("Kaseki validation workflows invoke scripts declared by this package", () =
   }
 });
 
-test("Kaseki workflows only run from main and submit the main branch ref", () => {
+test("Soyuz workflows keep their current schedules, main-only guard, and main ref", () => {
   const dry = readWorkflow("kaseki-dry.yaml");
   const docs = readWorkflow("kaseki-docs.yaml");
 
+  assert.deepEqual(dry.on.schedule, [{ cron: "0 2 * * 1" }]);
+  assert.deepEqual(docs.on.schedule, [{ cron: "0 1 * * 3" }]);
   assert.equal(getJob(dry, "dry_sweep").if, "github.ref == 'refs/heads/main'");
   assert.equal(getJob(docs, "docs_sweep").if, "github.ref == 'refs/heads/main'");
   assert.equal(getJob(dry, "dry_sweep").env.REF, "main");
   assert.equal(docs.env.REF, "main");
 
   const submissions = [
-    getRunStep(dry, "dry_sweep", "Submit DRY sweep"),
-    getRunStep(docs, "docs_sweep", "Submit documentation sweep"),
+    getRunStep(dry, "dry_sweep", "Submit DRY sweep to Soyuz"),
+    getRunStep(docs, "docs_sweep", "Submit documentation sweep to Soyuz"),
   ];
   for (const submission of submissions) {
     assert.match(submission, /--arg ref "\$REF"/);
@@ -183,12 +107,12 @@ test("Kaseki workflows only run from main and submit the main branch ref", () =>
   }
 });
 
-test("Kaseki sweeps share one concurrency group and remain main-only", () => {
+test("Soyuz sweeps use separate concurrency groups and remain main-only", () => {
   const dry = readWorkflow("kaseki-dry.yaml");
   const docs = readWorkflow("kaseki-docs.yaml");
 
-  assert.equal(dry.concurrency.group, "kaseki-sweeps-${{ github.repository }}");
-  assert.equal(docs.concurrency.group, dry.concurrency.group);
+  assert.equal(dry.concurrency.group, "soyuz-dry-sweep-${{ github.repository }}");
+  assert.equal(docs.concurrency.group, "soyuz-docs-sweep-${{ github.repository }}");
   assert.equal(dry.concurrency["cancel-in-progress"], false);
   assert.equal(docs.concurrency["cancel-in-progress"], false);
   assert.equal(getJob(dry, "dry_sweep").if, "github.ref == 'refs/heads/main'");
@@ -202,30 +126,33 @@ test("Kaseki DRY sweep covers every source directory and the actual tests direct
   assert.deepEqual(allowlist, ["src/**/*", "worker/**/*", "scripts/**/*", "tests/**/*"]);
 });
 
-// Controller allowlist contract: docs/operations-and-deployment.md#github-workflow-policy.
-test("Kaseki sweep validation accepts the approved controller and rejects lookalike URLs", () => {
-  for (const [name, jobName, stepName] of [
-    ["kaseki-dry.yaml", "dry_sweep", "Validate Kaseki configuration"],
-    ["kaseki-docs.yaml", "docs_sweep", "Validate Kaseki controller URL"],
-  ]) {
-    const script = getRunStep(readWorkflow(name), jobName, stepName);
+test("Soyuz URL validation accepts only the approved origin", () => {
+  assert.equal(validateSoyuzBaseUrl("https://soyuz.scheimann.workers.dev"), "https://soyuz.scheimann.workers.dev");
 
-    assert.equal(validateControllerUrl(script, "https://kaseki-tunnel.scheimann.xyz").status, 0, name);
-    for (const url of [
-      "https://attacker.example",
-      "https://kaseki-tunnel.scheimann.xyz.attacker.example",
-      "http://kaseki-tunnel.scheimann.xyz",
-    ]) {
-      assert.notEqual(validateControllerUrl(script, url).status, 0, `${name} accepted ${url}`);
-    }
+  for (const value of [
+    "https://attacker.example",
+    "https://soyuz.scheimann.workers.dev.attacker.example",
+    "http://soyuz.scheimann.workers.dev",
+  ]) {
+    assert.throws(() => validateSoyuzBaseUrl(value));
+  }
+
+  for (const [name, jobName] of [
+    ["kaseki-dry.yaml", "dry_sweep"],
+    ["kaseki-docs.yaml", "docs_sweep"],
+  ]) {
+    const validationStep = getJob(readWorkflow(name), jobName).steps.find((step: Workflow) => step.name === "Validate Soyuz URL") as Workflow | undefined;
+    assert.ok(validationStep, `${name} must define the Soyuz URL validation step`);
+    assert.equal(validationStep.shell, "bash", `${name} must declare the validation shell`);
+    assert.match(validationStep.run, /scripts\/validate-soyuz-url\.ts/);
   }
 });
 
 test("Kaseki sweeps request standard pull requests, never drafts, and cap diffs", () => {
   const dry = readWorkflow("kaseki-dry.yaml");
   const docs = readWorkflow("kaseki-docs.yaml");
-  const drySubmission = getRunStep(dry, "dry_sweep", "Submit DRY sweep");
-  const docsSubmission = getRunStep(docs, "docs_sweep", "Submit documentation sweep");
+  const drySubmission = getRunStep(dry, "dry_sweep", "Submit DRY sweep to Soyuz");
+  const docsSubmission = getRunStep(docs, "docs_sweep", "Submit documentation sweep to Soyuz");
 
   for (const submission of [drySubmission, docsSubmission]) {
     assert.match(submission, /publishMode:\s*"pr"/);
@@ -234,51 +161,54 @@ test("Kaseki sweeps request standard pull requests, never drafts, and cap diffs"
   }
 });
 
-test("Kaseki reruns derive the same submission key and distinct runs get distinct keys", () => {
-  const inputs = {
-    repository: "CyanAutomation/yokaiba",
-    workflow: "Kaseki documentation sweep",
-    runId: "12345",
-  };
-
+test("Soyuz submissions generate and send an idempotency key", () => {
   for (const [name, jobName, stepName] of [
-    ["kaseki-docs.yaml", "docs_sweep", "Submit documentation sweep"],
-    ["kaseki-dry.yaml", "dry_sweep", "Submit DRY sweep"],
+    ["kaseki-docs.yaml", "docs_sweep", "Submit documentation sweep to Soyuz"],
+    ["kaseki-dry.yaml", "dry_sweep", "Submit DRY sweep to Soyuz"],
   ]) {
-    const workflow = readWorkflow(name);
-    const submission = getRunStep(workflow, jobName, stepName);
-    const firstRunKey = runKasekiIdempotencyKey(submission, inputs);
-    const rerunKey = runKasekiIdempotencyKey(submission, inputs);
-    const newRunKey = runKasekiIdempotencyKey(submission, { ...inputs, runId: "12346" });
-
-    assert.equal(firstRunKey, "cyanautomation/yokaiba:kaseki documentation sweep:12345");
-    assert.equal(rerunKey, firstRunKey);
-    assert.notEqual(newRunKey, firstRunKey);
-    assert.match(submission, /--arg idempotencyKey "\$idempotency_key"/);
+    const submission = getRunStep(readWorkflow(name), jobName, stepName);
+    assert.match(submission, /tr '\[:upper:\]' '\[:lower:\]' < \/proc\/sys\/kernel\/random\/uuid/);
+    assert.match(submission, /--header "Idempotency-Key: \$idempotency_key"/);
     assert.match(submission, /idempotencyKey:\s*\$idempotencyKey/);
   }
 });
 
-// Polling contract: docs/operations-and-deployment.md#github-workflow-policy.
-test("Kaseki sweeps stop on terminal results and respect the polling deadline", () => {
-  for (const [name, jobName] of [["kaseki-docs.yaml", "docs_sweep"], ["kaseki-dry.yaml", "dry_sweep"]]) {
+test("Soyuz workflows submit once and report admission without waiting for completion", () => {
+  for (const [name, jobName, taskName] of [
+    ["kaseki-docs.yaml", "docs_sweep", "Soyuz documentation submission"],
+    ["kaseki-dry.yaml", "dry_sweep", "Soyuz DRY submission"],
+  ]) {
     const workflow = readWorkflow(name);
-    const waitJob = getJob(workflow, jobName).steps.find((step: Workflow) => step.name === "Wait for Kaseki completion") as Workflow | undefined;
-    assert.ok(waitJob?.run, `${name} must define its completion poller`);
-    assert.equal(waitJob.env?.KASEKI_POLL_TIMEOUT_SECONDS, "11100");
+    const job = getJob(workflow, jobName);
+    const steps = job.steps as Workflow[];
+    const summary = steps.find((step) => step.name === "Publish Soyuz submission details");
 
-    const completed = runKasekiPoll(waitJob.run as string, "completed", 11100);
-    assert.equal(completed.status, 0, `${name}: ${completed.stderr}`);
-    assert.match(completed.githubOutput, /status=completed/);
+    assert.equal(job.environment, "soyuz");
+    assert.equal(job["timeout-minutes"], 15);
+    assert.equal(steps.filter((step) => step.id === "submit").length, 1);
+    assert.equal(steps.some((step) => step.id === "wait" || /Wait for Kaseki/.test(step.name ?? "")), false);
+    assert.ok(summary);
+    assert.equal(summary.if, "always()");
+    assert.match(summary.run, new RegExp(taskName));
+    assert.match(summary.run, /does not confirm execution completion/);
+    assert.match(summary.run, /Monitor the run in the Soyuz dashboard/);
+    assert.doesNotMatch(JSON.stringify(workflow), /KASEKI_(?:API_TOKEN|BASE_URL)|kaseki-tunnel|api\/v1\/runs\/\$RUN_ID\/status/);
+  }
+});
 
-    const failed = runKasekiPoll(waitJob.run as string, "failed", 11100);
-    assert.notEqual(failed.status, 0, name);
-    assert.match(failed.githubOutput, /status=failed/);
+test("Soyuz workflow Bash steps have valid shell syntax", () => {
+  for (const name of ["kaseki-docs.yaml", "kaseki-dry.yaml"]) {
+    const workflow = readWorkflow(name);
+    const jobName = name === "kaseki-dry.yaml" ? "dry_sweep" : "docs_sweep";
+    const steps = getJob(workflow, jobName).steps as Workflow[];
 
-    const timedOut = runKasekiPoll(waitJob.run as string, "completed", 0);
-    assert.notEqual(timedOut.status, 0, name);
-    assert.match(timedOut.stderr + timedOut.stdout, /timed out/i);
-    assert.equal(timedOut.githubOutput, "");
+    for (const step of steps.filter((candidate) => candidate.shell === "bash")) {
+      const result = spawnSync("bash", ["--noprofile", "--norc", "-n"], {
+        input: step.run,
+        encoding: "utf8",
+      });
+      assert.equal(result.status, 0, `${name} step ${step.name}: ${result.stderr}`);
+    }
   }
 });
 
@@ -323,11 +253,11 @@ test("Cloudflare deployment runs typed scripts for version and deployment checks
   }
 });
 
-test("Kaseki workflows scope the token to gateway, submit, and poll steps", () => {
+test("Soyuz workflows scope the token to the submission step", () => {
   const docs = readWorkflow("kaseki-docs.yaml");
   const dry = readWorkflow("kaseki-dry.yaml");
-  assertKasekiTokenScope(docs, "docs_sweep");
-  assertKasekiTokenScope(dry, "dry_sweep");
+  assertSoyuzTokenScope(docs, "docs_sweep");
+  assertSoyuzTokenScope(dry, "dry_sweep");
 });
 
 test("validation checkout does not persist its read-only GitHub token", () => {
@@ -386,15 +316,26 @@ test("shared validation audits changed code after collecting test coverage", () 
   assert.equal(steps[auditIndex]?.run, "npm run fallow:audit -- --coverage coverage/coverage-final.json --format compact --quiet");
 });
 
-test("Kaseki health checks document their pinned upstream commit", () => {
+test("Soyuz workflows validate the response and use the HTTPS submission endpoint", () => {
   for (const name of ["kaseki-dry.yaml", "kaseki-docs.yaml"]) {
     const source = readFileSync(new URL(`../.github/workflows/${name}`, import.meta.url), "utf8");
+    const workflow = readWorkflow(name);
+    const jobName = name === "kaseki-dry.yaml" ? "dry_sweep" : "docs_sweep";
+    const submit = getRunStep(workflow, jobName, name === "kaseki-dry.yaml" ? "Submit DRY sweep to Soyuz" : "Submit documentation sweep to Soyuz");
 
-    assert.match(
-      source,
-      /uses: CyanAutomation\/kaseki-agent\/\.github\/actions\/verify-controller-health@30db5d15e117b8d8de13eb66766d48cf6b7d618b # ci: add shared health probe action \(2026-10-07\)/,
-      `${name} must preserve the readable note for its pinned commit`,
-    );
+    assert.equal(getJob(workflow, jobName).environment, "soyuz");
+    assert.equal(getJob(workflow, jobName).env?.SOYUZ_BASE_URL ?? workflow.env?.SOYUZ_BASE_URL, "${{ vars.SOYUZ_BASE_URL }}");
+    assert.match(submit, /--request POST "\$SOYUZ_BASE_URL\/v1\/runs"/);
+    assert.match(submit, /--proto '=https'/);
+    assert.match(submit, /--tlsv1\.2/);
+    assert.match(submit, /--max-filesize 1048576/);
+    assert.match(submit, /\^\(200\|202\)\$/);
+    assert.match(submit, /\.data\.id \| strings/);
+    assert.match(submit, /\.data\.displayId \| strings/);
+    assert.match(submit, /\.data\.status \| strings/);
+    assert.match(submit, /validate-soyuz-run-id\.ts/);
+    assert.match(submit, /Response body omitted/);
+    assert.doesNotMatch(source, /KASEKI_(?:API_TOKEN|BASE_URL)|kaseki-tunnel|api\/v1\/runs\/\$RUN_ID\/status/);
   }
 });
 
