@@ -15,6 +15,8 @@ import {
   aggregateSemanticCalibrationEvidence,
   aggregateSemanticPuzzleEvidence,
   accumulateResponseUsage,
+  isRetryableJevEvaluation,
+  shouldKeepAuditCheckpoint,
   auditProgressMessage,
   assertCheckpointConfiguration,
   checkpointTargetedDifficultyLevels,
@@ -33,6 +35,7 @@ import {
   readJevDecisionResponse,
   readAuditCheckpoint,
   readJevAuditReport,
+  parseJevAuditReport,
   removeCompletedAuditCheckpoint,
   requestJevDecisionBatch,
   SEMANTIC_ASSESSMENT_SCHEMA_VERSION,
@@ -142,6 +145,10 @@ test("audit usage aggregation adds provider totals and preserves missing values"
     totalCost: 1,
     totalInputTokens: 2,
     totalOutputTokens: 3,
+    usageByPhase: {
+      clue: { cost: 1, inputTokens: 2, outputTokens: 3 },
+      puzzle: { cost: 0, inputTokens: 0, outputTokens: 0 },
+    },
   };
   accumulateResponseUsage(checkpoint, {
     model: "puzzle-model",
@@ -158,7 +165,23 @@ test("audit usage aggregation adds provider totals and preserves missing values"
     totalCost: 1.5,
     totalInputTokens: 6,
     totalOutputTokens: 9,
+    usageByPhase: {
+      clue: { cost: 1, inputTokens: 2, outputTokens: 3 },
+      puzzle: { cost: 0.5, inputTokens: 4, outputTokens: 6 },
+    },
   });
+});
+
+test("only complete JEV evaluations are terminal; incomplete and unavailable results can be retried", () => {
+  assert.equal(isRetryableJevEvaluation("pending"), true);
+  assert.equal(isRetryableJevEvaluation("incomplete"), true);
+  assert.equal(isRetryableJevEvaluation("unavailable"), true);
+  assert.equal(isRetryableJevEvaluation("complete"), false);
+  assert.equal(shouldKeepAuditCheckpoint(false, 1, 0, false), true);
+  assert.equal(shouldKeepAuditCheckpoint(false, 0, 1, true), true);
+  assert.equal(shouldKeepAuditCheckpoint(false, 0, 1, false), false);
+  assert.equal(shouldKeepAuditCheckpoint(true, 0, 0, false), true);
+  assert.equal(shouldKeepAuditCheckpoint(false, 0, 0, true), false);
 });
 
 const configuration: JevRunConfiguration = {
@@ -318,6 +341,24 @@ test("JEV answers preserve confidence and report incomplete metrics without inve
   assert.deepEqual(partial.flagReasons, ["faithfulness below 0.50"]);
 });
 
+test("a retry merges prior valid answers with the missing metrics from the new response", () => {
+  const first = applyJevAnswers(clue(), { "0_faithful": { noul: 0.4, confidence: 0.9 } }, 0, "first");
+  const retried = applyJevAnswers(first, {
+    "0_ambiguous": { noul: 0.1 },
+    "0_readability": { score: 1.8 },
+    "0_linguisticComplexity": { score: 0.4 },
+    "0_relationshipExplicitness": { score: 1.9 },
+    "0_entityClarity": { score: 1.7 },
+    "0_misunderstandingRisk": { noul: 0.1 },
+  }, 0, "second");
+
+  assert.equal(retried.evaluationStatus, "complete");
+  assert.equal(retried.faithful, 0.4);
+  assert.equal(retried.faithfulConfidence, 0.9);
+  assert.deepEqual(retried.missingAnswers, []);
+  assert.equal(retried.evaluatedAt, "second");
+});
+
 test("complete JEV answers are explicitly marked complete and retain each metric confidence", () => {
   const complete = applyJevAnswers(clue(), {
     "0_faithful": { noul: 0.95, confidence: 0.88 },
@@ -375,11 +416,24 @@ test("missing or malformed answer maps are treated as empty so the batch can be 
 });
 
 test("audit Markdown reports targeted delivery, fallbacks, confidence, and incomplete evaluations", () => {
-  const partial = applyJevAnswers(clue(), { "0_ambiguous": { noul: 0.8, confidence: 0.7 } }, 0);
+  const partial = {
+    ...applyJevAnswers(clue(), { "0_ambiguous": { noul: 0.8, confidence: 0.7 } }, 0),
+    logicalContribution: "not-essential" as const,
+    jointlyEssentialClueSets: [["clue-2", "clue-3"]],
+    higherOrderRemovalCandidateSets: 1,
+    higherOrderRemovalChecks: 1,
+    higherOrderRemovalChecksCapped: false,
+  };
   const report: JevAuditReport = {
     startedAt: "2026-09-29T00:00:00.000Z",
     generatedAt: "2026-09-29T00:01:00.000Z",
     configuration: { ...configuration, resolvedModel: "test-model" },
+    usage: {
+      attribution: "phase-specific",
+      clue: { cost: 0.01, inputTokens: 10, outputTokens: 20 },
+      puzzle: { cost: 0.03, inputTokens: 30, outputTokens: 40 },
+      total: { cost: 0.04, inputTokens: 40, outputTokens: 60 },
+    },
     difficultyAudit: [{
       templateId: "test-template", modelVersion: "difficulty-v1", sampleSize: 1, generated: 1, unavailable: 0, seedPrefix: "seed",
       levelCounts: [1, ...Array<number>(11).fill(0)], humanTrace: { complete: 1, incomplete: 0 },
@@ -414,9 +468,13 @@ test("audit Markdown reports targeted delivery, fallbacks, confidence, and incom
   assert.match(markdown, /Targeted difficulty audit/);
   assert.match(markdown, /JEV clue-review model: test-model/);
   assert.match(markdown, /JEV puzzle-review model: not returned/);
+  assert.match(markdown, /JEV clue-review usage: \$0\.010000 \(10 input \/ 20 output tokens\)/);
+  assert.match(markdown, /JEV puzzle-review usage: \$0\.030000 \(30 input \/ 40 output tokens\)/);
   assert.match(markdown, /Puzzle generation model: yokaiba-difficulty-v5/);
   assert.match(markdown, /Logical clue contribution by removal/);
   assert.match(markdown, /Ablation was measured for 1\/1 sampled clues/);
+  assert.match(markdown, /Checked 1\/1 candidate triple removals/);
+  assert.match(markdown, /joint triples/);
   assert.match(markdown, /Raw generation distribution/);
   assert.match(markdown, /Progressive delivery distribution/);
   assert.match(markdown, /1\/1 \| 0\/1 \| 1\/1/);
@@ -497,7 +555,7 @@ test("audit checkpoints round-trip, migrate older versions, and remove completed
   const directory = await mkdtemp(join(tmpdir(), "jev-audit-test-"));
   const checkpointPath = join(directory, "audit.checkpoint.json");
   const checkpoint: AuditCheckpoint = {
-    version: 4,
+    version: 5,
     startedAt: "2026-09-29T00:00:00.000Z",
     configuration,
     difficultyAudit: [],
@@ -520,6 +578,10 @@ test("audit checkpoints round-trip, migrate older versions, and remove completed
     },
     totalInputTokens: 0,
     totalOutputTokens: 0,
+    usageByPhase: {
+      clue: { cost: 0.01, inputTokens: 10, outputTokens: 5 },
+      puzzle: { cost: 0.02, inputTokens: 20, outputTokens: 10 },
+    },
   };
   try {
     await writeAuditCheckpoint(checkpointPath, checkpoint);
@@ -529,6 +591,7 @@ test("audit checkpoints round-trip, migrate older versions, and remove completed
     assert.throws(() => assertCheckpointConfiguration(checkpoint.configuration, { ...configuration, generationModelVersion: "yokaiba-difficulty-v4" }), /does not match/);
 
     const priorV5Checkpoint = JSON.parse(JSON.stringify(checkpoint)) as Record<string, unknown>;
+    delete priorV5Checkpoint.usageByPhase;
     delete (priorV5Checkpoint.configuration as Record<string, unknown>).generationModelVersion;
     delete priorV5Checkpoint.resolvedModelsByPhase;
     priorV5Checkpoint.version = 2;
@@ -540,6 +603,7 @@ test("audit checkpoints round-trip, migrate older versions, and remove completed
     assert.doesNotThrow(() => assertCheckpointConfiguration(resumedPriorV5!.configuration, configuration));
 
     const legacyCheckpoint = JSON.parse(JSON.stringify(checkpoint)) as Record<string, unknown>;
+    delete legacyCheckpoint.usageByPhase;
     delete legacyCheckpoint.productionDifficultyAudit;
     delete legacyCheckpoint.resolvedModelsByPhase;
     legacyCheckpoint.version = 2;
@@ -564,7 +628,8 @@ test("audit checkpoints round-trip, migrate older versions, and remove completed
     }
     await writeFile(checkpointPath, `${JSON.stringify(legacyCheckpoint)}\n`);
     const migrated = await readAuditCheckpoint(checkpointPath);
-    assert.equal(migrated?.version, 4);
+    assert.equal(migrated?.version, 5);
+    assert.equal(migrated?.usageByPhase, undefined);
     assert.equal(migrated?.resolvedModelsByPhase.clue.attribution, "legacy-aggregate");
     assert.deepEqual(migrated?.productionDifficultyAudit, []);
     assert.deepEqual(migrated?.difficultyAudit, [{
@@ -600,7 +665,7 @@ test("targeted difficulty checkpoint resumes at the first unfinished level", asy
   const directory = await mkdtemp(join(tmpdir(), "jev-level-checkpoint-test-"));
   const checkpointPath = join(directory, "audit.checkpoint.json");
   const checkpoint: AuditCheckpoint = {
-    version: 4,
+    version: 5,
     startedAt: "2026-09-29T00:00:00.000Z",
     configuration,
     difficultyAudit: [],
@@ -667,8 +732,10 @@ test("older JEV reports can be loaded for follow-up puzzle review", async () => 
     puzzleAudit: { enabled: false, sampledPuzzles: 0, completePuzzles: 0, incompletePuzzles: 0, unavailablePuzzles: 0, flaggedPuzzles: [], puzzles: [] },
   };
   try {
-    await writeFile(reportPath, `${JSON.stringify(source)}\n`);
+    const sourceText = `${JSON.stringify(source)}\n`;
+    await writeFile(reportPath, sourceText);
     const report = await readJevAuditReport(reportPath);
+    assert.deepEqual(parseJevAuditReport(sourceText, reportPath), report);
     assert.deepEqual(report.productionDifficultyAudit, []);
     assert.deepEqual(report.clueAudit.clues, []);
     assert.deepEqual(report.clueAudit.models, ["test-model"]);

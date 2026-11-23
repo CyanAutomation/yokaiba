@@ -17,10 +17,96 @@ export interface ClueAblationResult {
   traceStepDelta: number;
   /** Other individually non-essential clues whose joint removal breaks uniqueness or no-guess completion. */
   redundantWithClueIds: string[];
+  /** Other clue IDs in a jointly essential triple involving this clue. */
+  jointlyEssentialClueSets: string[][];
+  higherOrderRemovalCandidateSets: number;
+  higherOrderRemovalChecks: number;
+  higherOrderRemovalChecksCapped: boolean;
 }
 
-/** Measure single-clue effects and interactions between individually non-essential clues. */
-export function auditClueAblation(template: PuzzleTemplate, clues: readonly Clue[], solver: PuzzleSolver = exhaustivePuzzleSolver): ClueAblationResult[] {
+export interface ClueAblationOptions {
+  /** Maximum deterministic sample of three-clue removals per puzzle. Defaults to 32. */
+  maxHigherOrderChecks?: number;
+}
+
+function choose3(count: number): number {
+  return count < 3 ? 0 : count * (count - 1) * (count - 2) / 6;
+}
+
+function unrankTripleCombination(count: number, rank: number): [number, number, number] {
+  let remaining = rank;
+  let first = 0;
+  for (; first < count - 2; first += 1) {
+    const combinationsWithFirst = (count - first - 1) * (count - first - 2) / 2;
+    if (remaining < combinationsWithFirst) break;
+    remaining -= combinationsWithFirst;
+  }
+  let second = first + 1;
+  for (; second < count - 1; second += 1) {
+    const combinationsWithSecond = count - second - 1;
+    if (remaining < combinationsWithSecond) break;
+    remaining -= combinationsWithSecond;
+  }
+  return [first, second, second + 1 + remaining];
+}
+
+function sampledTripleRanks(candidateCount: number, maxChecks: number): { candidateCount: number; checkCount: number; ranks: number[] } {
+  const checkCount = Math.min(candidateCount, maxChecks);
+  const ranks = checkCount === candidateCount
+    ? Array.from({ length: checkCount }, (_unused, index) => index)
+    : Array.from({ length: checkCount }, (_unused, index) => Math.floor((index + 0.5) * candidateCount / checkCount));
+  return { candidateCount, checkCount, ranks };
+}
+
+function recordTripleInteraction(
+  template: PuzzleTemplate,
+  clues: readonly Clue[],
+  results: ClueAblationResult[],
+  eligibleIndices: readonly number[],
+  rank: number,
+  solver: PuzzleSolver,
+): void {
+  const positions = unrankTripleCombination(eligibleIndices.length, rank);
+  const removedIndices = positions.map(position => eligibleIndices[position]!);
+  const removed = new Set(removedIndices);
+  const remaining = clues.filter((_candidate, index) => !removed.has(index));
+  const unique = solver.countSolutions(template, remaining, 2) === 1;
+  const traceComplete = evaluateHumanDeductionTraceV5(template, remaining).solved;
+  if (unique && traceComplete) return;
+  const clueIds = removedIndices.map(index => clues[index]!.id).sort();
+  for (const removedIndex of removedIndices) {
+    results[removedIndex]!.jointlyEssentialClueSets.push(clueIds.filter(id => id !== clues[removedIndex]!.id));
+  }
+}
+
+function recordHigherOrderInteractions(
+  template: PuzzleTemplate,
+  clues: readonly Clue[],
+  results: ClueAblationResult[],
+  eligibleIndices: readonly number[],
+  maxChecks: number,
+  solver: PuzzleSolver,
+): void {
+  const sample = sampledTripleRanks(choose3(eligibleIndices.length), maxChecks);
+  for (const result of results) {
+    result.higherOrderRemovalCandidateSets = sample.candidateCount;
+    result.higherOrderRemovalChecks = sample.checkCount;
+    result.higherOrderRemovalChecksCapped = sample.candidateCount > sample.checkCount;
+  }
+  for (const rank of sample.ranks) recordTripleInteraction(template, clues, results, eligibleIndices, rank, solver);
+}
+
+/** Measure single-clue effects, pair interactions, and a bounded sample of higher-order interactions. */
+export function auditClueAblation(
+  template: PuzzleTemplate,
+  clues: readonly Clue[],
+  solver: PuzzleSolver = exhaustivePuzzleSolver,
+  options: ClueAblationOptions = {},
+): ClueAblationResult[] {
+  const maxHigherOrderChecks = options.maxHigherOrderChecks ?? 32;
+  if (!Number.isSafeInteger(maxHigherOrderChecks) || maxHigherOrderChecks < 0) {
+    throw new RangeError("maxHigherOrderChecks must be a non-negative safe integer");
+  }
   const fullTrace = evaluateHumanDeductionTraceV5(template, clues);
   const results = clues.map((clue, removedIndex): ClueAblationResult => {
     const remaining = clues.filter((_candidate, index) => index !== removedIndex);
@@ -36,6 +122,10 @@ export function auditClueAblation(template: PuzzleTemplate, clues: readonly Clue
       traceStepCountWithoutClue: traceWithout.steps.length,
       traceStepDelta: traceWithout.steps.length - fullTrace.steps.length,
       redundantWithClueIds: [],
+      jointlyEssentialClueSets: [],
+      higherOrderRemovalCandidateSets: 0,
+      higherOrderRemovalChecks: 0,
+      higherOrderRemovalChecksCapped: false,
     };
   });
 
@@ -52,6 +142,8 @@ export function auditClueAblation(template: PuzzleTemplate, clues: readonly Clue
       results[rightIndex]!.redundantWithClueIds.push(clues[leftIndex]!.id);
     }
   }
+
+  recordHigherOrderInteractions(template, clues, results, individuallyNonEssential, maxHigherOrderChecks, solver);
   return results;
 }
 

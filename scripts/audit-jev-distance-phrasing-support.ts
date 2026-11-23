@@ -10,6 +10,32 @@ export interface DistancePhrasingPair {
   placesApart: AuditedClue;
 }
 
+function pendingVariant(clue: AuditedClue, text: string): AuditedClue {
+  return {
+    ...clue,
+    text,
+    faithful: undefined,
+    faithfulConfidence: undefined,
+    ambiguous: undefined,
+    ambiguousConfidence: undefined,
+    readability: undefined,
+    readabilityConfidence: undefined,
+    linguisticComplexity: undefined,
+    linguisticComplexityConfidence: undefined,
+    relationshipExplicitness: undefined,
+    relationshipExplicitnessConfidence: undefined,
+    entityClarity: undefined,
+    entityClarityConfidence: undefined,
+    misunderstandingRisk: undefined,
+    misunderstandingRiskConfidence: undefined,
+    evaluationStatus: "pending",
+    missingAnswers: [],
+    evaluatedAt: undefined,
+    flagged: false,
+    flagReasons: [],
+  };
+}
+
 /** Pair the same saved v5 distance clue semantics with both wording variants. */
 export function buildDistancePhrasingPairs(
   clues: readonly AuditedClue[],
@@ -32,11 +58,8 @@ export function buildDistancePhrasingPairs(
       sourceClueId: clue.clueId,
       // Keep every payload field except text identical so JEV cannot infer a
       // variant from version or phrase metadata.
-      betweenCount: { ...pairedClue, text: betweenCount },
-      placesApart: {
-        ...pairedClue,
-        text: placesApart,
-      },
+      betweenCount: pendingVariant(pairedClue, betweenCount),
+      placesApart: pendingVariant(pairedClue, placesApart),
     };
   });
 }

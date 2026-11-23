@@ -20,6 +20,14 @@ function auditHeaderLines(report: JevAuditReport): string[] {
     const names = phase.models.length === 0 ? "not returned" : phase.model ?? `mixed (${phase.models.join(", ")})`;
     return phase.modelAttribution === "legacy-aggregate" ? `${names} (legacy aggregate attribution)` : names;
   };
+  const usageLines = report.usage?.attribution === "phase-specific"
+    ? [
+      `JEV clue-review usage: $${report.usage.clue.cost.toFixed(6)} (${report.usage.clue.inputTokens} input / ${report.usage.clue.outputTokens} output tokens).`,
+      `JEV puzzle-review usage: $${report.usage.puzzle.cost.toFixed(6)} (${report.usage.puzzle.inputTokens} input / ${report.usage.puzzle.outputTokens} output tokens).`,
+    ]
+    : report.usage
+      ? [`JEV total usage: $${report.usage.total.cost.toFixed(6)} (${report.usage.total.inputTokens} input / ${report.usage.total.outputTokens} output tokens); phase attribution unavailable for this legacy checkpoint.`]
+      : [`JEV reported usage: $${clueAudit.totalCost.toFixed(6)} (${clueAudit.totalInputTokens} input / ${clueAudit.totalOutputTokens} output tokens); phase attribution unavailable.`];
   return [
     "# Yokaiba JEV audit",
     "",
@@ -33,7 +41,8 @@ function auditHeaderLines(report: JevAuditReport): string[] {
     `Puzzle generation model: ${report.configuration.generationModelVersion}`,
     `Provisional review thresholds: ${JSON.stringify(report.configuration.reviewThresholds)}`,
     `Samples: ${report.configuration.difficultySamples} per difficulty template; ${report.configuration.clueSamples} per wording template; batch size ${report.configuration.batchSize}.`,
-    `Clues reviewed: ${clueAudit.sampledClues}; status: ${clueAudit.status}; review leads: ${clueAudit.flaggedClues.length}; incomplete: ${clueAudit.incompleteClues.length}; unavailable: ${clueAudit.unavailableClues.length}; reported cost: $${clueAudit.totalCost.toFixed(6)} (${clueAudit.totalInputTokens} input / ${clueAudit.totalOutputTokens} output tokens).`,
+    `Clues reviewed: ${clueAudit.sampledClues}; status: ${clueAudit.status}; review leads: ${clueAudit.flaggedClues.length}; incomplete: ${clueAudit.incompleteClues.length}; unavailable: ${clueAudit.unavailableClues.length}.`,
+    ...usageLines,
     `Puzzle-level review: ${report.puzzleAudit.enabled ? "enabled" : "disabled"}; ${report.puzzleAudit.completePuzzles} complete / ${report.puzzleAudit.sampledPuzzles} sampled; ${report.puzzleAudit.flaggedPuzzles.length} review leads.`,
   ];
 }
@@ -92,9 +101,37 @@ function countContributionRole(
   return clues.filter(clue => clue.logicalContribution === role).length;
 }
 
+function summarizeHigherOrderInteractions(clues: readonly JevAuditReport["clueAudit"]["clues"][number][]) {
+  const interactions = new Set<string>();
+  const interactionSummaryByPuzzle = new Map<string, { candidates: number; checks: number; capped: boolean }>();
+  for (const clue of clues) {
+    const puzzleKey = JSON.stringify([clue.templateId, clue.seed]);
+    const current = interactionSummaryByPuzzle.get(puzzleKey);
+    interactionSummaryByPuzzle.set(puzzleKey, {
+      candidates: Math.max(current?.candidates ?? 0, clue.higherOrderRemovalCandidateSets ?? 0),
+      checks: Math.max(current?.checks ?? 0, clue.higherOrderRemovalChecks ?? 0),
+      capped: (current?.capped ?? false) || (clue.higherOrderRemovalChecksCapped ?? false),
+    });
+    for (const otherIds of clue.jointlyEssentialClueSets ?? []) {
+      interactions.add(JSON.stringify([clue.templateId, clue.seed, ...[clue.clueId, ...otherIds].sort()]));
+    }
+  }
+  return {
+    interactions,
+    candidates: [...interactionSummaryByPuzzle.values()].reduce((sum, row) => sum + row.candidates, 0),
+    checks: [...interactionSummaryByPuzzle.values()].reduce((sum, row) => sum + row.checks, 0),
+    cappedPuzzles: [...interactionSummaryByPuzzle.values()].filter(row => row.capped).length,
+  };
+}
+
+function countHigherOrderInteractionClues(clues: readonly JevAuditReport["clueAudit"]["clues"][number][]): number {
+  return clues.filter(clue => (clue.jointlyEssentialClueSets?.length ?? 0) > 0).length;
+}
+
 function clueContributionLines(report: JevAuditReport): string[] {
   const assessed = report.clueAudit.clues.filter(clue => clue.logicalContribution !== undefined);
   const interactions = new Set<string>();
+  const higherOrderSummary = summarizeHigherOrderInteractions(assessed);
   for (const clue of assessed) {
     for (const otherId of clue.redundantWithClueIds ?? []) {
       interactions.add(JSON.stringify([clue.templateId, clue.seed, ...[clue.clueId, otherId].sort()]));
@@ -108,7 +145,7 @@ function clueContributionLines(report: JevAuditReport): string[] {
     "## Logical clue contribution by removal",
     "",
     "Each clue is removed in turn. A clue is uniqueness-critical if the remaining clues admit multiple solutions, no-guess-critical if the solution stays unique but the v5 deduction trace no longer completes, and not essential if both properties remain.",
-    "The trace-step delta is the reduced trace length minus the full trace length; cited steps include deductions that depend on the clue. Joint-removal links show pairs that pass single-clue removal individually but break uniqueness or no-guess completion when both are removed.",
+    "The trace-step delta is the reduced trace length minus the full trace length; cited steps include deductions that depend on the clue. Joint-removal links show pairs that pass single-clue removal individually but break uniqueness or no-guess completion when both are removed. A bounded, evenly spaced sample of three-clue removals checks for higher-order interactions.",
     "",
   ];
   if (assessed.length === 0) {
@@ -118,18 +155,21 @@ function clueContributionLines(report: JevAuditReport): string[] {
   lines.push(
     `Ablation was measured for ${assessed.length}/${report.clueAudit.clues.length} sampled clues.`,
     `Detected ${interactions.size} jointly essential clue pairs.`,
+    `Checked ${higherOrderSummary.checks}/${higherOrderSummary.candidates} candidate triple removals across sampled puzzles; the cap was reached in ${higherOrderSummary.cappedPuzzles} puzzles. Detected ${higherOrderSummary.interactions.size} jointly essential triples.`,
     "",
-    "| Constraint kind | Uniqueness-critical | No-guess-critical | Not essential | Mean cited trace steps | Mean trace-step delta | Clues in joint-removal pairs | Total |",
-    "| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: |",
+    "| Constraint kind | Uniqueness-critical | No-guess-critical | Not essential | Mean cited trace steps | Mean trace-step delta | Clues in joint-removal pairs | Clues in joint triples | Total |",
+    "| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |",
   );
   const kinds = [...new Set(assessed.map(clue => clue.constraintKind))].sort();
   for (const kind of kinds) {
     const clues = assessed.filter(clue => clue.constraintKind === kind);
     const interactionClues = clues.filter(clue => (clue.redundantWithClueIds?.length ?? 0) > 0).length;
-    lines.push(`| ${kind} | ${countContributionRole(clues, "uniqueness-critical")} | ${countContributionRole(clues, "no-guess-critical")} | ${countContributionRole(clues, "not-essential")} | ${mean(clues.map(clue => clue.deductionStepsUsingClue))} | ${mean(clues.map(clue => clue.traceStepDelta))} | ${interactionClues} | ${clues.length} |`);
+    const tripleInteractionClues = countHigherOrderInteractionClues(clues);
+    lines.push(`| ${kind} | ${countContributionRole(clues, "uniqueness-critical")} | ${countContributionRole(clues, "no-guess-critical")} | ${countContributionRole(clues, "not-essential")} | ${mean(clues.map(clue => clue.deductionStepsUsingClue))} | ${mean(clues.map(clue => clue.traceStepDelta))} | ${interactionClues} | ${tripleInteractionClues} | ${clues.length} |`);
   }
   const interactionClues = assessed.filter(clue => (clue.redundantWithClueIds?.length ?? 0) > 0).length;
-  lines.push(`| Total | ${countContributionRole(assessed, "uniqueness-critical")} | ${countContributionRole(assessed, "no-guess-critical")} | ${countContributionRole(assessed, "not-essential")} | ${mean(assessed.map(clue => clue.deductionStepsUsingClue))} | ${mean(assessed.map(clue => clue.traceStepDelta))} | ${interactionClues} | ${assessed.length} |`);
+  const tripleInteractionClues = countHigherOrderInteractionClues(assessed);
+  lines.push(`| Total | ${countContributionRole(assessed, "uniqueness-critical")} | ${countContributionRole(assessed, "no-guess-critical")} | ${countContributionRole(assessed, "not-essential")} | ${mean(assessed.map(clue => clue.deductionStepsUsingClue))} | ${mean(assessed.map(clue => clue.traceStepDelta))} | ${interactionClues} | ${tripleInteractionClues} | ${assessed.length} |`);
   return lines;
 }
 
