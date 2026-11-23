@@ -27,6 +27,7 @@ import {
   markPuzzleUnavailable,
   parseAuditArguments,
   puzzleReviewFlagReasons,
+  shouldKeepAuditCheckpoint,
   readAuditCheckpoint,
   readJevAuditReport,
   removeCompletedAuditCheckpoint,
@@ -38,6 +39,7 @@ import {
   SEMANTIC_ASSESSMENT_SCHEMA_VERSION,
   JEV_AUDIT_GENERATION_MODEL_VERSION,
   generateJevAuditPuzzle,
+  isRetryableJevEvaluation,
   JEV_REVIEW_THRESHOLDS,
   type AuditCheckpoint,
   type AuditedClue,
@@ -90,6 +92,10 @@ function initialClue(
       traceStepCountWithoutClue: contribution.traceStepCountWithoutClue,
       traceStepDelta: contribution.traceStepDelta,
       redundantWithClueIds: contribution.redundantWithClueIds,
+      jointlyEssentialClueSets: contribution.jointlyEssentialClueSets,
+      higherOrderRemovalCandidateSets: contribution.higherOrderRemovalCandidateSets,
+      higherOrderRemovalChecks: contribution.higherOrderRemovalChecks,
+      higherOrderRemovalChecksCapped: contribution.higherOrderRemovalChecksCapped,
     }),
     evaluationStatus: "pending",
     missingAnswers: [],
@@ -170,8 +176,20 @@ if (args.resume) {
   checkpoint.puzzles = checkpoint.puzzles.map(puzzle => puzzle.evaluationStatus === "unavailable" ? { ...puzzle, evaluationStatus: "pending", missingAnswers: [] } : puzzle);
   console.error(`Resuming checkpoint: ${checkpoint.difficultyAudit.length} raw and ${checkpoint.productionDifficultyAudit.length} progressive templates, ${checkpoint.targetedDifficultyAudit.reduce((sum, row) => sum + row.levels.length, 0)} targeted levels, ${checkpoint.clues.filter(clue => clue.evaluationStatus !== "pending").length}/${checkpoint.clues.length} clues processed.`);
 } else if (sourceReport) {
+  const sourceUsageByPhase = sourceReport.usage?.attribution === "phase-specific"
+    ? { clue: { ...sourceReport.usage.clue }, puzzle: { ...sourceReport.usage.puzzle } }
+    : !sourceReport.puzzleAudit.enabled
+      ? {
+        clue: {
+          cost: sourceReport.clueAudit.totalCost,
+          inputTokens: sourceReport.clueAudit.totalInputTokens,
+          outputTokens: sourceReport.clueAudit.totalOutputTokens,
+        },
+        puzzle: { cost: 0, inputTokens: 0, outputTokens: 0 },
+      }
+      : undefined;
   checkpoint = {
-    version: 4,
+    version: 5,
     startedAt: sourceReport.startedAt,
     configuration,
     difficultyAudit: sourceReport.difficultyAudit,
@@ -179,7 +197,7 @@ if (args.resume) {
     targetedDifficultyAudit: sourceReport.targetedDifficultyAudit,
     clues: sourceReport.clueAudit.clues,
     puzzles: rebuildPuzzleReviewCorpus(sourceReport, Object.fromEntries(templates.map(template => [template.id, template.title]))),
-    totalCost: sourceReport.clueAudit.totalCost,
+    totalCost: sourceReport.usage?.total.cost ?? sourceReport.clueAudit.totalCost,
     resolvedModel: sourceReport.configuration.resolvedModel ?? sourceReport.clueAudit.model,
     resolvedModelsByPhase: {
       clue: { models: sourceReport.clueAudit.models, attribution: sourceReport.clueAudit.modelAttribution },
@@ -187,14 +205,15 @@ if (args.resume) {
         ? { models: sourceReport.puzzleAudit.models, attribution: sourceReport.puzzleAudit.modelAttribution }
         : { models: [], attribution: "phase-specific" },
     },
-    totalInputTokens: sourceReport.clueAudit.totalInputTokens,
-    totalOutputTokens: sourceReport.clueAudit.totalOutputTokens,
+    totalInputTokens: sourceReport.usage?.total.inputTokens ?? sourceReport.clueAudit.totalInputTokens,
+    totalOutputTokens: sourceReport.usage?.total.outputTokens ?? sourceReport.clueAudit.totalOutputTokens,
+    ...(sourceUsageByPhase ? { usageByPhase: sourceUsageByPhase } : {}),
   };
   await writeAuditCheckpoint(checkpointPath, checkpoint);
   console.error(`Prepared ${checkpoint.puzzles.length} puzzle reviews from ${checkpoint.clues.length} saved clues.`);
 } else {
   checkpoint = {
-    version: 4,
+    version: 5,
     startedAt: invocationStartedAt,
     configuration,
     difficultyAudit: [],
@@ -210,6 +229,10 @@ if (args.resume) {
     },
     totalInputTokens: 0,
     totalOutputTokens: 0,
+    usageByPhase: {
+      clue: { cost: 0, inputTokens: 0, outputTokens: 0 },
+      puzzle: { cost: 0, inputTokens: 0, outputTokens: 0 },
+    },
   };
   await writeAuditCheckpoint(checkpointPath, checkpoint);
 }
@@ -276,7 +299,7 @@ let providerUnavailable = false;
 try {
   for (let offset = 0; offset < checkpoint.clues.length; offset += configuration.batchSize) {
     const batch = checkpoint.clues.slice(offset, offset + configuration.batchSize);
-    const pending = batch.filter(clue => clue.evaluationStatus === "pending");
+    const pending = batch.filter(clue => isRetryableJevEvaluation(clue.evaluationStatus));
     if (pending.length === 0) continue;
     const response = await requestSemanticBatch(buildLatestClueDecisionPayload(pending));
     accumulateResponseUsage(checkpoint, response, "clue");
@@ -290,7 +313,7 @@ try {
   if (configuration.puzzleReview) {
     for (let offset = 0; offset < checkpoint.puzzles.length; offset += configuration.batchSize) {
       const batch = checkpoint.puzzles.slice(offset, offset + configuration.batchSize);
-      const pending = batch.filter(puzzle => puzzle.evaluationStatus === "pending");
+      const pending = batch.filter(puzzle => isRetryableJevEvaluation(puzzle.evaluationStatus));
       if (pending.length === 0) continue;
       const response = await requestSemanticBatch(buildLatestPuzzleDecisionPayload(pending));
       accumulateResponseUsage(checkpoint, response, "puzzle");
@@ -335,6 +358,21 @@ const overallModelAttribution = summarizeResolvedModels([
   ...clueModelAttribution.models,
   ...puzzleModelAttribution.models,
 ]);
+const reportUsage = checkpoint.usageByPhase
+  ? {
+    attribution: "phase-specific" as const,
+    clue: checkpoint.usageByPhase.clue,
+    puzzle: checkpoint.usageByPhase.puzzle,
+    total: {
+      cost: checkpoint.usageByPhase.clue.cost + checkpoint.usageByPhase.puzzle.cost,
+      inputTokens: checkpoint.usageByPhase.clue.inputTokens + checkpoint.usageByPhase.puzzle.inputTokens,
+      outputTokens: checkpoint.usageByPhase.clue.outputTokens + checkpoint.usageByPhase.puzzle.outputTokens,
+    },
+  }
+  : {
+    attribution: "legacy-aggregate" as const,
+    total: { cost: checkpoint.totalCost, inputTokens: checkpoint.totalInputTokens, outputTokens: checkpoint.totalOutputTokens },
+  };
 const report: JevAuditReport = {
   startedAt: checkpoint.startedAt,
   generatedAt: new Date().toISOString(),
@@ -343,12 +381,13 @@ const report: JevAuditReport = {
   productionDifficultyAudit: checkpoint.productionDifficultyAudit,
   targetedDifficultyAudit: checkpoint.targetedDifficultyAudit,
   semanticCalibrationEvidence: aggregateSemanticCalibrationEvidence(checkpoint.clues, checkpoint.puzzles),
+  usage: reportUsage,
   clueAudit: {
     ...clueModelAttribution,
     sampledClues: checkpoint.clues.length,
-    totalCost: checkpoint.totalCost,
-    totalInputTokens: checkpoint.totalInputTokens,
-    totalOutputTokens: checkpoint.totalOutputTokens,
+    totalCost: reportUsage.attribution === "phase-specific" ? reportUsage.clue.cost : reportUsage.total.cost,
+    totalInputTokens: reportUsage.attribution === "phase-specific" ? reportUsage.clue.inputTokens : reportUsage.total.inputTokens,
+    totalOutputTokens: reportUsage.attribution === "phase-specific" ? reportUsage.clue.outputTokens : reportUsage.total.outputTokens,
     status: clueAuditStatus,
     flaggedClues,
     incompleteClues,
@@ -370,7 +409,12 @@ const report: JevAuditReport = {
 await mkdir(dirname(target), { recursive: true });
 await writeFile(target, `${JSON.stringify(report, null, 2)}\n`);
 await writeFile(markdownTarget, buildAuditMarkdown(report));
-if (!providerUnavailable) await removeCompletedAuditCheckpoint(checkpointPath);
+const incompleteSemanticWork = incompleteClues.length > 0 || (configuration.puzzleReview && incompletePuzzles.length > 0);
+if (!shouldKeepAuditCheckpoint(providerUnavailable, incompleteClues.length, incompletePuzzles.length, configuration.puzzleReview)) {
+  await removeCompletedAuditCheckpoint(checkpointPath);
+} else if (!providerUnavailable && incompleteSemanticWork) {
+  console.error(`Incomplete JEV answers remain. Checkpoint kept at ${checkpointPath}; rerun with --out ${outputBase} --difficulty-samples ${configuration.difficultySamples} --clue-samples ${configuration.clueSamples} --batch-size ${configuration.batchSize}${configuration.puzzleReview ? " --puzzle-review" : ""} --resume to retry missing metrics.`);
+}
 console.log(JSON.stringify({
   json: target,
   markdown: markdownTarget,

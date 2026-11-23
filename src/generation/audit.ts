@@ -17,10 +17,50 @@ export interface ClueAblationResult {
   traceStepDelta: number;
   /** Other individually non-essential clues whose joint removal breaks uniqueness or no-guess completion. */
   redundantWithClueIds: string[];
+  /** Other clue IDs in a jointly essential triple involving this clue. */
+  jointlyEssentialClueSets: string[][];
+  higherOrderRemovalCandidateSets: number;
+  higherOrderRemovalChecks: number;
+  higherOrderRemovalChecksCapped: boolean;
 }
 
-/** Measure single-clue effects and interactions between individually non-essential clues. */
-export function auditClueAblation(template: PuzzleTemplate, clues: readonly Clue[], solver: PuzzleSolver = exhaustivePuzzleSolver): ClueAblationResult[] {
+export interface ClueAblationOptions {
+  /** Maximum deterministic sample of three-clue removals per puzzle. Defaults to 32. */
+  maxHigherOrderChecks?: number;
+}
+
+function choose3(count: number): number {
+  return count < 3 ? 0 : count * (count - 1) * (count - 2) / 6;
+}
+
+function unrankTripleCombination(count: number, rank: number): [number, number, number] {
+  let remaining = rank;
+  let first = 0;
+  for (; first < count - 2; first += 1) {
+    const combinationsWithFirst = (count - first - 1) * (count - first - 2) / 2;
+    if (remaining < combinationsWithFirst) break;
+    remaining -= combinationsWithFirst;
+  }
+  let second = first + 1;
+  for (; second < count - 1; second += 1) {
+    const combinationsWithSecond = count - second - 1;
+    if (remaining < combinationsWithSecond) break;
+    remaining -= combinationsWithSecond;
+  }
+  return [first, second, second + 1 + remaining];
+}
+
+/** Measure single-clue effects, pair interactions, and a bounded sample of higher-order interactions. */
+export function auditClueAblation(
+  template: PuzzleTemplate,
+  clues: readonly Clue[],
+  solver: PuzzleSolver = exhaustivePuzzleSolver,
+  options: ClueAblationOptions = {},
+): ClueAblationResult[] {
+  const maxHigherOrderChecks = options.maxHigherOrderChecks ?? 32;
+  if (!Number.isSafeInteger(maxHigherOrderChecks) || maxHigherOrderChecks < 0) {
+    throw new RangeError("maxHigherOrderChecks must be a non-negative safe integer");
+  }
   const fullTrace = evaluateHumanDeductionTraceV5(template, clues);
   const results = clues.map((clue, removedIndex): ClueAblationResult => {
     const remaining = clues.filter((_candidate, index) => index !== removedIndex);
@@ -36,6 +76,10 @@ export function auditClueAblation(template: PuzzleTemplate, clues: readonly Clue
       traceStepCountWithoutClue: traceWithout.steps.length,
       traceStepDelta: traceWithout.steps.length - fullTrace.steps.length,
       redundantWithClueIds: [],
+      jointlyEssentialClueSets: [],
+      higherOrderRemovalCandidateSets: 0,
+      higherOrderRemovalChecks: 0,
+      higherOrderRemovalChecksCapped: false,
     };
   });
 
@@ -50,6 +94,30 @@ export function auditClueAblation(template: PuzzleTemplate, clues: readonly Clue
       if (uniqueWithoutPair && traceCompleteWithoutPair) continue;
       results[leftIndex]!.redundantWithClueIds.push(clues[rightIndex]!.id);
       results[rightIndex]!.redundantWithClueIds.push(clues[leftIndex]!.id);
+    }
+  }
+
+  const higherOrderCandidateSets = choose3(individuallyNonEssential.length);
+  const higherOrderChecks = Math.min(higherOrderCandidateSets, maxHigherOrderChecks);
+  const sampledRanks = higherOrderChecks === higherOrderCandidateSets
+    ? Array.from({ length: higherOrderChecks }, (_unused, index) => index)
+    : Array.from({ length: higherOrderChecks }, (_unused, index) => Math.floor((index + 0.5) * higherOrderCandidateSets / higherOrderChecks));
+  for (const result of results) {
+    result.higherOrderRemovalCandidateSets = higherOrderCandidateSets;
+    result.higherOrderRemovalChecks = higherOrderChecks;
+    result.higherOrderRemovalChecksCapped = higherOrderCandidateSets > higherOrderChecks;
+  }
+  for (const sampledRank of sampledRanks) {
+    const positions = unrankTripleCombination(individuallyNonEssential.length, sampledRank);
+    const removedIndices = positions.map(position => individuallyNonEssential[position]!);
+    const removed = new Set(removedIndices);
+    const remaining = clues.filter((_candidate, index) => !removed.has(index));
+    const uniqueWithoutTriple = solver.countSolutions(template, remaining, 2) === 1;
+    const traceCompleteWithoutTriple = evaluateHumanDeductionTraceV5(template, remaining).solved;
+    if (uniqueWithoutTriple && traceCompleteWithoutTriple) continue;
+    const clueIds = removedIndices.map(index => clues[index]!.id).sort();
+    for (const removedIndex of removedIndices) {
+      results[removedIndex]!.jointlyEssentialClueSets.push(clueIds.filter(id => id !== clues[removedIndex]!.id));
     }
   }
   return results;

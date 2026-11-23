@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
+import { exhaustivePuzzleSolver } from "../src/constraints/solver.js";
 import {
   aggregateDifficultyAuditRecords,
   auditClueAblation,
@@ -413,4 +414,23 @@ test("clue ablation detects jointly essential pairs and reports trace impact", (
   assert.ok(duplicateResult.redundantWithClueIds.includes(original.id));
   assert.ok(originalResult.deductionStepsUsingClue >= 0);
   assert.ok(duplicateResult.deductionStepsUsingClue >= 0);
+});
+
+test("clue ablation samples jointly essential triples among individually nonessential clues", () => {
+  const puzzle = generatePuzzleForRequest(tournamentOrderV2Template, "audit-clue-ablation");
+  const original = puzzle.clues[0]!;
+  const duplicateA = { ...original, id: `${original.id}-duplicate-a` };
+  const duplicateB = { ...original, id: `${original.id}-duplicate-b` };
+  const clues = [...puzzle.clues, duplicateA, duplicateB];
+  const ablation = auditClueAblation(tournamentOrderV2Template, clues, exhaustivePuzzleSolver, { maxHigherOrderChecks: 8 });
+  const tripleIds = [original.id, duplicateA.id, duplicateB.id].sort();
+
+  for (const clueId of tripleIds) {
+    const result = ablation.find(row => row.clueId === clueId)!;
+    assert.equal(result.logicalContribution, "not-essential");
+    assert.deepEqual(result.jointlyEssentialClueSets, [tripleIds.filter(id => id !== clueId)]);
+    assert.equal(result.higherOrderRemovalCandidateSets, 1);
+    assert.equal(result.higherOrderRemovalChecks, 1);
+    assert.equal(result.higherOrderRemovalChecksCapped, false);
+  }
 });

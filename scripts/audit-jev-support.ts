@@ -89,7 +89,7 @@ function normalizedModelPhase(
 }
 
 export function accumulateResponseUsage(
-  checkpoint: Pick<AuditCheckpoint, "resolvedModel" | "resolvedModelsByPhase" | "totalCost" | "totalInputTokens" | "totalOutputTokens">,
+  checkpoint: Pick<AuditCheckpoint, "resolvedModel" | "resolvedModelsByPhase" | "totalCost" | "totalInputTokens" | "totalOutputTokens" | "usageByPhase">,
   response: JevDecisionResponse,
   phase: "clue" | "puzzle",
 ): void {
@@ -101,6 +101,12 @@ export function accumulateResponseUsage(
   checkpoint.totalCost += withFallback(response.usage.cost, 0);
   checkpoint.totalInputTokens += withFallback(response.usage.inputTokens, 0);
   checkpoint.totalOutputTokens += withFallback(response.usage.outputTokens, 0);
+  if (checkpoint.usageByPhase) {
+    const phaseUsage = checkpoint.usageByPhase[phase];
+    phaseUsage.cost += withFallback(response.usage.cost, 0);
+    phaseUsage.inputTokens += withFallback(response.usage.inputTokens, 0);
+    phaseUsage.outputTokens += withFallback(response.usage.outputTokens, 0);
+  }
 }
 
 export async function removeCompletedAuditCheckpoint(path: string): Promise<void> {
@@ -132,6 +138,9 @@ export interface JevUsage {
   inputTokens: number;
   outputTokens: number;
 }
+export type JevReportedUsage =
+  | { attribution: "phase-specific"; clue: JevUsage; puzzle: JevUsage; total: JevUsage }
+  | { attribution: "legacy-aggregate"; total: JevUsage };
 export interface JevDecisionPayload {
   model: string;
   state: Record<string, unknown>;
@@ -161,6 +170,19 @@ export interface JevAnswer {
 
 export type JevEvaluationStatus = "pending" | "complete" | "incomplete" | "unavailable";
 
+export function isRetryableJevEvaluation(status: JevEvaluationStatus): boolean {
+  return status !== "complete";
+}
+
+export function shouldKeepAuditCheckpoint(
+  providerUnavailable: boolean,
+  incompleteClues: number,
+  incompletePuzzles: number,
+  puzzleReviewEnabled: boolean,
+): boolean {
+  return providerUnavailable || incompleteClues > 0 || (puzzleReviewEnabled && incompletePuzzles > 0);
+}
+
 export function readJevAnswerMap(value: unknown): Record<string, JevAnswer> {
   return value !== null && typeof value === "object" && !Array.isArray(value)
     ? value as Record<string, JevAnswer>
@@ -187,6 +209,10 @@ export interface AuditedClue {
   traceStepCountWithoutClue?: number;
   traceStepDelta?: number;
   redundantWithClueIds?: string[];
+  jointlyEssentialClueSets?: string[][];
+  higherOrderRemovalCandidateSets?: number;
+  higherOrderRemovalChecks?: number;
+  higherOrderRemovalChecksCapped?: boolean;
   faithful?: number;
   faithfulConfidence?: number;
   ambiguous?: number;
@@ -283,7 +309,7 @@ export interface AuditArguments {
 }
 
 export interface AuditCheckpoint {
-  version: 4;
+  version: 5;
   startedAt: string;
   configuration: JevRunConfiguration;
   difficultyAudit: DifficultyCorpusAudit[];
@@ -299,6 +325,8 @@ export interface AuditCheckpoint {
   };
   totalInputTokens: number;
   totalOutputTokens: number;
+  /** Absent only on legacy checkpoints whose phase spend cannot be recovered. */
+  usageByPhase?: { clue: JevUsage; puzzle: JevUsage };
 }
 
 export interface JevAuditReport {
@@ -309,6 +337,7 @@ export interface JevAuditReport {
   productionDifficultyAudit: DifficultyCorpusAudit[];
   targetedDifficultyAudit: TargetedDifficultyCorpusAudit[];
   semanticCalibrationEvidence: SemanticPuzzleEvidence[];
+  usage?: JevReportedUsage;
   clueAudit: {
     model: string | null;
     models: string[];
@@ -387,6 +416,20 @@ export function applyJevAnswers(
     entityClarity: readMetricAnswer(answers, index, "entityClarity", "score", 2),
     misunderstandingRisk: readMetricAnswer(answers, index, "misunderstandingRisk", "noul", 1),
   };
+  metrics.faithful.value ??= clue.faithful;
+  metrics.faithful.confidence ??= clue.faithfulConfidence;
+  metrics.ambiguous.value ??= clue.ambiguous;
+  metrics.ambiguous.confidence ??= clue.ambiguousConfidence;
+  metrics.readability.value ??= clue.readability;
+  metrics.readability.confidence ??= clue.readabilityConfidence;
+  metrics.linguisticComplexity.value ??= clue.linguisticComplexity;
+  metrics.linguisticComplexity.confidence ??= clue.linguisticComplexityConfidence;
+  metrics.relationshipExplicitness.value ??= clue.relationshipExplicitness;
+  metrics.relationshipExplicitness.confidence ??= clue.relationshipExplicitnessConfidence;
+  metrics.entityClarity.value ??= clue.entityClarity;
+  metrics.entityClarity.confidence ??= clue.entityClarityConfidence;
+  metrics.misunderstandingRisk.value ??= clue.misunderstandingRisk;
+  metrics.misunderstandingRisk.confidence ??= clue.misunderstandingRiskConfidence;
   const missingAnswers = missingMetricNames(metrics);
   const flagReasons = [
     belowThreshold(metrics.faithful.value, JEV_REVIEW_THRESHOLDS.faithfulnessBelow, "faithfulness"),
@@ -436,6 +479,18 @@ export function applyJevPuzzleAnswers(
     cognitiveBurden: readMetricAnswer(answers, index, "cognitiveBurden", "score", 2),
     initialReadingClarity: readMetricAnswer(answers, index, "initialReadingClarity", "score", 2),
   };
+  metrics.wordingRepetition.value ??= puzzle.wordingRepetition;
+  metrics.wordingRepetition.confidence ??= puzzle.wordingRepetitionConfidence;
+  metrics.terminologyInconsistency.value ??= puzzle.terminologyInconsistency;
+  metrics.terminologyInconsistency.confidence ??= puzzle.terminologyInconsistencyConfidence;
+  metrics.phrasingVariety.value ??= puzzle.phrasingVariety;
+  metrics.phrasingVariety.confidence ??= puzzle.phrasingVarietyConfidence;
+  metrics.linguisticDifficultyComparedToLogical.value ??= puzzle.linguisticDifficultyComparedToLogical;
+  metrics.linguisticDifficultyComparedToLogical.confidence ??= puzzle.linguisticDifficultyComparedToLogicalConfidence;
+  metrics.cognitiveBurden.value ??= puzzle.cognitiveBurden;
+  metrics.cognitiveBurden.confidence ??= puzzle.cognitiveBurdenConfidence;
+  metrics.initialReadingClarity.value ??= puzzle.initialReadingClarity;
+  metrics.initialReadingClarity.confidence ??= puzzle.initialReadingClarityConfidence;
   const missingAnswers = missingMetricNames(metrics);
   const result: AuditedPuzzle = {
     ...puzzle,
@@ -813,6 +868,15 @@ function checkpointGenerationModelVersion(checkpoint: Record<string, unknown>): 
   return versions.values().next().value ?? DEFAULT_DIFFICULTY_MODEL_VERSION;
 }
 
+function normalizeUsageTotals(value: unknown): JevUsage | undefined {
+  if (value === null || typeof value !== "object" || Array.isArray(value)) return undefined;
+  const usage = value as Record<string, unknown>;
+  if (!finiteInRange(usage.cost, 0, Number.MAX_SAFE_INTEGER)
+    || !finiteInRange(usage.inputTokens, 0, Number.MAX_SAFE_INTEGER)
+    || !finiteInRange(usage.outputTokens, 0, Number.MAX_SAFE_INTEGER)) return undefined;
+  return { cost: usage.cost, inputTokens: usage.inputTokens, outputTokens: usage.outputTokens };
+}
+
 export async function readAuditCheckpoint(path: string): Promise<AuditCheckpoint | undefined> {
   let source: string;
   try {
@@ -832,7 +896,7 @@ export async function readAuditCheckpoint(path: string): Promise<AuditCheckpoint
     resolvedModelsByPhase?: unknown;
     [key: string]: unknown;
   };
-  if (!checkpoint || (checkpoint.version !== 2 && checkpoint.version !== 3 && checkpoint.version !== 4) || !Array.isArray(checkpoint.clues) || !Array.isArray(checkpoint.puzzles) || !Array.isArray(checkpoint.difficultyAudit) || !Array.isArray(checkpoint.targetedDifficultyAudit)) {
+  if (!checkpoint || (checkpoint.version !== 2 && checkpoint.version !== 3 && checkpoint.version !== 4 && checkpoint.version !== 5) || !Array.isArray(checkpoint.clues) || !Array.isArray(checkpoint.puzzles) || !Array.isArray(checkpoint.difficultyAudit) || !Array.isArray(checkpoint.targetedDifficultyAudit)) {
     throw new Error(`invalid audit checkpoint: ${path}`);
   }
   const parsedCheckpoint = checkpoint as unknown as AuditCheckpoint;
@@ -843,12 +907,21 @@ export async function readAuditCheckpoint(path: string): Promise<AuditCheckpoint
   const priorConfiguration = checkpoint.configuration !== null && typeof checkpoint.configuration === "object"
     ? checkpoint.configuration as Record<string, unknown>
     : {};
+  const rawUsageByPhase = checkpoint.usageByPhase !== null && typeof checkpoint.usageByPhase === "object"
+    ? checkpoint.usageByPhase as Record<string, unknown>
+    : undefined;
+  const normalizedClueUsage = normalizeUsageTotals(rawUsageByPhase?.clue);
+  const normalizedPuzzleUsage = normalizeUsageTotals(rawUsageByPhase?.puzzle);
+  if (rawUsageByPhase && (!normalizedClueUsage || !normalizedPuzzleUsage)) {
+    throw new Error(`invalid audit checkpoint usage totals: ${path}`);
+  }
   const legacyPuzzlePhaseAttempted = priorConfiguration.puzzleReview === true
     && checkpoint.puzzles.some(puzzle => puzzle !== null && typeof puzzle === "object"
       && (puzzle as Record<string, unknown>).evaluationStatus !== "pending");
   return {
     ...parsedCheckpoint,
-    version: 4,
+    version: 5,
+    ...(normalizedClueUsage && normalizedPuzzleUsage ? { usageByPhase: { clue: normalizedClueUsage, puzzle: normalizedPuzzleUsage } } : {}),
     resolvedModelsByPhase: {
       clue: normalizedModelPhase(priorModels.clue, legacyResolvedModel),
       puzzle: normalizedModelPhase(priorModels.puzzle, legacyPuzzlePhaseAttempted ? legacyResolvedModel : null),

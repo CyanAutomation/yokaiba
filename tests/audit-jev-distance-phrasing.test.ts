@@ -1,6 +1,17 @@
 import assert from "node:assert/strict";
+import { mkdtemp, rm } from "node:fs/promises";
+import { join } from "node:path";
+import { tmpdir } from "node:os";
 import test from "node:test";
 import type { AuditedClue } from "../scripts/audit-jev-support.js";
+import {
+  assertDistanceComparisonConfiguration,
+  isDistanceComparisonPairComplete,
+  parseDistanceComparisonArguments,
+  readDistanceComparisonCheckpoint,
+  writeDistanceComparisonCheckpoint,
+  type DistanceComparisonCheckpoint,
+} from "../scripts/audit-jev-distance-checkpoint.js";
 import { buildDistancePhrasingPairs, renderDistanceComparisonMarkdown, selectAdverseDistanceExamples, summarizeDistanceMetric } from "../scripts/audit-jev-distance-phrasing-support.js";
 import { tournamentOrderTemplate } from "../src/templates/tournament-order.js";
 
@@ -30,8 +41,71 @@ function distanceClue(overrides: Partial<AuditedClue> = {}): AuditedClue {
   };
 }
 
-test("distance wording pairs preserve saved v5 semantics and render both comparison variants", () => {
-  const source = distanceClue({ text: "Text saved before the current wording was rendered." });
+test("distance comparison CLI requires stable output for resume and rejects duplicate options", () => {
+  assert.deepEqual(parseDistanceComparisonArguments(["--report", "source.json", "--out", "out", "--resume"]), {
+    report: "source.json", outputBase: "out", batchSize: 10, resume: true,
+  });
+  assert.throws(() => parseDistanceComparisonArguments(["--report", "source.json", "--resume"]), /--resume requires --out/);
+  assert.throws(() => parseDistanceComparisonArguments(["--report", "a.json", "--report", "b.json", "--out", "out"]), /duplicate option/);
+});
+
+test("distance comparison checkpoints round-trip and reject configuration drift", async () => {
+  const directory = await mkdtemp(join(tmpdir(), "jev-distance-checkpoint-"));
+  const checkpointPath = join(directory, "comparison.checkpoint.json");
+  const checkpoint: DistanceComparisonCheckpoint = {
+    version: 1,
+    configuration: {
+      sourceReport: "/reports/source.json",
+      sourceFingerprint: "sha256:test",
+      generationModelVersion: "yokaiba-difficulty-v5",
+      requestedModel: "~typesafe/jev-latest",
+      endpoint: "https://example.test/decisions",
+      batchSize: 10,
+      pairCount: 1,
+    },
+    pairs: [{
+      templateId: distanceClue().templateId,
+      seed: distanceClue().seed,
+      sourceClueId: distanceClue().clueId,
+      betweenCount: distanceClue({ text: "between" }),
+      placesApart: distanceClue({ text: "apart" }),
+    }],
+    usage: {
+      resolvedModel: null,
+      resolvedModelsByPhase: {
+        clue: { models: [], attribution: "phase-specific" },
+        puzzle: { models: [], attribution: "phase-specific" },
+      },
+      totalCost: 0,
+      totalInputTokens: 0,
+      totalOutputTokens: 0,
+    },
+  };
+  try {
+    await writeDistanceComparisonCheckpoint(checkpointPath, checkpoint);
+    assert.deepEqual(await readDistanceComparisonCheckpoint(checkpointPath), checkpoint);
+    assert.doesNotThrow(() => assertDistanceComparisonConfiguration(checkpoint.configuration, checkpoint.configuration));
+    assert.throws(() => assertDistanceComparisonConfiguration(checkpoint.configuration, { ...checkpoint.configuration, batchSize: 5 }), /does not match/);
+  } finally {
+    await rm(directory, { recursive: true, force: true });
+  }
+});
+
+test("distance pair completion checks only the metrics used in the comparison", () => {
+  const complete = distanceClue({ faithful: 1, readability: 2, relationshipExplicitness: 2, misunderstandingRisk: 0, ambiguous: 0 });
+  const other = distanceClue({ faithful: 1, readability: 2, relationshipExplicitness: 2, misunderstandingRisk: 0, ambiguous: 0 });
+  assert.equal(isDistanceComparisonPairComplete({
+    templateId: complete.templateId, seed: complete.seed, sourceClueId: complete.clueId,
+    betweenCount: complete, placesApart: other,
+  }), true);
+  assert.equal(isDistanceComparisonPairComplete({
+    templateId: complete.templateId, seed: complete.seed, sourceClueId: complete.clueId,
+    betweenCount: complete, placesApart: { ...other, ambiguous: undefined },
+  }), false);
+});
+
+test("distance wording pairs preserve saved v5 semantics and reset prior JEV answers", () => {
+  const source = distanceClue({ text: "Text saved before the current wording was rendered.", faithful: 0.9, ambiguous: 0.1 });
   const pair = buildDistancePhrasingPairs([source], [tournamentOrderTemplate])[0]!;
 
   assert.equal(pair.seed, source.seed);
@@ -43,6 +117,9 @@ test("distance wording pairs preserve saved v5 semantics and render both compari
   assert.equal(pair.placesApart.languageVersion, undefined);
   assert.equal(pair.betweenCount.phraseVariant, undefined);
   assert.equal(pair.placesApart.phraseVariant, undefined);
+  assert.equal(pair.betweenCount.faithful, undefined);
+  assert.equal(pair.placesApart.ambiguous, undefined);
+  assert.equal(pair.betweenCount.evaluationStatus, "pending");
   assert.deepEqual({ ...pair.betweenCount, text: "" }, { ...pair.placesApart, text: "" });
   assert.equal(pair.placesApart.text,
     "The -60 kg competitor and the competitor who finished 3rd were exactly two positions apart in the event order.");
