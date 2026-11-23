@@ -30,7 +30,7 @@ This repository declares Fallow in `devDependencies` and locks it through `packa
 ./node_modules/.bin/fallow dead-code --format json --quiet
 ```
 
-Use `package-lock.json` as the version source of truth; update this skill's references when the lockfile changes. The current lockfile resolves Fallow to 3.39.0. Check the installed CLI's `--help` or `schema` output when a flag or output field is unclear; online references may describe another release. In other repositories, use that project's package manager and locked local binary. Do not silently install or run an unpinned copy just to satisfy this skill.
+Use `package-lock.json` as the version source of truth; update this skill's references when the lockfile changes. The current lockfile resolves Fallow to 3.43.2. Check the installed CLI's `--help` or `schema` output when a flag or output field is unclear; online references may describe another release. In other repositories, use that project's package manager and locked local binary. Do not silently install or run an unpinned copy just to satisfy this skill.
 
 ## Read results without hiding failures
 

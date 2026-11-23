@@ -309,9 +309,12 @@ test("shared validation audits changed code after collecting test coverage", () 
   const shared = readWorkflow("validate-reusable.yml");
   const steps = getJob(shared, "validate").steps as Workflow[];
   const coverageIndex = steps.findIndex(step => step.run === "npm run test:coverage");
+  const healthIndex = steps.findIndex(step => step.name === "Report TypeScript health with coverage");
   const auditIndex = steps.findIndex(step => step.name === "Audit changed code with Fallow");
 
   assert.ok(coverageIndex >= 0, "validation must collect Istanbul coverage");
+  assert.ok(healthIndex > coverageIndex, "Fallow health must run after coverage is available");
+  assert.equal(steps[healthIndex]?.run, "npm run fallow:health -- --coverage coverage/coverage-final.json");
   assert.ok(auditIndex > coverageIndex, "Fallow must run after coverage is available");
   assert.equal(steps[auditIndex]?.run, "npm run fallow:audit -- --coverage coverage/coverage-final.json --format compact --quiet");
 });

@@ -1,6 +1,6 @@
 # Fallow CLI reference for this repository
 
-This quick reference is checked against the Fallow version resolved by this repository's lockfile (currently 3.39.0). The installed binary's `--help` and `schema` output take precedence if the lockfile changes.
+This quick reference is checked against the Fallow version resolved by this repository's lockfile (currently 3.43.2). The installed binary's `--help` and `schema` output take precedence if the lockfile changes.
 
 ## Common commands
 

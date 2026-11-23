@@ -131,6 +131,30 @@ test("v5 trace distinguishes negative clues and each supported relation strategy
   }
 });
 
+test("v5 direct clues record their eliminated values and resulting placement", () => {
+  const direct = evaluateHumanDeductionTraceV5(spec, [{
+    id: "match-aki-red",
+    text: "Aki wore red.",
+    constraint: { kind: "matches", subject: "Aki", category: "color", value: "Red" },
+  }]);
+  const directStep = direct.steps.find(step => step.clueIds.includes("match-aki-red"));
+  assert.ok(directStep);
+  assert.equal(directStep.rule, "direct-fact");
+  assert.deepEqual(directStep.eliminatedPossibilities, [{ category: "color", row: 0, value: "Blue" }]);
+  assert.deepEqual(directStep.placements, [{ category: "color", row: 0, value: "Red" }]);
+
+  const negative = evaluateHumanDeductionTraceV5(spec, [{
+    id: "ban-red",
+    text: "Aki did not wear red.",
+    constraint: { kind: "notMatches", subject: "Aki", category: "color", value: "Red" },
+  }]);
+  const negativeStep = negative.steps.find(step => step.clueIds.includes("ban-red"));
+  assert.ok(negativeStep);
+  assert.equal(negativeStep.rule, "simple-elimination");
+  assert.deepEqual(negativeStep.eliminatedPossibilities, [{ category: "color", row: 0, value: "Red" }]);
+  assert.deepEqual(negativeStep.placements, [{ category: "color", row: 0, value: "Blue" }]);
+});
+
 test("v5 assessment keeps normalized metrics separate from the trace and versioned band", () => {
   const trace = evaluateHumanDeductionTraceV5(spec, clues);
   const telemetry = solveWithTelemetry(spec, clues, 2).telemetry;
