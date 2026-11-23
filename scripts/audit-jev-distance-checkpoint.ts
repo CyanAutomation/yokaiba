@@ -1,6 +1,5 @@
-import { mkdir, readFile, rename, rm, writeFile } from "node:fs/promises";
-import { dirname } from "node:path";
-import { randomUUID } from "node:crypto";
+import { parseCliOptions } from "./audit-jev-cli-arguments.js";
+import { readJsonFileIfExists, writeJsonFileAtomically } from "./audit-json-file.js";
 import type { AuditedClue } from "./audit-jev-support.js";
 import type { DistancePhrasingPair } from "./audit-jev-distance-phrasing-support.js";
 
@@ -36,21 +35,8 @@ export interface DistanceComparisonCheckpoint {
 }
 
 export function parseDistanceComparisonArguments(argv: readonly string[]) {
-  const values = new Map<string, string>();
-  let resume = false;
-  for (let index = 0; index < argv.length; index += 1) {
-    const option = argv[index]!;
-    if (option === "--resume") {
-      if (resume) throw new Error("duplicate option --resume");
-      resume = true;
-      continue;
-    }
-    if (!["--report", "--out", "--batch-size"].includes(option)) throw new Error(`unknown option ${option}`);
-    if (values.has(option)) throw new Error(`duplicate option ${option}`);
-    const value = argv[++index];
-    if (!value || value.startsWith("--")) throw new Error(`${option} requires a value`);
-    values.set(option, value);
-  }
+  const { values, flags } = parseCliOptions(argv, ["--report", "--out", "--batch-size"], ["--resume"]);
+  const resume = flags.has("--resume");
   const report = values.get("--report");
   const outputBase = values.get("--out");
   if (!report) throw new Error("--report requires a saved v5 JEV report");
@@ -86,26 +72,13 @@ export function assertDistanceComparisonConfiguration(
 }
 
 export async function writeDistanceComparisonCheckpoint(path: string, checkpoint: DistanceComparisonCheckpoint): Promise<void> {
-  await mkdir(dirname(path), { recursive: true });
-  const temporaryPath = `${path}.${randomUUID()}.tmp`;
-  try {
-    await writeFile(temporaryPath, `${JSON.stringify(checkpoint, null, 2)}\n`, { flag: "wx" });
-    await rename(temporaryPath, path);
-  } catch (error) {
-    await rm(temporaryPath, { force: true });
-    throw error;
-  }
+  await writeJsonFileAtomically(path, checkpoint);
 }
 
 export async function readDistanceComparisonCheckpoint(path: string): Promise<DistanceComparisonCheckpoint | undefined> {
-  let source: string;
-  try {
-    source = await readFile(path, "utf8");
-  } catch (error) {
-    if (error && typeof error === "object" && "code" in error && error.code === "ENOENT") return undefined;
-    throw error;
-  }
-  const checkpoint = JSON.parse(source) as Partial<DistanceComparisonCheckpoint>;
+  const source = await readJsonFileIfExists(path);
+  if (source === undefined) return undefined;
+  const checkpoint = source as Partial<DistanceComparisonCheckpoint>;
   if (!checkpoint || checkpoint.version !== 1 || !checkpoint.configuration || !Array.isArray(checkpoint.pairs)
     || !checkpoint.usage || typeof checkpoint.usage !== "object") {
     throw new Error(`invalid distance comparison checkpoint: ${path}`);

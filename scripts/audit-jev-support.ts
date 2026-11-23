@@ -1,8 +1,7 @@
-import { mkdir, readFile, rename, rm, unlink, writeFile } from "node:fs/promises";
-import { dirname } from "node:path";
-import { randomUUID } from "node:crypto";
+import { readFile, unlink } from "node:fs/promises";
 import { auditTargetedDifficultyLevel } from "../src/generation/audit.js";
 import { DEFAULT_DIFFICULTY_MODEL_VERSION, generatePuzzleForRequest } from "../src/generation/generator.js";
+import { readJsonFileIfExists, writeJsonFileAtomically } from "./audit-json-file.js";
 import type { ClueConstraint, Difficulty, DifficultyAuditProgressCallback, DifficultyCorpusAudit, PuzzleTemplate, TargetedDifficultyCorpusAudit } from "../src/index.js";
 export { parseAuditArguments } from "./audit-jev-arguments.js";
 export { buildAuditMarkdown } from "./audit-jev-markdown.js";
@@ -761,15 +760,7 @@ export function assertCheckpointConfiguration(actual: JevRunConfiguration, expec
 }
 
 export async function writeAuditCheckpoint(path: string, checkpoint: AuditCheckpoint): Promise<void> {
-  await mkdir(dirname(path), { recursive: true });
-  const temporaryPath = `${path}.${randomUUID()}.tmp`;
-  try {
-    await writeFile(temporaryPath, `${JSON.stringify(checkpoint, null, 2)}\n`, { flag: "wx" });
-    await rename(temporaryPath, path);
-  } catch (error) {
-    await rm(temporaryPath, { force: true });
-    throw error;
-  }
+  await writeJsonFileAtomically(path, checkpoint);
 }
 
 function integerOr(value: unknown, fallback: number): number {
@@ -877,55 +868,48 @@ function normalizeUsageTotals(value: unknown): JevUsage | undefined {
   return { cost: usage.cost, inputTokens: usage.inputTokens, outputTokens: usage.outputTokens };
 }
 
-export async function readAuditCheckpoint(path: string): Promise<AuditCheckpoint | undefined> {
-  let source: string;
-  try {
-    source = await readFile(path, "utf8");
-  } catch (error) {
-    if (error && typeof error === "object" && "code" in error && error.code === "ENOENT") return undefined;
-    throw error;
-  }
-  const checkpoint = JSON.parse(source) as {
-    version?: unknown;
-    clues?: unknown;
-    puzzles?: unknown;
-    difficultyAudit?: unknown;
-    productionDifficultyAudit?: unknown;
-    targetedDifficultyAudit?: unknown;
-    resolvedModel?: unknown;
-    resolvedModelsByPhase?: unknown;
-    [key: string]: unknown;
-  };
-  if (!checkpoint || (checkpoint.version !== 2 && checkpoint.version !== 3 && checkpoint.version !== 4 && checkpoint.version !== 5) || !Array.isArray(checkpoint.clues) || !Array.isArray(checkpoint.puzzles) || !Array.isArray(checkpoint.difficultyAudit) || !Array.isArray(checkpoint.targetedDifficultyAudit)) {
-    throw new Error(`invalid audit checkpoint: ${path}`);
-  }
-  const parsedCheckpoint = checkpoint as unknown as AuditCheckpoint;
+function isObjectRecord(value: unknown): value is Record<string, unknown> {
+  return value !== null && typeof value === "object" && !Array.isArray(value);
+}
+
+function isAuditCheckpoint(value: unknown): value is Record<string, unknown> {
+  if (!isObjectRecord(value)) return false;
+  const supportedVersion = value.version === 2 || value.version === 3 || value.version === 4 || value.version === 5;
+  return supportedVersion && Array.isArray(value.clues) && Array.isArray(value.puzzles)
+    && Array.isArray(value.difficultyAudit) && Array.isArray(value.targetedDifficultyAudit);
+}
+
+function checkpointUsageByPhase(checkpoint: Record<string, unknown>, path: string) {
+  const rawUsage = checkpoint.usageByPhase;
+  if (rawUsage === null || typeof rawUsage !== "object") return undefined;
+  if (!isObjectRecord(rawUsage)) throw new Error(`invalid audit checkpoint usage totals: ${path}`);
+  const clue = normalizeUsageTotals(rawUsage.clue);
+  const puzzle = normalizeUsageTotals(rawUsage.puzzle);
+  if (!clue || !puzzle) throw new Error(`invalid audit checkpoint usage totals: ${path}`);
+  return { clue, puzzle };
+}
+
+function checkpointResolvedModels(checkpoint: Record<string, unknown>) {
   const legacyResolvedModel = typeof checkpoint.resolvedModel === "string" ? checkpoint.resolvedModel : null;
-  const priorModels = checkpoint.resolvedModelsByPhase !== null && typeof checkpoint.resolvedModelsByPhase === "object"
-    ? checkpoint.resolvedModelsByPhase as Record<string, unknown>
-    : {};
-  const priorConfiguration = checkpoint.configuration !== null && typeof checkpoint.configuration === "object"
-    ? checkpoint.configuration as Record<string, unknown>
-    : {};
-  const rawUsageByPhase = checkpoint.usageByPhase !== null && typeof checkpoint.usageByPhase === "object"
-    ? checkpoint.usageByPhase as Record<string, unknown>
-    : undefined;
-  const normalizedClueUsage = normalizeUsageTotals(rawUsageByPhase?.clue);
-  const normalizedPuzzleUsage = normalizeUsageTotals(rawUsageByPhase?.puzzle);
-  if (rawUsageByPhase && (!normalizedClueUsage || !normalizedPuzzleUsage)) {
-    throw new Error(`invalid audit checkpoint usage totals: ${path}`);
-  }
+  const priorModels = isObjectRecord(checkpoint.resolvedModelsByPhase) ? checkpoint.resolvedModelsByPhase : {};
+  const priorConfiguration = isObjectRecord(checkpoint.configuration) ? checkpoint.configuration : {};
+  const puzzles = checkpoint.puzzles as unknown[];
   const legacyPuzzlePhaseAttempted = priorConfiguration.puzzleReview === true
-    && checkpoint.puzzles.some(puzzle => puzzle !== null && typeof puzzle === "object"
-      && (puzzle as Record<string, unknown>).evaluationStatus !== "pending");
+    && puzzles.some(puzzle => isObjectRecord(puzzle) && puzzle.evaluationStatus !== "pending");
+  return {
+    clue: normalizedModelPhase(priorModels.clue, legacyResolvedModel),
+    puzzle: normalizedModelPhase(priorModels.puzzle, legacyPuzzlePhaseAttempted ? legacyResolvedModel : null),
+  };
+}
+
+function normalizeAuditCheckpoint(checkpoint: Record<string, unknown>, path: string): AuditCheckpoint {
+  const parsedCheckpoint = checkpoint as unknown as AuditCheckpoint;
+  const usageByPhase = checkpointUsageByPhase(checkpoint, path);
   return {
     ...parsedCheckpoint,
     version: 5,
-    ...(normalizedClueUsage && normalizedPuzzleUsage ? { usageByPhase: { clue: normalizedClueUsage, puzzle: normalizedPuzzleUsage } } : {}),
-    resolvedModelsByPhase: {
-      clue: normalizedModelPhase(priorModels.clue, legacyResolvedModel),
-      puzzle: normalizedModelPhase(priorModels.puzzle, legacyPuzzlePhaseAttempted ? legacyResolvedModel : null),
-    },
+    ...(usageByPhase ? { usageByPhase } : {}),
+    resolvedModelsByPhase: checkpointResolvedModels(checkpoint),
     configuration: {
       ...parsedCheckpoint.configuration,
       generationModelVersion: checkpointGenerationModelVersion(checkpoint),
@@ -933,6 +917,13 @@ export async function readAuditCheckpoint(path: string): Promise<AuditCheckpoint
     difficultyAudit: normalizeDifficultyAuditRows(checkpoint.difficultyAudit),
     productionDifficultyAudit: normalizeDifficultyAuditRows(checkpoint.productionDifficultyAudit),
   };
+}
+
+export async function readAuditCheckpoint(path: string): Promise<AuditCheckpoint | undefined> {
+  const checkpoint = await readJsonFileIfExists(path);
+  if (checkpoint === undefined) return undefined;
+  if (!isAuditCheckpoint(checkpoint)) throw new Error(`invalid audit checkpoint: ${path}`);
+  return normalizeAuditCheckpoint(checkpoint, path);
 }
 
 /** Read current or pre-production-path JEV reports for reusable puzzle review. */

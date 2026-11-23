@@ -1,6 +1,6 @@
 import { JEV_REVIEW_THRESHOLDS, type AuditedClue } from "./audit-jev-support.js";
 
-export const HUMAN_CALIBRATION_METRICS = [
+const HUMAN_CALIBRATION_METRICS = [
   "faithfulness",
   "ambiguity",
   "readability",
@@ -128,7 +128,7 @@ function metricValue(clue: AuditedClue, metric: HumanCalibrationMetric): number 
   return typeof value === "number" && Number.isFinite(value) ? value : undefined;
 }
 
-export function jevConcernForMetric(metric: HumanCalibrationMetric, value: number): boolean {
+function jevConcernForMetric(metric: HumanCalibrationMetric, value: number): boolean {
   switch (metric) {
     case "faithfulness": return value < JEV_REVIEW_THRESHOLDS.faithfulnessBelow;
     case "ambiguity": return value > JEV_REVIEW_THRESHOLDS.ambiguityAbove;

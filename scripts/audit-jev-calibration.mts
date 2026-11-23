@@ -1,18 +1,11 @@
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { dirname, resolve } from "node:path";
+import { parseCliOptions } from "./audit-jev-cli-arguments.js";
 import { readJevAuditReport } from "./audit-jev-support.js";
 import { compareJevWithHumanCalibration, parseHumanCalibrationLabels, renderHumanCalibrationMarkdown } from "./audit-jev-calibration-support.js";
 
 function parseArguments(argv: readonly string[]) {
-  const values = new Map<string, string>();
-  for (let index = 0; index < argv.length; index += 1) {
-    const option = argv[index]!;
-    if (!["--report", "--labels", "--out"].includes(option)) throw new Error(`unknown option ${option}`);
-    if (values.has(option)) throw new Error(`duplicate option ${option}`);
-    const value = argv[++index];
-    if (!value || value.startsWith("--")) throw new Error(`${option} requires a value`);
-    values.set(option, value);
-  }
+  const { values } = parseCliOptions(argv, ["--report", "--labels", "--out"]);
   const report = values.get("--report");
   const labels = values.get("--labels");
   const outputBase = values.get("--out");
