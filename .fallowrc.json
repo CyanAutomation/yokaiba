@@ -16,7 +16,7 @@
       { "name": "generation", "patterns": ["src/generation/**"] },
       { "name": "catalogue", "patterns": ["src/catalogue.ts"] },
       { "name": "api", "patterns": ["src/api/**"] },
-      { "name": "mcp", "patterns": ["src/mcp/**"] },
+      { "name": "utcp", "patterns": ["src/utcp/**"] },
       { "name": "worker", "patterns": ["worker/**"] },
       { "name": "public-api", "patterns": ["src/index.ts"] },
       { "name": "scripts", "patterns": ["scripts/**"] },
@@ -29,11 +29,11 @@
       { "from": "generation", "allow": ["domain", "constraints"] },
       { "from": "catalogue", "allow": ["domain"] },
       { "from": "api", "allow": ["domain", "generation", "catalogue"] },
-      { "from": "mcp", "allow": ["domain", "generation", "api", "catalogue"] },
-      { "from": "worker", "allow": ["domain", "constraints", "templates", "generation", "catalogue", "api", "mcp"] },
-      { "from": "public-api", "allow": ["domain", "constraints", "templates", "generation", "catalogue", "api", "mcp"] },
-      { "from": "scripts", "allow": ["domain", "constraints", "templates", "generation", "catalogue", "api", "mcp", "public-api"] },
-      { "from": "tests", "allow": ["domain", "constraints", "templates", "generation", "catalogue", "api", "mcp", "worker", "scripts", "public-api"] }
+      { "from": "utcp", "allow": ["api", "domain"] },
+      { "from": "worker", "allow": ["domain", "constraints", "templates", "generation", "catalogue", "api", "utcp"] },
+      { "from": "public-api", "allow": ["domain", "constraints", "templates", "generation", "catalogue", "api", "utcp"] },
+      { "from": "scripts", "allow": ["domain", "constraints", "templates", "generation", "catalogue", "api", "utcp", "public-api"] },
+      { "from": "tests", "allow": ["domain", "constraints", "templates", "generation", "catalogue", "api", "utcp", "worker", "scripts", "public-api"] }
     ]
   }
 }

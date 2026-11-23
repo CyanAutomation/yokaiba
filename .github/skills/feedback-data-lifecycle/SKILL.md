@@ -11,7 +11,7 @@ Use this skill for changes spanning `POST /v1/events`, `POST /v1/feedback`, Anal
 
 - Read [REST API usage](../../../docs/api-usage.md), [operations and deployment](../../../docs/operations-and-deployment.md), and [difficulty and calibration](../../../docs/difficulty-and-calibration.md).
 - Inspect the relevant route, storage adapter, migration, OpenAPI schema, and tests before changing a payload or persistence rule.
-- For public schemas, token behavior, or response compatibility, also follow the [API and MCP contracts skill](../api-mcp-contracts/SKILL.md). For Cloudflare bindings and migrations, also follow the [Cloudflare operations skill](../cloudflare-operations/SKILL.md).
+- For public schemas, token behavior, or response compatibility, also follow the [REST and UTCP contracts skill](../api-utcp-contracts/SKILL.md). For Cloudflare bindings and migrations, also follow the [Cloudflare operations skill](../cloudflare-operations/SKILL.md).
 
 ## Keep trust and storage boundaries clear
 

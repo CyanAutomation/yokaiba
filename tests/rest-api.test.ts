@@ -104,7 +104,6 @@ function assertCoreOpenApiSchemas(schemas: OpenApiObject): void {
   assert.equal(publicTrace.properties.steps, undefined, "public difficulty traces must not expose answer-bearing deductions");
   assert.equal(publicTrace.properties.unresolvedPossibilities, undefined);
   assert.deepEqual(schemas.GenerationRequest.properties.difficultyModel.enum, ["v4", "v5", "compare"]);
-  assert.ok(schemas.Readiness.properties.mcpPuzzleActionRateLimitProvider);
   assert.ok(schemas.Readiness.properties.generateRateLimitProvider);
   assert.ok(schemas.Readiness.properties.outcomeTelemetryProvider);
   assert.ok(schemas.PuzzleHintRequest.properties.hintIndex);
@@ -142,6 +141,10 @@ test("OpenAPI documents every public REST endpoint", async () => {
     "/docs/": {
       get: { statuses: ["200", "405"], headers: ["X-Request-Id"] },
       head: { statuses: ["200", "405"], headers: ["X-Request-Id"] },
+    },
+    "/utcp": {
+      get: { statuses: ["200", "304", "405", "503"], schema: "UtcpManual", headers: ["Cache-Control", "ETag", "X-Request-Id"] },
+      head: { statuses: ["200", "304", "405"], headers: ["Cache-Control", "ETag", "X-Request-Id"] },
     },
     "/openapi/v1.yaml": {
       get: { statuses: ["200", "405"], headers: ["X-Request-Id"] },

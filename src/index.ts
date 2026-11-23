@@ -13,4 +13,4 @@ export * from "./templates/open-division.js";
 export * from "./templates/championship-circuit.js";
 export * from "./templates/championship-bridge.js";
 export * from "./api/router.js";
-export * from "./mcp/server.js";
+export * from "./utcp/manual.js";

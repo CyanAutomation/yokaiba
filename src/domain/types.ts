@@ -109,6 +109,6 @@ export interface GeneratedPuzzle {
   generationStrategy?: number;
   /** Present when the caller opted into deterministic seed fallback for a target level. */
   seedFallbackAttempt?: number;
-  /** Retained by trusted callers only; REST/MCP generation responses redact this. */
+  /** Retained by trusted callers only; REST generation responses redact this. */
   solution: Solution;
 }

@@ -12,10 +12,6 @@ test("version and readiness expose deployed build and rate-limit configuration",
     REST_RATE_LIMITER: { limit: async () => ({ success: true }) },
     REST_GENERATE_RATE_LIMITER: { limit: async () => ({ success: true }) },
     VERIFY_RATE_LIMITER: { limit: async () => ({ success: true }) },
-    MCP_PREAUTH_RATE_LIMITER: { limit: async () => ({ success: true }) },
-    MCP_RATE_LIMITER: { limit: async () => ({ success: true }) },
-    MCP_GENERATE_RATE_LIMITER: { limit: async () => ({ success: true }) },
-    MCP_PUZZLE_ACTION_RATE_LIMITER: { limit: async () => ({ success: true }) },
     PUZZLE_OUTCOMES: { writeDataPoint: () => undefined },
   };
   const version = await isolatedWorker.fetch(new Request("https://yokaiba.test/v1/version"), env, {} as ExecutionContext);
@@ -26,134 +22,9 @@ test("version and readiness expose deployed build and rate-limit configuration",
   assert.deepEqual(await ready.json(), {
     status: "ready", build: { serviceVersion: "0.1.0-test", buildSha: "deadbeef" },
     rateLimitProvider: "configured", generateRateLimitProvider: "configured", verifyRateLimitProvider: "configured",
-    mcpPreAuthRateLimitProvider: "configured", mcpRateLimitProvider: "configured", mcpGenerateRateLimitProvider: "configured",
-    mcpPuzzleActionRateLimitProvider: "configured", outcomeTelemetryProvider: "configured",
+    outcomeTelemetryProvider: "configured",
   });
   assert.equal(ready.headers.get("cache-control"), "no-store");
-});
-
-test("MCP rate limiting runs before authentication", async () => {
-  const isolatedLimiter = createRateLimiter(new Map());
-  const isolatedWorker = createWorker({ rateLimiter: isolatedLimiter });
-  const env = {
-    API_KEY: "secret",
-    MCP_ALLOWED_HOSTNAMES: "yokaiba.test",
-    MCP_RATE_LIMIT: "2",
-  };
-  const makeRequest = () => new Request("https://yokaiba.test/mcp", {
-    headers: { "cf-connecting-ip": "192.0.2.201" },
-  });
-
-  // Apply the limit before authentication so unauthenticated request floods cannot bypass this protection.
-  const firstUnauthorized = await isolatedWorker.fetch(makeRequest(), env, {} as ExecutionContext);
-  assert.equal(firstUnauthorized.status, 401);
-  assert.deepEqual(await firstUnauthorized.json(), {
-    error: { code: "unauthorized", message: "A valid API key is required" },
-  });
-  const secondUnauthorized = await isolatedWorker.fetch(makeRequest(), env, {} as ExecutionContext);
-  assert.equal(secondUnauthorized.status, 401);
-  assert.deepEqual(await secondUnauthorized.json(), {
-    error: { code: "unauthorized", message: "A valid API key is required" },
-  });
-  assert.equal(secondUnauthorized.headers.get("cache-control"), "no-store");
-  const limited = await isolatedWorker.fetch(makeRequest(), env, {} as ExecutionContext);
-  assert.equal(limited.status, 429);
-  assert.deepEqual(await limited.clone().json(), {
-    error: { code: "rate_limited", message: "Too many requests" },
-  });
-  assert.equal(limited.headers.get("retry-after"), "60");
-});
-
-test("MCP pre-auth provider rate limiting protects authentication before the MCP handler", async () => {
-  const providerKeys: string[] = [];
-  let authenticatedProviderCalled = false;
-  const isolatedWorker = createWorker({ rateLimiter: () => { throw new Error("local fallback should not run"); } });
-  const env = {
-    API_KEY: "secret",
-    MCP_ALLOWED_HOSTNAMES: "yokaiba.test",
-    MCP_PREAUTH_RATE_LIMITER: { limit: async ({ key }: { key: string }) => { providerKeys.push(key); return { success: false }; } },
-    MCP_RATE_LIMITER: { limit: async () => { authenticatedProviderCalled = true; return { success: true }; } },
-  };
-  const response = await isolatedWorker.fetch(new Request("https://yokaiba.test/mcp", {
-    headers: { "cf-connecting-ip": "192.0.2.201" },
-  }), env, {} as ExecutionContext);
-
-  assert.equal(response.status, 429);
-  assert.deepEqual(providerKeys, ["192.0.2.201:/mcp"]);
-  assert.equal(authenticatedProviderCalled, false);
-});
-
-test("MCP provider rate limiting uses an authenticated principal and falls back locally on failure", async () => {
-  const providerKeys: string[] = [];
-  const isolatedWorker = createWorker({ localRateLimitStore: new Map(), clock: () => 1_000 });
-  const env = {
-    API_KEY: "secret",
-    MCP_ALLOWED_HOSTNAMES: "yokaiba.test",
-    MCP_RATE_LIMIT: "1",
-    MCP_PREAUTH_RATE_LIMITER: { limit: async () => ({ success: true }) },
-    MCP_RATE_LIMITER: { limit: async ({ key }: { key: string }) => { providerKeys.push(key); throw new Error("provider unavailable"); } },
-  };
-  const request = () => new Request("https://yokaiba.test/mcp", {
-    headers: { authorization: "Bearer secret", host: "yokaiba.test", "cf-connecting-ip": "192.0.2.202" },
-  });
-
-  const first = await isolatedWorker.fetch(request(), env, {} as ExecutionContext);
-  assert.notEqual(first.status, 429);
-  assert.equal(providerKeys.length, 1);
-  assert.match(providerKeys[0], /^api-key:[a-f0-9]{64}:mcp$/);
-  assert.doesNotMatch(providerKeys[0], /secret|192\.0\.2\.202/);
-
-  const limited = await isolatedWorker.fetch(request(), env, {} as ExecutionContext);
-  assert.equal(limited.status, 429);
-  const ready = await isolatedWorker.fetch(new Request("https://yokaiba.test/readyz"), env, {} as ExecutionContext);
-  assert.deepEqual(await ready.json(), {
-    status: "ready", build: { serviceVersion: "0.1.0", buildSha: "local" },
-    rateLimitProvider: "fallback", generateRateLimitProvider: "fallback", verifyRateLimitProvider: "fallback",
-    mcpPreAuthRateLimitProvider: "configured", mcpRateLimitProvider: "fallback", mcpGenerateRateLimitProvider: "fallback",
-    mcpPuzzleActionRateLimitProvider: "fallback", outcomeTelemetryProvider: "disabled",
-  });
-});
-
-test("MCP generate_puzzle calls its dedicated provider quota", async () => {
-  const allMcpKeys: string[] = [];
-  const generationKeys: string[] = [];
-  const isolatedWorker = createWorker({ rateLimiter: () => { throw new Error("local fallback should not run"); } });
-  const env = {
-    API_KEY: "secret",
-    MCP_ALLOWED_HOSTNAMES: "yokaiba.test",
-    MCP_PREAUTH_RATE_LIMITER: { limit: async () => ({ success: true }) },
-    MCP_RATE_LIMITER: { limit: async ({ key }: { key: string }) => { allMcpKeys.push(key); return { success: true }; } },
-    MCP_GENERATE_RATE_LIMITER: { limit: async ({ key }: { key: string }) => { generationKeys.push(key); return { success: true }; } },
-  };
-  const response = await isolatedWorker.fetch(new Request("https://yokaiba.test/mcp", {
-    method: "POST",
-    headers: { authorization: "Bearer secret", host: "yokaiba.test", "content-type": "application/json" },
-    body: JSON.stringify({ jsonrpc: "2.0", id: 1, method: "tools/call", params: { name: "generate_puzzle", arguments: {} } }),
-  }), env, {} as ExecutionContext);
-
-  assert.notEqual(response.status, 429);
-  assert.deepEqual(allMcpKeys.map(key => key.replace(/:mcp$/, "")), generationKeys.map(key => key.replace(/:generate_puzzle$/, "")));
-  assert.match(generationKeys[0], /^api-key:[a-f0-9]{64}:generate_puzzle$/);
-});
-
-test("MCP_API_KEYS gives distinct clients independent provider quota identities", async () => {
-  const providerKeys: string[] = [];
-  const isolatedWorker = createWorker({ rateLimiter: () => { throw new Error("local fallback should not run"); } });
-  const env = {
-    MCP_API_KEYS: JSON.stringify({ game: "game-secret", partner: "partner-secret" }),
-    MCP_ALLOWED_HOSTNAMES: "yokaiba.test",
-    MCP_PREAUTH_RATE_LIMITER: { limit: async () => ({ success: true }) },
-    MCP_RATE_LIMITER: { limit: async ({ key }: { key: string }) => { providerKeys.push(key); return { success: true }; } },
-  };
-  const request = (key: string) => new Request("https://yokaiba.test/mcp", {
-    headers: { authorization: `Bearer ${key}`, host: "yokaiba.test" },
-  });
-
-  assert.notEqual((await isolatedWorker.fetch(request("game-secret"), env, {} as ExecutionContext)).status, 429);
-  assert.notEqual((await isolatedWorker.fetch(request("partner-secret"), env, {} as ExecutionContext)).status, 429);
-  assert.equal(providerKeys.length, 2);
-  assert.notEqual(providerKeys[0], providerKeys[1]);
-  assert.ok(providerKeys.every(key => /^api-key:[a-f0-9]{64}:mcp$/.test(key)));
 });
 
 test("worker rejects malformed URLs without throwing", async () => {
@@ -211,12 +82,11 @@ test("worker falls back to local REST rate limiting when the provider fails", as
   assert.deepEqual(await ready.json(), {
     status: "ready", build: { serviceVersion: "0.1.0", buildSha: "local" },
     rateLimitProvider: "fallback", generateRateLimitProvider: "fallback", verifyRateLimitProvider: "fallback",
-    mcpPreAuthRateLimitProvider: "fallback", mcpRateLimitProvider: "fallback", mcpGenerateRateLimitProvider: "fallback",
-    mcpPuzzleActionRateLimitProvider: "fallback", outcomeTelemetryProvider: "disabled",
+    outcomeTelemetryProvider: "disabled",
   });
 });
 
-test("worker fails closed when configured shared quotas fail for expensive REST and MCP actions", async () => {
+test("worker fails closed when configured shared quotas fail for expensive REST actions", async () => {
   let localFallbackCalls = 0;
   const isolatedWorker = createWorker({
     rateLimiter: () => { localFallbackCalls += 1; return false; },
@@ -233,65 +103,11 @@ test("worker fails closed when configured shared quotas fail for expensive REST 
   assert.equal(generate.status, 429);
   assert.equal(verify.status, 429);
 
-  const mcpRequest = (toolName: string) => new Request("https://yokaiba.test/mcp", {
-    method: "POST",
-    headers: { authorization: "Bearer secret", host: "yokaiba.test", "content-type": "application/json" },
-    body: JSON.stringify({ jsonrpc: "2.0", id: 1, method: "tools/call", params: { name: toolName, arguments: {} } }),
-  });
-  const mcpBaseEnv = {
-    API_KEY: "secret", MCP_ALLOWED_HOSTNAMES: "yokaiba.test",
-    MCP_PREAUTH_RATE_LIMITER: { limit: async () => ({ success: true }) },
-    MCP_RATE_LIMITER: { limit: async () => ({ success: true }) },
-  };
-  const mcpGenerate = await isolatedWorker.fetch(mcpRequest("generate_puzzle"), { ...mcpBaseEnv, MCP_GENERATE_RATE_LIMITER: providerFailure }, {} as ExecutionContext);
-  const mcpVerify = await isolatedWorker.fetch(mcpRequest("verify_puzzle_answer"), { ...mcpBaseEnv, MCP_PUZZLE_ACTION_RATE_LIMITER: providerFailure }, {} as ExecutionContext);
-  assert.equal(mcpGenerate.status, 429);
-  assert.equal(mcpVerify.status, 429);
   assert.equal(localFallbackCalls, 0);
-  const readiness = await isolatedWorker.fetch(new Request("https://yokaiba.test/readyz"), {
-    ...restEnv,
-    MCP_GENERATE_RATE_LIMITER: providerFailure,
-    MCP_PUZZLE_ACTION_RATE_LIMITER: providerFailure,
-  }, {} as ExecutionContext);
+  const readiness = await isolatedWorker.fetch(new Request("https://yokaiba.test/readyz"), restEnv, {} as ExecutionContext);
   const status = await readiness.json() as Record<string, unknown>;
   assert.equal(status.generateRateLimitProvider, "failing");
   assert.equal(status.verifyRateLimitProvider, "failing");
-  assert.equal(status.mcpGenerateRateLimitProvider, "failing");
-  assert.equal(status.mcpPuzzleActionRateLimitProvider, "failing");
-});
-
-test("worker applies dedicated MCP quotas to every costly call in a legacy batch", async () => {
-  let generationQuotaCalls = 0;
-  const isolatedWorker = createWorker({ rateLimiter: () => { throw new Error("local fallback should not run"); } });
-  const batch = ["first", "second"].map((seed, index) => ({
-    jsonrpc: "2.0",
-    id: index + 1,
-    method: "tools/call",
-    params: { name: "generate_puzzle", arguments: { templateId: "tournament-order-v1", seed } },
-  }));
-  const response = await isolatedWorker.fetch(new Request("https://yokaiba.test/mcp", {
-    method: "POST",
-    headers: {
-      authorization: "Bearer secret",
-      host: "yokaiba.test",
-      "content-type": "application/json",
-      accept: "application/json, text/event-stream",
-    },
-    body: JSON.stringify(batch),
-  }), {
-    API_KEY: "secret",
-    MCP_ALLOWED_HOSTNAMES: "yokaiba.test",
-    MCP_PREAUTH_RATE_LIMITER: { limit: async () => ({ success: true }) },
-    MCP_RATE_LIMITER: { limit: async () => ({ success: true }) },
-    MCP_GENERATE_RATE_LIMITER: { limit: async () => {
-      generationQuotaCalls += 1;
-      if (generationQuotaCalls === 1) return { success: true };
-      throw new Error("provider unavailable");
-    } },
-  }, {} as ExecutionContext);
-
-  assert.equal(response.status, 429);
-  assert.equal(generationQuotaCalls, 2);
 });
 
 test("worker allows supported CORS preflight headers", async () => {
@@ -884,25 +700,6 @@ test("worker reports outcome storage failures in readiness and rejects the event
 
   const ready = await isolatedWorker.fetch(new Request("https://yokaiba.test/readyz"), { PUZZLE_OUTCOMES: { writeDataPoint: () => undefined } }, {} as ExecutionContext);
   assert.equal((await ready.json() as { outcomeTelemetryProvider: string }).outcomeTelemetryProvider, "failing");
-});
-
-test("worker protects MCP puzzle actions with their own per-tool quota", async () => {
-  const actionKeys: string[] = [];
-  const isolatedWorker = createWorker({ rateLimiter: () => { throw new Error("configured provider should handle the quota"); } });
-  const response = await isolatedWorker.fetch(new Request("https://yokaiba.test/mcp", {
-    method: "POST",
-    headers: { authorization: "Bearer secret", host: "yokaiba.test", "content-type": "application/json", accept: "application/json, text/event-stream" },
-    body: JSON.stringify({ jsonrpc: "2.0", id: 7, method: "tools/call", params: { name: "verify_puzzle_answer", arguments: {} } }),
-  }), {
-    API_KEY: "secret", MCP_ALLOWED_HOSTNAMES: "yokaiba.test",
-    MCP_PREAUTH_RATE_LIMITER: { limit: async () => ({ success: true }) },
-    MCP_RATE_LIMITER: { limit: async () => ({ success: true }) },
-    MCP_PUZZLE_ACTION_RATE_LIMITER: { limit: async ({ key }: { key: string }) => { actionKeys.push(key); return { success: true }; } },
-  }, {} as ExecutionContext);
-
-  assert.notEqual(response.status, 429);
-  assert.equal(actionKeys.length, 1);
-  assert.match(actionKeys[0]!, /^api-key:[a-f0-9]{64}:verify_puzzle_answer$/);
 });
 
 test("worker applies a tighter best-effort limit to answer verification", async () => {
