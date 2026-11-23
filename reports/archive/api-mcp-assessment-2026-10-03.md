@@ -1,3 +1,5 @@
+> Archived historical assessment of the retired MCP integration. Superseded by the UTCP cutover.
+
 # Yokaiba API and MCP Assessment
 
 **Assessment date:** 3 October 2026

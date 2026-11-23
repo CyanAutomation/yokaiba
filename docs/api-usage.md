@@ -2,7 +2,7 @@
 
 ## REST API
 
-The API root redirects to the [API documentation page](https://yokaiba.scheimann.workers.dev/docs), and the complete contract is published at [`/openapi/v1.yaml`](https://yokaiba.scheimann.workers.dev/openapi/v1.yaml). A compact, ChatGPT Actions-oriented REST contract is also published at [`/openapi/chatgpt-actions-v1.yaml`](https://yokaiba.scheimann.workers.dev/openapi/chatgpt-actions-v1.yaml). The repository sources are [public/openapi/v1.yaml](../public/openapi/v1.yaml) and [public/openapi/chatgpt-actions-v1.yaml](../public/openapi/chatgpt-actions-v1.yaml). The `/docs` page is plain HTML and links to both machine-readable OpenAPI contracts.
+The API root redirects to the [API documentation page](https://yokaiba.scheimann.workers.dev/docs), and the complete contract is published at [`/openapi/v1.yaml`](https://yokaiba.scheimann.workers.dev/openapi/v1.yaml). The UTCP manual served at `/utcp` describes selected operations as direct HTTP tools. A compact, ChatGPT Actions-oriented REST contract is also published at [`/openapi/chatgpt-actions-v1.yaml`](https://yokaiba.scheimann.workers.dev/openapi/chatgpt-actions-v1.yaml). The repository sources are [public/openapi/v1.yaml](../public/openapi/v1.yaml) and [public/openapi/chatgpt-actions-v1.yaml](../public/openapi/chatgpt-actions-v1.yaml). The `/docs` page links to these specifications.
 
 - `GET /healthz`
 - `GET /readyz`
@@ -14,6 +14,21 @@ The API root redirects to the [API documentation page](https://yokaiba.scheimann
 - `POST /v1/puzzles/hint`
 - `POST /v1/events`
 - `POST /v1/feedback`
+
+### UTCP tool discovery
+
+UTCP clients can fetch `/utcp` as a JSON manual. It advertises `list_scenarios` and `generate_puzzle`, and includes `verify_puzzle_answer` and `get_puzzle_hint` when `PUZZLE_TOKEN_SECRET` is configured. The manual maps each tool directly to the corresponding REST endpoint; there is no extra tool-call server. For POST tools, the manual sets `body_field` to `body`, so tool arguments contain the JSON request under that property. For example, generation arguments look like:
+
+```json
+{
+  "body": {
+    "templateId": "tournament-order-v2",
+    "seed": "round-42"
+  }
+}
+```
+
+The manual uses the REST API's public access policy and route-specific rate limits. Browser clients must include the manual's origin in `REST_ALLOWED_ORIGINS`, as they do for other REST requests.
 
 ### 60-second browser quick start
 
@@ -48,7 +63,7 @@ replay. The currently supported five-row templates are `open-division-v2`,
 `championship-bridge-v1`, and `championship-circuit-v2`; all use the IJF sequence `-60 kg`, `-66 kg`,
 `-73 kg`, `-81 kg`, `-90 kg`. `championship-bridge-v1` overlaps levels 8–9 with a five-row, three-category board so players can practise the Championship Circuit's board shape before entering its expert range.
 
-For browser games, use the cacheable GET form. Deterministic puzzle and scenario catalogue GET endpoints are cached by Workers Cache and return `Cache-Control: public, max-age=300, s-maxage=300, must-revalidate`. Tokenized puzzle responses shorten that window to end at least one second before the configured puzzle-token expiry; a token lifetime of one second disables response caching. Browsers and edge caches must revalidate once a response is stale. `/v1/version` uses `Cache-Control: no-cache`, allowing clients to retain its ETag while always revalidating deployment metadata. Health, readiness, and authenticated MCP responses use `no-store`.
+For browser games, use the cacheable GET form. Deterministic puzzle and scenario catalogue GET endpoints and the UTCP manual are cached by Workers Cache and return `Cache-Control: public, max-age=300, s-maxage=300, must-revalidate`. Tokenized puzzle responses shorten that window to end at least one second before the configured puzzle-token expiry; a token lifetime of one second disables response caching. Browsers and edge caches must revalidate once a response is stale. `/v1/version` uses `Cache-Control: no-cache`, allowing clients to retain its ETag while always revalidating deployment metadata. Health and readiness responses use `no-store`.
 
 ```js
 const baseUrl = "https://yokaiba.scheimann.workers.dev";

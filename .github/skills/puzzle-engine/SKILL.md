@@ -29,4 +29,4 @@ Use this skill for changes under src/constraints, src/domain, src/generation, an
 
 Use tests in tests/solver.test.ts, tests/puzzle-generator.test.ts, tests/templates.test.ts, and related generation tests as applicable. For output-distribution changes, use the deterministic audit scripts only when the request calls for an audit; those reports do not establish human difficulty.
 
-If a change alters REST or MCP behavior, also follow the api-mcp-contracts skill.
+If a change alters REST or UTCP behavior, also follow the api-utcp-contracts skill.

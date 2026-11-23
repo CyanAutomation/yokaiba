@@ -3,7 +3,7 @@ info:
   title: Yokaiba API
   version: 0.1.0
   description: |
-    Deterministic, uniquely-solvable judo logic-grid puzzles. REST is public; MCP uses a separate API key. The Streamable HTTP MCP endpoint is `/mcp`; it offers `list_scenarios` and `generate_puzzle`, plus `verify_puzzle_answer` and `get_puzzle_hint` when `PUZZLE_TOKEN_SECRET` is configured. MCP authentication and tool discovery use MCP protocol requests, not REST paths. The Action-focused REST contract is available at `/openapi/chatgpt-actions-v1.yaml`. Outcome telemetry is anonymous and uses Analytics Engine; puzzle difficulty feedback is separately stored in D1. See the repository README for MCP connection guidance.
+    Deterministic, uniquely-solvable judo logic-grid puzzles. REST endpoints are public and use route-specific rate limits; puzzle verification and hints require a signed puzzle token. The UTCP manual at `/utcp` describes selected REST operations for direct HTTP calls. The Action-focused REST contract is available at `/openapi/chatgpt-actions-v1.yaml`. Outcome telemetry is anonymous and uses Analytics Engine; puzzle difficulty feedback is separately stored in D1. See the repository README for UTCP connection guidance.
     Cross-origin browser clients must be listed in the `REST_ALLOWED_ORIGINS` Worker secret; unlisted origins receive no CORS permission.
 servers:
   - url: /
@@ -114,6 +114,34 @@ paths:
         '200':
           description: Browser-based API reference
           headers: { X-Request-Id: { $ref: '#/components/headers/RequestId' } }
+        '405': { $ref: '#/components/responses/MethodNotAllowed' }
+  /utcp:
+    get:
+      operationId: getUtcpManual
+      summary: Discover direct HTTP tool definitions
+      responses:
+        '200':
+          description: Versioned UTCP manual with REST-backed tool schemas and HTTP call templates
+          headers:
+            Cache-Control: { $ref: '#/components/headers/CacheControl' }
+            ETag: { $ref: '#/components/headers/Etag' }
+            X-Request-Id: { $ref: '#/components/headers/RequestId' }
+          content:
+            application/json: { schema: { $ref: '#/components/schemas/UtcpManual' } }
+        '304': { $ref: '#/components/responses/NotModified' }
+        '405': { $ref: '#/components/responses/MethodNotAllowed' }
+        '503': { $ref: '#/components/responses/NotConfigured' }
+    head:
+      operationId: headUtcpManual
+      summary: Return UTCP manual headers without a response body
+      responses:
+        '200':
+          description: UTCP manual metadata
+          headers:
+            Cache-Control: { $ref: '#/components/headers/CacheControl' }
+            ETag: { $ref: '#/components/headers/Etag' }
+            X-Request-Id: { $ref: '#/components/headers/RequestId' }
+        '304': { $ref: '#/components/responses/NotModified' }
         '405': { $ref: '#/components/responses/MethodNotAllowed' }
   /openapi/v1.yaml:
     get:
@@ -427,7 +455,7 @@ components:
       description: Echoes an explicitly allowlisted browser origin; absent for other origins.
     CacheControl:
       schema: { type: string }
-      description: Endpoint-specific cache policy. Scenario and catalogue responses are revalidated after five minutes. Successful tokenized puzzle responses use at most five minutes and expire at least one second before the puzzle token; a one-second token lifetime disables caching. Version metadata uses no-cache, and health, readiness, and MCP responses use no-store.
+      description: Endpoint-specific cache policy. Scenario and catalogue responses and the UTCP manual are revalidated after five minutes. Successful tokenized puzzle responses use at most five minutes and expire at least one second before the puzzle token; a one-second token lifetime disables caching. Version metadata uses no-cache, and health and readiness responses use no-store.
     Etag:
       schema: { type: string }
       description: Content-derived validator for conditional GET requests.
@@ -503,18 +531,49 @@ components:
         build: { $ref: '#/components/schemas/Build' }
     Readiness:
       type: object
-      required: [status, build, rateLimitProvider, generateRateLimitProvider, verifyRateLimitProvider, mcpPreAuthRateLimitProvider, mcpRateLimitProvider, mcpGenerateRateLimitProvider, mcpPuzzleActionRateLimitProvider, outcomeTelemetryProvider]
+      required: [status, build, rateLimitProvider, generateRateLimitProvider, verifyRateLimitProvider, outcomeTelemetryProvider]
       properties:
         status: { type: string, const: ready }
         build: { $ref: '#/components/schemas/Build' }
         rateLimitProvider: { type: string, enum: [configured, fallback, failing], description: General REST provider state; fallback means local per-isolate limiting is active. }
         generateRateLimitProvider: { type: string, enum: [configured, fallback, failing], description: A configured provider error is failing and puzzle generation is denied for that request. }
         verifyRateLimitProvider: { type: string, enum: [configured, fallback, failing], description: A configured provider error is failing and verification, hints, and feedback are denied for that request. }
-        mcpPreAuthRateLimitProvider: { type: string, enum: [configured, fallback, failing] }
-        mcpRateLimitProvider: { type: string, enum: [configured, fallback, failing] }
-        mcpGenerateRateLimitProvider: { type: string, enum: [configured, fallback, failing], description: A configured provider error is failing and puzzle generation is denied for that request. }
-        mcpPuzzleActionRateLimitProvider: { type: string, enum: [configured, fallback, failing], description: A configured provider error is failing and puzzle actions are denied for that request. }
         outcomeTelemetryProvider: { type: string, enum: [configured, disabled, failing], description: Configured when an Analytics Engine write succeeds; failing after a write exception in this Worker isolate. }
+    UtcpManual:
+      type: object
+      required: [manual_version, utcp_version, info, tools]
+      properties:
+        manual_version: { type: string, const: "1.0.0" }
+        utcp_version: { type: string, const: "1.0.1" }
+        info: { $ref: '#/components/schemas/UtcpInfo' }
+        tools:
+          type: array
+          items: { $ref: '#/components/schemas/UtcpTool' }
+    UtcpInfo:
+      type: object
+      required: [title, version, description]
+      properties:
+        title: { type: string, const: Yokaiba API }
+        version: { type: string, description: Current deployed service version. }
+        description: { type: string }
+    UtcpTool:
+      type: object
+      required: [name, description, inputs, outputs, tool_call_template]
+      properties:
+        name: { type: string, enum: [list_scenarios, generate_puzzle, verify_puzzle_answer, get_puzzle_hint] }
+        description: { type: string }
+        inputs: { type: object, description: JSON Schema input contract for this tool. }
+        outputs: { type: object, description: JSON Schema output contract for this tool. }
+        tool_call_template: { $ref: '#/components/schemas/UtcpHttpCallTemplate' }
+    UtcpHttpCallTemplate:
+      type: object
+      required: [call_template_type, url, http_method]
+      properties:
+        call_template_type: { type: string, const: http }
+        url: { type: string, format: uri }
+        http_method: { type: string, enum: [GET, POST] }
+        content_type: { type: string, const: application/json }
+        body_field: { type: string, const: body, description: Tool request payload is nested under the `body` input and sent as JSON. }
     Build:
       type: object
       required: [serviceVersion, buildSha]

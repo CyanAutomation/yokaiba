@@ -19,7 +19,7 @@ curl -fsS 'http://localhost:8787/v1/scenarios'
 curl -fsS 'http://localhost:8787/v1/puzzles/generate?templateId=tournament-order-v2&seed=local-example'
 ```
 
-For browser calls, local REST CORS is disabled until `REST_ALLOWED_ORIGINS` is configured. Answer verification and hints need `PUZZLE_TOKEN_SECRET` so generated puzzles contain signed tokens. MCP requires an API key and `MCP_ALLOWED_HOSTNAMES`. See [operations and deployment](operations-and-deployment.md) for the complete configuration reference. Use a local `.dev.vars` file for local-only values; never put production credentials in source control.
+For browser calls, local REST CORS is disabled until `REST_ALLOWED_ORIGINS` is configured. Answer verification and hints need `PUZZLE_TOKEN_SECRET` so generated puzzles contain signed tokens. UTCP discovery uses `PUBLIC_API_BASE_URL` to advertise the canonical API origin. Set it to `http://localhost:8787` in a local `.dev.vars` file when testing against Wrangler. See [operations and deployment](operations-and-deployment.md) for the complete configuration reference. Use a local `.dev.vars` file for local-only values; never put production credentials in source control.
 
 If Wrangler cannot bind its default port, stop the process already using port 8787 or choose a different port with Wrangler's `--port` option. Missing optional secrets do not block the public REST generation quick start.
 
@@ -41,7 +41,7 @@ The weekly external-link workflow checks the README's linked destinations with `
 ## Architecture
 
 - `worker/main.ts` is the Cloudflare Worker entry point. It keeps the default gateway uncached and exports a dedicated `CachedPublic` entrypoint for reusable public GET responses. `worker/index.ts` contains routing, rate limiting, local generation caching, and response handling.
-- `src/api/` contains REST routing and request handlers. `src/mcp/` registers the Streamable HTTP MCP tools.
+- `src/api/` contains REST routing and request handlers. `src/utcp/` builds the versioned manual that maps selected tools directly to those routes.
 - `src/generation/` builds deterministic puzzles and difficulty evidence. `src/constraints/` and `src/domain/` provide the solver and puzzle model used by generation and answer actions.
 - `public/openapi/` contains the REST contracts served through the Worker asset binding.
 

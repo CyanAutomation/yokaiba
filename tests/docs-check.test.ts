@@ -151,20 +151,19 @@ test("README response preview matches the deterministic generation example", asy
   assert.equal(puzzle.solution, undefined);
 });
 
-test("hosted API docs link MCP setup guidance to the operations guide", async () => {
+test("hosted API docs link UTCP setup guidance and expose the discovery manual", async () => {
   const worker = createWorker();
   const response = await worker.fetch(new Request("https://yokaiba.test/docs"), {}, {} as ExecutionContext);
   assert.equal(response.status, 200);
   const html = await response.text();
-  const setupGuide = "https://github.com/CyanAutomation/yokaiba/blob/main/docs/operations-and-deployment.md#mcp-and-deployment";
+  const setupGuide = "https://github.com/CyanAutomation/yokaiba/blob/main/docs/operations-and-deployment.md#utcp-tool-discovery";
   const links = [...html.matchAll(/<a\b([^>]*)>([\s\S]*?)<\/a>/gi)].map(([, attributes, content]) => ({
     href: /\bhref="([^"]+)"/i.exec(attributes ?? "")?.[1],
     label: (content ?? "").replace(/<[^>]*>/g, "").trim(),
   }));
 
-  for (const label of ["MCP setup", "MCP setup guide"]) {
-    const link = links.find(candidate => candidate.label === label);
-    assert.ok(link, `expected a visible ${label} link`);
-    assert.equal(link.href, setupGuide);
-  }
+  const setupLink = links.find(candidate => candidate.label === "UTCP setup");
+  assert.ok(setupLink, "expected a visible UTCP setup link");
+  assert.equal(setupLink.href, setupGuide);
+  assert.ok(links.some(candidate => candidate.label === "UTCP manual" && candidate.href === "/utcp"));
 });

@@ -28,7 +28,11 @@ type = "worker"
 [assets]
 directory = "./public"
 binding = "ASSETS"
-run_worker_first = ["/docs", "/docs/", "/openapi/*"]
+run_worker_first = ["/docs", "/docs/", "/utcp", "/openapi/*"]
+
+[vars]
+# Canonical origin used in UTCP HTTP call templates. Override for a custom domain.
+PUBLIC_API_BASE_URL = "https://yokaiba.scheimann.workers.dev"
 
 [[d1_databases]]
 binding = "PUZZLE_FEEDBACK"
@@ -41,18 +45,10 @@ binding = "PUZZLE_OUTCOMES"
 dataset = "yokaiba_puzzle_outcomes"
 
 # Set these as Worker secrets before deployment:
-#   npx wrangler secret put API_KEY
-#   npx wrangler secret put MCP_API_KEYS # optional JSON map for per-client keys
-#   npx wrangler secret put MCP_ALLOWED_HOSTNAMES
 #   npx wrangler secret put REST_ALLOWED_ORIGINS
 #   npx wrangler secret put PUZZLE_TOKEN_SECRET
 #   npx wrangler secret put PUZZLE_TOKEN_PREVIOUS_SECRETS # optional JSON array during key rotation
 #   npx wrangler secret put PUZZLE_TOKEN_TTL_SECONDS # optional, default 604800 seconds
-# API_KEY matches the Budokon Worker convention. It is required for /mcp only.
-# MCP_API_KEYS may replace API_KEY with a JSON object mapping client labels to
-# distinct API keys, for example {"game":"...","partner":"..."}.
-# MCP_ALLOWED_HOSTNAMES is a comma-separated hostname allowlist; it is required
-# for the MCP handler's Origin and Host validation.
 # REST_ALLOWED_ORIGINS is a comma-separated list of exact browser origins that
 # may call the public REST API. It is intentionally unset by default.
 # PUZZLE_TOKEN_SECRET signs browser puzzle tokens used by /v1/puzzles/verify.
@@ -61,7 +57,6 @@ dataset = "yokaiba_puzzle_outcomes"
 # REST_GENERATE_RATE_LIMIT is the local fallback for REST generation (default 10/minute).
 # VERIFY_RATE_LIMIT is the local fallback for verification attempts per minute (default 10).
 # FEEDBACK_RATE_LIMIT is the local fallback for puzzle feedback (default 10/minute).
-# MCP_PUZZLE_ACTION_RATE_LIMIT is the local fallback for MCP hints and verification (default 10).
 
 [[ratelimits]]
 name = "REST_RATE_LIMITER"
@@ -86,42 +81,6 @@ name = "VERIFY_RATE_LIMITER"
 # feedback. Those operations fail closed if the provider errors; local fallbacks
 # are used only when this binding is not configured.
 namespace_id = "870283"
-
-  [ratelimits.simple]
-  limit = 10
-  period = 60
-
-[[ratelimits]]
-name = "MCP_PUZZLE_ACTION_RATE_LIMITER"
-# Keep verification and hint quotas separate from generation and general MCP traffic.
-namespace_id = "870287"
-
-  [ratelimits.simple]
-  limit = 10
-  period = 60
-
-[[ratelimits]]
-name = "MCP_PREAUTH_RATE_LIMITER"
-# A short per-IP window protects authentication from invalid-key floods.
-namespace_id = "870284"
-
-  [ratelimits.simple]
-  limit = 10
-  period = 10
-
-[[ratelimits]]
-name = "MCP_RATE_LIMITER"
-# This namespace is keyed by a SHA-256 API-key fingerprint, never the secret itself.
-namespace_id = "870285"
-
-  [ratelimits.simple]
-  limit = 30
-  period = 60
-
-[[ratelimits]]
-name = "MCP_GENERATE_RATE_LIMITER"
-# Keep expensive generation separate from lightweight MCP discovery requests.
-namespace_id = "870286"
 
   [ratelimits.simple]
   limit = 10

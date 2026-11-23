@@ -1,43 +1,27 @@
 import { createRestRouter } from "../src/api/router.js";
-import { createYokaibaMcpHandler } from "../src/mcp/server.js";
+import { createUtcpManual, DEFAULT_PUBLIC_API_BASE_URL } from "../src/utcp/manual.js";
 import { tournamentOrderTemplate } from "../src/templates/tournament-order.js";
 import { tournamentOrderV2Template } from "../src/templates/tournament-order-v2.js";
 import { openDivisionTemplate } from "../src/templates/open-division.js";
 import { championshipCircuitTemplate } from "../src/templates/championship-circuit.js";
 import { championshipBridgeTemplate } from "../src/templates/championship-bridge.js";
-import { hostHeaderValidationResponse } from "@modelcontextprotocol/server";
 import { json } from "../src/api/json-response.js";
 import { DEFAULT_PUZZLE_TOKEN_TTL_SECONDS, MAX_PUZZLE_TOKEN_TTL_SECONDS } from "../src/api/puzzle-token.js";
 import { emitDifficultyGeneration } from "./difficulty-telemetry.js";
 import { createPuzzleFeedbackSink, type D1DatabaseLike } from "./puzzle-feedback-storage.js";
 import {
-  asRateLimitDecision,
   createRateLimiter,
-  providerRateLimitDecision,
   restRateLimitConfiguration,
   restRateLimitDecision,
   type RateLimitDecision,
   type RateLimiter,
   type RateLimitStore,
 } from "./rate-limit.js";
-export { createRateLimiter } from "./rate-limit.js";
 export type { RateLimiter, RateLimitStore } from "./rate-limit.js";
 
 export interface Env {
-  /** Matches Budokon's API-key secret name and protects the MCP endpoint. */
-  API_KEY?: string;
-  /** Optional JSON object of client IDs to API keys for per-client MCP quotas. */
-  MCP_API_KEYS?: string;
-  /** Required comma-separated hostnames, e.g. yokaiba.example.com,yokaiba.workers.dev. */
-  MCP_ALLOWED_HOSTNAMES?: string;
-  /** Optional requests-per-minute override. Defaults to 30. */
-  MCP_RATE_LIMIT?: string;
-  /** Optional unauthenticated MCP requests-per-window override. Defaults to 10. */
-  MCP_PREAUTH_RATE_LIMIT?: string;
-  /** Optional expensive generate_puzzle MCP requests-per-minute override. Defaults to 10. */
-  MCP_GENERATE_RATE_LIMIT?: string;
-  /** Optional bounded verify/hint MCP operations per minute. Defaults to 10 per tool and key. */
-  MCP_PUZZLE_ACTION_RATE_LIMIT?: string;
+  /** Canonical HTTPS origin advertised in UTCP HTTP call templates. */
+  PUBLIC_API_BASE_URL?: string;
   /** Comma-separated browser origins permitted to call the public REST API. */
   REST_ALLOWED_ORIGINS?: string;
   /** HMAC secret used to issue and validate browser puzzle tokens. */
@@ -65,14 +49,6 @@ export interface Env {
   REST_GENERATE_RATE_LIMITER?: { limit(options: { key: string }): Promise<{ success: boolean }> };
   /** Shared Cloudflare Rate Limiting binding for answer verification, hints, and feedback; these operations fail closed if it errors. */
   VERIFY_RATE_LIMITER?: { limit(options: { key: string }): Promise<{ success: boolean }> };
-  /** Optional Cloudflare binding that throttles unauthenticated MCP traffic before authentication. */
-  MCP_PREAUTH_RATE_LIMITER?: { limit(options: { key: string }): Promise<{ success: boolean }> };
-  /** Optional Cloudflare binding for authenticated MCP request enforcement. */
-  MCP_RATE_LIMITER?: { limit(options: { key: string }): Promise<{ success: boolean }> };
-  /** Optional Cloudflare binding for the expensive MCP generate_puzzle operation. */
-  MCP_GENERATE_RATE_LIMITER?: { limit(options: { key: string }): Promise<{ success: boolean }> };
-  /** Optional Cloudflare binding for MCP answer-verification and hint tools. */
-  MCP_PUZZLE_ACTION_RATE_LIMITER?: { limit(options: { key: string }): Promise<{ success: boolean }> };
   /** Cloudflare Analytics Engine dataset for anonymous puzzle outcome events. */
   PUZZLE_OUTCOMES?: AnalyticsEngineDataset;
   /** Cloudflare D1 database for durable anonymous player feedback. */
@@ -85,14 +61,12 @@ const templates = [tournamentOrderV2Template, tournamentOrderTemplate, openDivis
 
 // JSON response builder provided by src/api/json-response.ts
 
-const encoder = new TextEncoder();
-
 const docsDocument = `<!doctype html>
 <html lang="en">
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <meta name="description" content="REST API and MCP documentation for Yokaiba." />
+  <meta name="description" content="REST API and UTCP documentation for Yokaiba." />
   <title>Yokaiba API documentation</title>
   <style>
     :root { color-scheme: light dark; font: 16px/1.6 system-ui, sans-serif; }
@@ -116,12 +90,13 @@ const docsDocument = `<!doctype html>
 <body>
   <header>
     <h1>Yokaiba API</h1>
-    <p>Build judo logic-grid puzzle experiences with the REST API, or connect an MCP client to discover and use Yokaiba tools.</p>
+    <p>Build judo logic-grid puzzle experiences with the REST API, or connect a UTCP client to discover and call Yokaiba tools directly.</p>
     <nav aria-label="API specifications and guides">
       <a href="/openapi/v1.yaml">REST OpenAPI specification</a>
       <a href="/openapi/chatgpt-actions-v1.yaml">ChatGPT Actions specification</a>
       <a href="https://github.com/CyanAutomation/yokaiba/blob/main/docs/api-usage.md">REST usage guide</a>
-      <a href="https://github.com/CyanAutomation/yokaiba/blob/main/docs/operations-and-deployment.md#mcp-and-deployment">MCP setup</a>
+      <a href="/utcp">UTCP manual</a>
+      <a href="https://github.com/CyanAutomation/yokaiba/blob/main/docs/operations-and-deployment.md#utcp-tool-discovery">UTCP setup</a>
     </nav>
   </header>
 
@@ -150,80 +125,13 @@ const docsDocument = `<!doctype html>
       <p class="note">The generated response contains the puzzle and a token for later verification or hints. It does not include the hidden solution.</p>
     </section>
 
-    <section aria-labelledby="mcp-title">
-      <h2 id="mcp-title">MCP</h2>
-      <p>Connect to <code>https://yokaiba.scheimann.workers.dev/mcp</code> using Streamable HTTP. MCP requires an API key and an allowed hostname. See the <a href="https://github.com/CyanAutomation/yokaiba/blob/main/docs/operations-and-deployment.md#mcp-and-deployment">MCP setup guide</a> for client configuration and available tools.</p>
+    <section aria-labelledby="utcp-title">
+      <h2 id="utcp-title">UTCP</h2>
+      <p>Fetch the <a href="/utcp">UTCP manual</a> to discover tool schemas and direct HTTP call templates. UTCP clients call the REST endpoints themselves; puzzle actions require a token returned during generation.</p>
     </section>
   </main>
 </body>
 </html>`;
-
-function constantTimeEqual(expected: string, candidate: string): boolean {
-  const expectedBytes = encoder.encode(expected);
-  const candidateBytes = encoder.encode(candidate);
-  const length = Math.max(expectedBytes.length, candidateBytes.length);
-  let difference = expectedBytes.length ^ candidateBytes.length;
-  for (let index = 0; index < length; index += 1) {
-    difference |= (expectedBytes[index] ?? 0) ^ (candidateBytes[index] ?? 0);
-  }
-  return difference === 0;
-}
-
-function requestApiKey(request: Request): string | null {
-  return request.headers.get("authorization")?.replace(/^Bearer\s+/i, "") ?? request.headers.get("x-api-key");
-}
-
-function authorized(request: Request, key: string | undefined) {
-  if (!key) return false;
-  const candidate = requestApiKey(request);
-  return candidate !== null && constantTimeEqual(key, candidate);
-}
-
-function configuredMcpApiKeys(env: Env): string[] | undefined {
-  if (!env.MCP_API_KEYS) return env.API_KEY ? [env.API_KEY] : undefined;
-  try {
-    const parsed = JSON.parse(env.MCP_API_KEYS) as unknown;
-    if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) return undefined;
-    const keys = Object.values(parsed).filter((value): value is string => typeof value === "string" && value.length > 0);
-    return keys.length > 0 ? keys : undefined;
-  } catch {
-    return undefined;
-  }
-}
-
-function authenticatedMcpApiKey(request: Request, env: Env): string | undefined {
-  const candidate = requestApiKey(request);
-  const keys = configuredMcpApiKeys(env);
-  if (!candidate || !keys) return undefined;
-  let matchingKey: string | undefined;
-  for (const key of keys) if (constantTimeEqual(key, candidate)) matchingKey ??= key;
-  return matchingKey;
-}
-
-async function apiKeyFingerprint(key: string): Promise<string> {
-  const digest = await crypto.subtle.digest("SHA-256", encoder.encode(key));
-  return Array.from(new Uint8Array(digest), byte => byte.toString(16).padStart(2, "0")).join("");
-}
-
-async function mcpToolNames(request: Request): Promise<string[]> {
-  if (request.method !== "POST") return [];
-  try {
-    const payload: unknown = await request.clone().json();
-    const messages = Array.isArray(payload) ? payload : [payload];
-    const toolNames: string[] = [];
-    for (const message of messages) {
-      if (!message || typeof message !== "object" || Array.isArray(message)) continue;
-      const record = message as Record<string, unknown>;
-      const params = record.params;
-      if (record.method !== "tools/call" || !params || typeof params !== "object" || Array.isArray(params)) continue;
-      const name = (params as Record<string, unknown>).name;
-      if (typeof name === "string") toolNames.push(name);
-    }
-    return toolNames;
-  } catch {
-    return [];
-  }
-}
 
 export interface WorkerOptions {
   localRateLimitStore?: RateLimitStore;
@@ -241,11 +149,11 @@ function configuredOrigins(rawOrigins: string | undefined) {
   return (rawOrigins ?? "").split(",").map(value => value.trim()).filter(Boolean);
 }
 
-function corsHeaders(origin: string | null, allowedOrigins: string[]) {
+function corsHeaders(origin: string | null, allowedOrigins: string[], methods = "GET, POST, OPTIONS") {
   if (!origin || !allowedOrigins.includes(origin)) return undefined;
   return {
     "access-control-allow-origin": origin,
-    "access-control-allow-methods": "GET, POST, OPTIONS",
+    "access-control-allow-methods": methods,
     "access-control-allow-headers": "content-type, if-none-match",
     "access-control-expose-headers": "etag, x-request-id, ratelimit-limit, ratelimit-policy, ratelimit-remaining, ratelimit-reset, retry-after",
     "access-control-max-age": "86400",
@@ -300,20 +208,10 @@ function noStoreIfUnspecified(response: Response): Response {
   return new Response(response.body, { status: response.status, statusText: response.statusText, headers });
 }
 
-function allowedOrigin(request: Request, hostnames: string[]) {
-  const origin = request.headers.get("origin");
-  if (!origin) return true;
-  try { return hostnames.includes(new URL(origin).hostname); } catch { return false; }
-}
-
 interface ProviderFailures {
   rest: boolean;
   restGenerate: boolean;
   verify: boolean;
-  mcpPreAuth: boolean;
-  mcp: boolean;
-  mcpGenerate: boolean;
-  mcpPuzzleAction: boolean;
   outcomeTelemetry: boolean;
 }
 
@@ -336,7 +234,7 @@ function configuredRestLimit(path: string, env: Env): string {
 }
 
 function finalizeResponse(response: Response, request: Request, env: Env, context: RequestContext): Response {
-  if (context.path === "/mcp" || !response.headers.has("cache-control")) response.headers.set("cache-control", "no-store");
+  if (!response.headers.has("cache-control")) response.headers.set("cache-control", "no-store");
   response.headers.set("x-request-id", context.requestId);
   if (context.restRequest) {
     const configuredLimit = configuredRestLimit(context.path, env);
@@ -376,10 +274,6 @@ function readinessResponse(env: Env, build: ReturnType<typeof buildInfo>, failur
     rateLimitProvider: rateLimitProviderState(env.REST_RATE_LIMITER, failures.rest),
     generateRateLimitProvider: rateLimitProviderState(env.REST_GENERATE_RATE_LIMITER, failures.restGenerate, true),
     verifyRateLimitProvider: rateLimitProviderState(env.VERIFY_RATE_LIMITER, failures.verify, true),
-    mcpPreAuthRateLimitProvider: rateLimitProviderState(env.MCP_PREAUTH_RATE_LIMITER, failures.mcpPreAuth),
-    mcpRateLimitProvider: rateLimitProviderState(env.MCP_RATE_LIMITER, failures.mcp),
-    mcpGenerateRateLimitProvider: rateLimitProviderState(env.MCP_GENERATE_RATE_LIMITER, failures.mcpGenerate, true),
-    mcpPuzzleActionRateLimitProvider: rateLimitProviderState(env.MCP_PUZZLE_ACTION_RATE_LIMITER, failures.mcpPuzzleAction, true),
     outcomeTelemetryProvider: outcomeTelemetryProviderState(env.PUZZLE_OUTCOMES, failures.outcomeTelemetry),
   });
 }
@@ -421,8 +315,20 @@ function writePuzzleOutcome(dataset: AnalyticsEngineDataset, event: Record<strin
   });
 }
 
+async function utcpManualResponse(request: Request, env: Env, build: ReturnType<typeof buildInfo>): Promise<Response> {
+  try {
+    return await cachePublicGet(json(createUtcpManual({
+      publicApiBaseUrl: env.PUBLIC_API_BASE_URL ?? DEFAULT_PUBLIC_API_BASE_URL,
+      serviceVersion: build.serviceVersion,
+      puzzleActionsAvailable: Boolean(env.PUZZLE_TOKEN_SECRET),
+    }), 200, { "cache-control": "public, max-age=300, s-maxage=300, must-revalidate" }), request);
+  } catch {
+    return json({ error: { code: "not_configured", message: "UTCP public API base URL is invalid" } }, 503, { "cache-control": "no-store" });
+  }
+}
+
 async function staticRoute(path: string, request: Request, env: Env, build: ReturnType<typeof buildInfo>, failures: ProviderFailures): Promise<Response | undefined> {
-  if (!["/", "/healthz", "/readyz", "/docs", "/docs/", "/openapi/v1.yaml", "/openapi/chatgpt-actions-v1.yaml"].includes(path)) return undefined;
+  if (!["/", "/healthz", "/readyz", "/docs", "/docs/", "/utcp", "/openapi/v1.yaml", "/openapi/chatgpt-actions-v1.yaml"].includes(path)) return undefined;
   if (request.method !== "GET" && request.method !== "HEAD") {
     return json({ error: { code: "method_not_allowed", message: "Method not allowed" } }, 405, { allow: "GET, HEAD" });
   }
@@ -433,16 +339,17 @@ async function staticRoute(path: string, request: Request, env: Env, build: Retu
     response = await readinessResponse(env, build, failures);
     response.headers.set("cache-control", "no-store");
   } else if (path === "/docs" || path === "/docs/") response = await cachePublicGet(docsResponse(), request);
+  else if (path === "/utcp") response = await utcpManualResponse(request, env, build);
   else response = await staticAsset(request, env, path, "application/yaml; charset=utf-8");
   if (request.method === "HEAD") return new Response(null, { status: response.status, statusText: response.statusText, headers: response.headers });
   return response;
 }
 
-function corsPreflight(request: Request, cors: Record<string, string> | undefined): Response {
+function corsPreflight(request: Request, cors: Record<string, string> | undefined, allowedMethods: readonly string[] = ["GET", "POST"]): Response {
   const requestedMethod = request.headers.get("access-control-request-method");
   const requestedHeaders = request.headers.get("access-control-request-headers")?.split(",").map(value => value.trim().toLowerCase()).filter(Boolean) ?? [];
   const allowedHeaders = new Set(["content-type", "if-none-match"]);
-  if (!cors || !["GET", "POST"].includes(requestedMethod?.toUpperCase() ?? "") || requestedHeaders.some(header => !allowedHeaders.has(header))) {
+  if (!cors || !allowedMethods.includes(requestedMethod?.toUpperCase() ?? "") || requestedHeaders.some(header => !allowedHeaders.has(header))) {
     return json({ error: { code: "forbidden", message: "Origin is not allowed" } }, 403);
   }
   return new Response(null, { status: 204 });
@@ -512,130 +419,6 @@ async function routeRestRequest(request: Request, path: string, env: Env, ctx: E
   return cachePublicGet(response, request);
 }
 
-interface McpRequestDependencies {
-  readonly rateLimited: RateLimiter;
-  readonly failures: ProviderFailures;
-  readonly finish: (response: Response) => Response;
-  readonly setRateLimit: (scope: string, decision: RateLimitDecision) => boolean;
-}
-
-async function resolveMcpRateLimit(
-  request: Request,
-  provider: Env["MCP_RATE_LIMITER"] | undefined,
-  rawLimit: string | undefined,
-  scope: string,
-  rateLimited: RateLimiter,
-  onProviderFailure: () => void,
-  key?: string,
-  failClosedOnFailure = false,
-): Promise<RateLimitDecision> {
-  return await providerRateLimitDecision(provider, request, onProviderFailure, key, failClosedOnFailure)
-    ?? asRateLimitDecision(rateLimited(request, rawLimit, scope));
-}
-
-async function authenticatedMcpPrincipal(request: Request, env: Env, finish: (response: Response) => Response): Promise<string | Response> {
-  const authenticatedApiKey = authenticatedMcpApiKey(request, env);
-  if (!configuredMcpApiKeys(env) || !env.MCP_ALLOWED_HOSTNAMES) return finish(json({ error: { code: "not_configured", message: "MCP credentials and allowed hosts are required" } }, 503));
-  if (!authenticatedApiKey) return finish(json({ error: { code: "unauthorized", message: "A valid API key is required" } }, 401));
-  const hostnames = env.MCP_ALLOWED_HOSTNAMES.split(",").map(value => value.trim()).filter(Boolean);
-  const rejectedHost = hostHeaderValidationResponse(request, hostnames);
-  if (rejectedHost) return finish(rejectedHost);
-  if (!allowedOrigin(request, hostnames)) return finish(json({ error: { code: "forbidden", message: "Origin is not allowed" } }, 403));
-  return `api-key:${await apiKeyFingerprint(authenticatedApiKey)}`;
-}
-
-async function applyMcpPreAuthLimit(request: Request, env: Env, dependencies: McpRequestDependencies): Promise<Response | undefined> {
-  const preAuthDecision = await resolveMcpRateLimit(
-    request,
-    env.MCP_PREAUTH_RATE_LIMITER,
-    env.MCP_PREAUTH_RATE_LIMIT ?? env.MCP_RATE_LIMIT ?? "10",
-    "mcp-preauth",
-    dependencies.rateLimited,
-    () => { dependencies.failures.mcpPreAuth = true; },
-  );
-  return dependencies.setRateLimit("mcp-preauth", preAuthDecision) ? dependencies.finish(tooManyRequests()) : undefined;
-}
-
-async function applyMcpPrincipalLimit(
-  request: Request,
-  principal: string,
-  env: Env,
-  dependencies: McpRequestDependencies,
-): Promise<Response | undefined> {
-  const principalLimit = await resolveMcpRateLimit(
-    request,
-    env.MCP_RATE_LIMITER,
-    env.MCP_RATE_LIMIT,
-    "mcp",
-    dependencies.rateLimited,
-    () => { dependencies.failures.mcp = true; },
-    `${principal}:mcp`,
-  );
-  return dependencies.setRateLimit("mcp", principalLimit) ? dependencies.finish(tooManyRequests()) : undefined;
-}
-
-async function applyMcpToolLimit(
-  request: Request,
-  toolName: string,
-  principal: string,
-  env: Env,
-  dependencies: McpRequestDependencies,
-): Promise<Response | undefined> {
-  if (toolName === "generate_puzzle") {
-    const decision = await resolveMcpRateLimit(
-      request,
-      env.MCP_GENERATE_RATE_LIMITER,
-      env.MCP_GENERATE_RATE_LIMIT ?? "10",
-      "mcp-generate",
-      dependencies.rateLimited,
-      () => { dependencies.failures.mcpGenerate = true; },
-      `${principal}:generate_puzzle`,
-      true,
-    );
-    return dependencies.setRateLimit("mcp-generate", decision) ? dependencies.finish(tooManyRequests()) : undefined;
-  }
-  if (toolName !== "verify_puzzle_answer" && toolName !== "get_puzzle_hint") return undefined;
-  const decision = await resolveMcpRateLimit(
-    request,
-    env.MCP_PUZZLE_ACTION_RATE_LIMITER,
-    env.MCP_PUZZLE_ACTION_RATE_LIMIT ?? "10",
-    "mcp-puzzle-action",
-    dependencies.rateLimited,
-    () => { dependencies.failures.mcpPuzzleAction = true; },
-    `${principal}:${toolName}`,
-    true,
-  );
-  return dependencies.setRateLimit("mcp-puzzle-action", decision) ? dependencies.finish(tooManyRequests()) : undefined;
-}
-
-async function applyMcpToolLimits(request: Request, principal: string, env: Env, dependencies: McpRequestDependencies): Promise<Response | undefined> {
-  for (const toolName of await mcpToolNames(request)) {
-    const rejection = await applyMcpToolLimit(request, toolName, principal, env, dependencies);
-    if (rejection) return rejection;
-  }
-  return undefined;
-}
-
-async function routeMcpRequest(request: Request, env: Env, dependencies: McpRequestDependencies): Promise<Response> {
-  const preAuthRejection = await applyMcpPreAuthLimit(request, env, dependencies);
-  if (preAuthRejection) return preAuthRejection;
-
-  const principal = await authenticatedMcpPrincipal(request, env, dependencies.finish);
-  if (principal instanceof Response) return principal;
-
-  const principalRejection = await applyMcpPrincipalLimit(request, principal, env, dependencies);
-  if (principalRejection) return principalRejection;
-
-  const toolRejection = await applyMcpToolLimits(request, principal, env, dependencies);
-  if (toolRejection) return toolRejection;
-  return dependencies.finish(await createYokaibaMcpHandler(templates, {
-    puzzleTokenSecret: env.PUZZLE_TOKEN_SECRET,
-    puzzleTokenPreviousSecrets: env.PUZZLE_TOKEN_SECRET ? previousPuzzleTokenSecrets(env) : [],
-    puzzleTokenTtlSeconds: puzzleTokenTtlSeconds(env),
-    serviceVersion: buildInfo(env).serviceVersion,
-  }).fetch(request));
-}
-
 interface WorkerRuntimeDependencies {
   readonly options: WorkerOptions;
   readonly rateLimited: RateLimiter;
@@ -652,7 +435,7 @@ function invalidUrlResponse(request: Request, startedAt: number, requestId: stri
   return response;
 }
 
-const STATIC_CACHE_PATHS = new Set(["/docs", "/docs/", "/openapi/v1.yaml", "/openapi/chatgpt-actions-v1.yaml"]);
+const STATIC_CACHE_PATHS = new Set(["/docs", "/docs/", "/utcp", "/openapi/v1.yaml", "/openapi/chatgpt-actions-v1.yaml"]);
 const REST_CACHE_PATHS = new Set(["/v1/puzzles/generate", "/v1/scenarios", "/v1/capabilities"]);
 
 function requestFinalizer(request: Request, env: Env, context: RequestContext): (response: Response) => Response {
@@ -696,23 +479,6 @@ async function applyRestRequestLimit(
   return context.rateLimitDecision.limited ? finish(tooManyRequests()) : undefined;
 }
 
-function mcpRequestDependencies(
-  context: RequestContext,
-  dependencies: WorkerRuntimeDependencies,
-  finish: (response: Response) => Response,
-): McpRequestDependencies {
-  return {
-    rateLimited: dependencies.rateLimited,
-    failures: dependencies.failures,
-    finish,
-    setRateLimit: (scope, decision) => {
-      context.rateLimitScope = scope;
-      context.rateLimitDecision = decision;
-      return decision.limited;
-    },
-  };
-}
-
 function restRequestDependencies(dependencies: WorkerRuntimeDependencies, build: ReturnType<typeof buildInfo>): RestRequestDependencies {
   return {
     options: dependencies.options,
@@ -737,9 +503,12 @@ async function dispatchWorkerRequest(
   const cachedStatic = await tryCachedPublicGet(request, path, STATIC_CACHE_PATHS, ctx, dependencies.options, finish);
   if (cachedStatic) return cachedStatic;
 
+  if ((context.restRequest || path === "/utcp") && request.method === "OPTIONS") {
+    return finish(corsPreflight(request, context.responseCorsHeaders, context.restRequest ? ["GET", "POST"] : ["GET", "HEAD"]));
+  }
+
   const staticResponse = await staticRoute(path, request, env, build, dependencies.failures);
   if (staticResponse) return finish(staticResponse);
-  if (context.restRequest && request.method === "OPTIONS") return finish(corsPreflight(request, context.responseCorsHeaders));
 
   const limited = await applyRestRequestLimit(request, path, env, context, dependencies, finish);
   if (limited) return limited;
@@ -747,7 +516,6 @@ async function dispatchWorkerRequest(
   const cachedRest = await tryCachedPublicGet(request, path, REST_CACHE_PATHS, ctx, dependencies.options, finish);
   if (cachedRest) return cachedRest;
 
-  if (path === "/mcp") return routeMcpRequest(request, env, mcpRequestDependencies(context, dependencies, finish));
   return finish(await routeRestRequest(request, path, env, ctx, restRequestDependencies(dependencies, build)));
 }
 
@@ -761,12 +529,15 @@ async function handleWorkerRequest(request: Request, env: Env, ctx: ExecutionCon
     return invalidUrlResponse(request, startedAt, requestId);
   }
   const restRequest = path.startsWith("/v1/");
+  const utcpDiscoveryRequest = path === "/utcp";
   const context: RequestContext = {
     startedAt,
     requestId,
     path,
     restRequest,
-    responseCorsHeaders: restRequest ? corsHeaders(request.headers.get("origin"), configuredOrigins(env.REST_ALLOWED_ORIGINS)) : undefined,
+    responseCorsHeaders: restRequest || utcpDiscoveryRequest
+      ? corsHeaders(request.headers.get("origin"), configuredOrigins(env.REST_ALLOWED_ORIGINS), utcpDiscoveryRequest ? "GET, HEAD, OPTIONS" : undefined)
+      : undefined,
   };
   return dispatchWorkerRequest(request, path, env, ctx, context, dependencies);
 }
@@ -776,7 +547,7 @@ export function createWorker(options: WorkerOptions = {}) {
   const rateLimited = options.rateLimiter ?? createRateLimiter(options.localRateLimitStore, clock);
   const generatedPuzzleCache = options.generatedPuzzleCache ?? new GeneratedPuzzleCache();
   const generatedPuzzleRequests = new Map<string, Promise<Response>>();
-  const failures: ProviderFailures = { rest: false, restGenerate: false, verify: false, mcpPreAuth: false, mcp: false, mcpGenerate: false, mcpPuzzleAction: false, outcomeTelemetry: false };
+  const failures: ProviderFailures = { rest: false, restGenerate: false, verify: false, outcomeTelemetry: false };
   const dependencies: WorkerRuntimeDependencies = {
     options,
     rateLimited,
@@ -793,12 +564,13 @@ export function createWorker(options: WorkerOptions = {}) {
 export function createCachedPublicWorker() {
   const cache = new GeneratedPuzzleCache();
   const inFlight = new Map<string, Promise<Response>>();
-  const failures: ProviderFailures = { rest: false, restGenerate: false, verify: false, mcpPreAuth: false, mcp: false, mcpGenerate: false, mcpPuzzleAction: false, outcomeTelemetry: false };
+  const failures: ProviderFailures = { rest: false, restGenerate: false, verify: false, outcomeTelemetry: false };
   return {
     fetch: (request: Request, env: Env, ctx: ExecutionContext): Promise<Response> => {
       const path = new URL(request.url).pathname;
       if (request.method !== "GET") return Promise.resolve(json({ error: { code: "method_not_allowed", message: "Method not allowed" } }, 405, { "cache-control": "no-store" }));
       if (path === "/docs" || path === "/docs/") return cachePublicGet(docsResponse(), request);
+      if (path === "/utcp") return utcpManualResponse(request, env, buildInfo(env));
       if (path === "/openapi/v1.yaml" || path === "/openapi/chatgpt-actions-v1.yaml") {
         return staticAsset(request, env, path, "application/yaml; charset=utf-8");
       }

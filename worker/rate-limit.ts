@@ -74,11 +74,11 @@ export function createRateLimiter(rateLimits: RateLimitStore = new Map(), clock:
   return (request, rawLimit, scope) => applyRateLimit(rateLimits, request, rawLimit, scope, clock());
 }
 
-export function asRateLimitDecision(result: boolean | RateLimitDecision): RateLimitDecision {
+function asRateLimitDecision(result: boolean | RateLimitDecision): RateLimitDecision {
   return typeof result === "boolean" ? { limited: result } : result;
 }
 
-export async function providerRateLimitDecision(
+async function providerRateLimitDecision(
   provider: RateLimitProvider | undefined,
   request: Request,
   onProviderFailure: () => void,
