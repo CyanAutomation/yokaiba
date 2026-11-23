@@ -93,10 +93,8 @@ test("UTCP POST tool arguments send the nested body directly to the existing RES
 });
 
 test("UTCP manual accepts HTTPS origins and local loopback HTTP but rejects unsafe bases", () => {
-  assert.equal(
-    createUtcpManual({ publicApiBaseUrl: "http://localhost:8787/", serviceVersion: "dev", puzzleActionsAvailable: false }).tools[0]?.tool_call_template.url.startsWith("http://localhost:8787/"),
-    true,
-  );
+  const localManual = createUtcpManual({ publicApiBaseUrl: "http://localhost:8787/", serviceVersion: "dev", puzzleActionsAvailable: false });
+  assert.equal(new URL(localManual.tools[0]!.tool_call_template.url).origin, "http://localhost:8787");
   for (const url of [
     "http://yokaiba.example",
     "https://user:password@yokaiba.example",
@@ -118,7 +116,7 @@ test("Worker serves the UTCP manual as cacheable JSON and returns 404 on the rem
   assert.match(get.headers.get("cache-control") ?? "", /max-age=300/);
   const manual = await get.json() as ReturnType<typeof createUtcpManual>;
   assert.equal(manual.info.version, "1.2.3");
-  assert.ok(manual.tools.every(tool => tool.tool_call_template.url.startsWith(BASE_URL)));
+  assert.ok(manual.tools.every(tool => new URL(tool.tool_call_template.url).origin === BASE_URL));
 
   const head = await worker.fetch(new Request("https://worker.example/utcp", { method: "HEAD" }), env, {} as ExecutionContext);
   assert.equal(head.status, 200);
