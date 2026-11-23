@@ -47,6 +47,9 @@ test("distance comparison CLI requires stable output for resume and rejects dupl
   });
   assert.throws(() => parseDistanceComparisonArguments(["--report", "source.json", "--resume"]), /--resume requires --out/);
   assert.throws(() => parseDistanceComparisonArguments(["--report", "a.json", "--report", "b.json", "--out", "out"]), /duplicate option/);
+  assert.throws(() => parseDistanceComparisonArguments(["--report", "source.json", "--out", "out", "--resume", "--resume"]), /duplicate option --resume/);
+  assert.throws(() => parseDistanceComparisonArguments(["--report"]), /--report requires a value/);
+  assert.throws(() => parseDistanceComparisonArguments(["--unknown"]), /unknown option/);
 });
 
 test("distance comparison checkpoints round-trip and reject configuration drift", async () => {

@@ -415,7 +415,14 @@ test("missing or malformed answer maps are treated as empty so the batch can be 
 });
 
 test("audit Markdown reports targeted delivery, fallbacks, confidence, and incomplete evaluations", () => {
-  const partial = applyJevAnswers(clue(), { "0_ambiguous": { noul: 0.8, confidence: 0.7 } }, 0);
+  const partial = {
+    ...applyJevAnswers(clue(), { "0_ambiguous": { noul: 0.8, confidence: 0.7 } }, 0),
+    logicalContribution: "not-essential" as const,
+    jointlyEssentialClueSets: [["clue-2", "clue-3"]],
+    higherOrderRemovalCandidateSets: 1,
+    higherOrderRemovalChecks: 1,
+    higherOrderRemovalChecksCapped: false,
+  };
   const report: JevAuditReport = {
     startedAt: "2026-09-29T00:00:00.000Z",
     generatedAt: "2026-09-29T00:01:00.000Z",
@@ -465,6 +472,8 @@ test("audit Markdown reports targeted delivery, fallbacks, confidence, and incom
   assert.match(markdown, /Puzzle generation model: yokaiba-difficulty-v5/);
   assert.match(markdown, /Logical clue contribution by removal/);
   assert.match(markdown, /Ablation was measured for 1\/1 sampled clues/);
+  assert.match(markdown, /Checked 1\/1 candidate triple removals/);
+  assert.match(markdown, /joint triples/);
   assert.match(markdown, /Raw generation distribution/);
   assert.match(markdown, /Progressive delivery distribution/);
   assert.match(markdown, /1\/1 \| 0\/1 \| 1\/1/);

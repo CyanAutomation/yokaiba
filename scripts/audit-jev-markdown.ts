@@ -101,28 +101,42 @@ function countContributionRole(
   return clues.filter(clue => clue.logicalContribution === role).length;
 }
 
+function summarizeHigherOrderInteractions(clues: readonly JevAuditReport["clueAudit"]["clues"][number][]) {
+  const interactions = new Set<string>();
+  const interactionSummaryByPuzzle = new Map<string, { candidates: number; checks: number; capped: boolean }>();
+  for (const clue of clues) {
+    const puzzleKey = JSON.stringify([clue.templateId, clue.seed]);
+    const current = interactionSummaryByPuzzle.get(puzzleKey);
+    interactionSummaryByPuzzle.set(puzzleKey, {
+      candidates: Math.max(current?.candidates ?? 0, clue.higherOrderRemovalCandidateSets ?? 0),
+      checks: Math.max(current?.checks ?? 0, clue.higherOrderRemovalChecks ?? 0),
+      capped: (current?.capped ?? false) || (clue.higherOrderRemovalChecksCapped ?? false),
+    });
+    for (const otherIds of clue.jointlyEssentialClueSets ?? []) {
+      interactions.add(JSON.stringify([clue.templateId, clue.seed, ...[clue.clueId, ...otherIds].sort()]));
+    }
+  }
+  return {
+    interactions,
+    candidates: [...interactionSummaryByPuzzle.values()].reduce((sum, row) => sum + row.candidates, 0),
+    checks: [...interactionSummaryByPuzzle.values()].reduce((sum, row) => sum + row.checks, 0),
+    cappedPuzzles: [...interactionSummaryByPuzzle.values()].filter(row => row.capped).length,
+  };
+}
+
+function countHigherOrderInteractionClues(clues: readonly JevAuditReport["clueAudit"]["clues"][number][]): number {
+  return clues.filter(clue => (clue.jointlyEssentialClueSets?.length ?? 0) > 0).length;
+}
+
 function clueContributionLines(report: JevAuditReport): string[] {
   const assessed = report.clueAudit.clues.filter(clue => clue.logicalContribution !== undefined);
   const interactions = new Set<string>();
-  const higherOrderInteractions = new Set<string>();
-  const interactionSummaryByPuzzle = new Map<string, { candidates: number; checks: number; capped: boolean }>();
+  const higherOrderSummary = summarizeHigherOrderInteractions(assessed);
   for (const clue of assessed) {
-    const puzzleKey = JSON.stringify([clue.templateId, clue.seed]);
-    interactionSummaryByPuzzle.set(puzzleKey, {
-      candidates: Math.max(interactionSummaryByPuzzle.get(puzzleKey)?.candidates ?? 0, clue.higherOrderRemovalCandidateSets ?? 0),
-      checks: Math.max(interactionSummaryByPuzzle.get(puzzleKey)?.checks ?? 0, clue.higherOrderRemovalChecks ?? 0),
-      capped: (interactionSummaryByPuzzle.get(puzzleKey)?.capped ?? false) || (clue.higherOrderRemovalChecksCapped ?? false),
-    });
     for (const otherId of clue.redundantWithClueIds ?? []) {
       interactions.add(JSON.stringify([clue.templateId, clue.seed, ...[clue.clueId, otherId].sort()]));
     }
-    for (const otherIds of clue.jointlyEssentialClueSets ?? []) {
-      higherOrderInteractions.add(JSON.stringify([clue.templateId, clue.seed, ...[clue.clueId, ...otherIds].sort()]));
-    }
   }
-  const higherOrderCandidates = [...interactionSummaryByPuzzle.values()].reduce((sum, row) => sum + row.candidates, 0);
-  const higherOrderChecks = [...interactionSummaryByPuzzle.values()].reduce((sum, row) => sum + row.checks, 0);
-  const cappedPuzzles = [...interactionSummaryByPuzzle.values()].filter(row => row.capped).length;
   const mean = (values: Array<number | undefined>) => {
     const present = values.filter((value): value is number => value !== undefined && Number.isFinite(value));
     return present.length ? (present.reduce((sum, value) => sum + value, 0) / present.length).toFixed(2) : "n/a";
@@ -141,7 +155,7 @@ function clueContributionLines(report: JevAuditReport): string[] {
   lines.push(
     `Ablation was measured for ${assessed.length}/${report.clueAudit.clues.length} sampled clues.`,
     `Detected ${interactions.size} jointly essential clue pairs.`,
-    `Checked ${higherOrderChecks}/${higherOrderCandidates} candidate triple removals across sampled puzzles; the cap was reached in ${cappedPuzzles} puzzles. Detected ${higherOrderInteractions.size} jointly essential triples.`,
+    `Checked ${higherOrderSummary.checks}/${higherOrderSummary.candidates} candidate triple removals across sampled puzzles; the cap was reached in ${higherOrderSummary.cappedPuzzles} puzzles. Detected ${higherOrderSummary.interactions.size} jointly essential triples.`,
     "",
     "| Constraint kind | Uniqueness-critical | No-guess-critical | Not essential | Mean cited trace steps | Mean trace-step delta | Clues in joint-removal pairs | Clues in joint triples | Total |",
     "| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |",
@@ -150,11 +164,11 @@ function clueContributionLines(report: JevAuditReport): string[] {
   for (const kind of kinds) {
     const clues = assessed.filter(clue => clue.constraintKind === kind);
     const interactionClues = clues.filter(clue => (clue.redundantWithClueIds?.length ?? 0) > 0).length;
-    const tripleInteractionClues = clues.filter(clue => (clue.jointlyEssentialClueSets?.length ?? 0) > 0).length;
+    const tripleInteractionClues = countHigherOrderInteractionClues(clues);
     lines.push(`| ${kind} | ${countContributionRole(clues, "uniqueness-critical")} | ${countContributionRole(clues, "no-guess-critical")} | ${countContributionRole(clues, "not-essential")} | ${mean(clues.map(clue => clue.deductionStepsUsingClue))} | ${mean(clues.map(clue => clue.traceStepDelta))} | ${interactionClues} | ${tripleInteractionClues} | ${clues.length} |`);
   }
   const interactionClues = assessed.filter(clue => (clue.redundantWithClueIds?.length ?? 0) > 0).length;
-  const tripleInteractionClues = assessed.filter(clue => (clue.jointlyEssentialClueSets?.length ?? 0) > 0).length;
+  const tripleInteractionClues = countHigherOrderInteractionClues(assessed);
   lines.push(`| Total | ${countContributionRole(assessed, "uniqueness-critical")} | ${countContributionRole(assessed, "no-guess-critical")} | ${countContributionRole(assessed, "not-essential")} | ${mean(assessed.map(clue => clue.deductionStepsUsingClue))} | ${mean(assessed.map(clue => clue.traceStepDelta))} | ${interactionClues} | ${tripleInteractionClues} | ${assessed.length} |`);
   return lines;
 }

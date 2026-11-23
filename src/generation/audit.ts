@@ -50,6 +50,52 @@ function unrankTripleCombination(count: number, rank: number): [number, number, 
   return [first, second, second + 1 + remaining];
 }
 
+function sampledTripleRanks(candidateCount: number, maxChecks: number): { candidateCount: number; checkCount: number; ranks: number[] } {
+  const checkCount = Math.min(candidateCount, maxChecks);
+  const ranks = checkCount === candidateCount
+    ? Array.from({ length: checkCount }, (_unused, index) => index)
+    : Array.from({ length: checkCount }, (_unused, index) => Math.floor((index + 0.5) * candidateCount / checkCount));
+  return { candidateCount, checkCount, ranks };
+}
+
+function recordTripleInteraction(
+  template: PuzzleTemplate,
+  clues: readonly Clue[],
+  results: ClueAblationResult[],
+  eligibleIndices: readonly number[],
+  rank: number,
+  solver: PuzzleSolver,
+): void {
+  const positions = unrankTripleCombination(eligibleIndices.length, rank);
+  const removedIndices = positions.map(position => eligibleIndices[position]!);
+  const removed = new Set(removedIndices);
+  const remaining = clues.filter((_candidate, index) => !removed.has(index));
+  const unique = solver.countSolutions(template, remaining, 2) === 1;
+  const traceComplete = evaluateHumanDeductionTraceV5(template, remaining).solved;
+  if (unique && traceComplete) return;
+  const clueIds = removedIndices.map(index => clues[index]!.id).sort();
+  for (const removedIndex of removedIndices) {
+    results[removedIndex]!.jointlyEssentialClueSets.push(clueIds.filter(id => id !== clues[removedIndex]!.id));
+  }
+}
+
+function recordHigherOrderInteractions(
+  template: PuzzleTemplate,
+  clues: readonly Clue[],
+  results: ClueAblationResult[],
+  eligibleIndices: readonly number[],
+  maxChecks: number,
+  solver: PuzzleSolver,
+): void {
+  const sample = sampledTripleRanks(choose3(eligibleIndices.length), maxChecks);
+  for (const result of results) {
+    result.higherOrderRemovalCandidateSets = sample.candidateCount;
+    result.higherOrderRemovalChecks = sample.checkCount;
+    result.higherOrderRemovalChecksCapped = sample.candidateCount > sample.checkCount;
+  }
+  for (const rank of sample.ranks) recordTripleInteraction(template, clues, results, eligibleIndices, rank, solver);
+}
+
 /** Measure single-clue effects, pair interactions, and a bounded sample of higher-order interactions. */
 export function auditClueAblation(
   template: PuzzleTemplate,
@@ -97,29 +143,7 @@ export function auditClueAblation(
     }
   }
 
-  const higherOrderCandidateSets = choose3(individuallyNonEssential.length);
-  const higherOrderChecks = Math.min(higherOrderCandidateSets, maxHigherOrderChecks);
-  const sampledRanks = higherOrderChecks === higherOrderCandidateSets
-    ? Array.from({ length: higherOrderChecks }, (_unused, index) => index)
-    : Array.from({ length: higherOrderChecks }, (_unused, index) => Math.floor((index + 0.5) * higherOrderCandidateSets / higherOrderChecks));
-  for (const result of results) {
-    result.higherOrderRemovalCandidateSets = higherOrderCandidateSets;
-    result.higherOrderRemovalChecks = higherOrderChecks;
-    result.higherOrderRemovalChecksCapped = higherOrderCandidateSets > higherOrderChecks;
-  }
-  for (const sampledRank of sampledRanks) {
-    const positions = unrankTripleCombination(individuallyNonEssential.length, sampledRank);
-    const removedIndices = positions.map(position => individuallyNonEssential[position]!);
-    const removed = new Set(removedIndices);
-    const remaining = clues.filter((_candidate, index) => !removed.has(index));
-    const uniqueWithoutTriple = solver.countSolutions(template, remaining, 2) === 1;
-    const traceCompleteWithoutTriple = evaluateHumanDeductionTraceV5(template, remaining).solved;
-    if (uniqueWithoutTriple && traceCompleteWithoutTriple) continue;
-    const clueIds = removedIndices.map(index => clues[index]!.id).sort();
-    for (const removedIndex of removedIndices) {
-      results[removedIndex]!.jointlyEssentialClueSets.push(clueIds.filter(id => id !== clues[removedIndex]!.id));
-    }
-  }
+  recordHigherOrderInteractions(template, clues, results, individuallyNonEssential, maxHigherOrderChecks, solver);
   return results;
 }
 

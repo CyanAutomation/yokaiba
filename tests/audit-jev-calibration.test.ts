@@ -95,6 +95,23 @@ test("player misread comparison excludes incomplete JEV assessments", () => {
   assert.equal(report.playerOutcomes.misreadRateDifference, null);
 });
 
+test("human calibration retains false-positive and false-negative clue examples", () => {
+  const falsePositive = clue({ seed: "seed-fp", clueId: "clue-fp", faithful: 0.2 });
+  const falseNegative = clue({ seed: "seed-fn", clueId: "clue-fn", faithful: 0.9 });
+  const labels = parseHumanCalibrationLabels({
+    version: 1,
+    labels: [
+      { templateId: "cup", seed: "seed-fp", clueId: "clue-fp", concerns: { faithfulness: false } },
+      { templateId: "cup", seed: "seed-fn", clueId: "clue-fn", concerns: { faithfulness: true } },
+    ],
+  });
+  const faithfulness = compareJevWithHumanCalibration([falsePositive, falseNegative], labels).metrics.faithfulness;
+
+  assert.deepEqual(faithfulness.confusion, { truePositive: 0, falsePositive: 1, trueNegative: 0, falseNegative: 1 });
+  assert.deepEqual(faithfulness.falsePositiveExamples, [{ templateId: "cup", seed: "seed-fp", clueId: "clue-fp" }]);
+  assert.deepEqual(faithfulness.falseNegativeExamples, [{ templateId: "cup", seed: "seed-fn", clueId: "clue-fn" }]);
+});
+
 test("human calibration rejects duplicate clue keys and invalid player counts", () => {
   const row = { templateId: "cup", seed: "seed", clueId: "clue", concerns: { faithfulness: true } };
   assert.throws(() => parseHumanCalibrationLabels({ version: 1, labels: [row, row] }), /duplicate label key/);
@@ -102,5 +119,13 @@ test("human calibration rejects duplicate clue keys and invalid player counts", 
     version: 1,
     labels: [{ ...row, playerOutcome: { exposures: 2, misreads: 3 } }],
   }), /misreads cannot exceed exposures/);
+  assert.throws(() => parseHumanCalibrationLabels({
+    version: 1,
+    labels: [{ ...row, concerns: { faithfulness: "yes" } }],
+  }), /must be boolean/);
+  assert.throws(() => parseHumanCalibrationLabels({
+    version: 1,
+    labels: [{ ...row, concerns: { unrecognizedMetric: true } }],
+  }), /unknown human calibration metric/);
 });
 
