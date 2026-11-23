@@ -2,7 +2,7 @@
 
 ## REST API
 
-The API root redirects to the [API documentation page](https://yokaiba.scheimann.workers.dev/docs), and the complete contract is published at [`/openapi/v1.yaml`](https://yokaiba.scheimann.workers.dev/openapi/v1.yaml). The [UTCP manual](https://yokaiba.scheimann.workers.dev/utcp) describes selected operations as direct HTTP tools. A compact, ChatGPT Actions-oriented REST contract is also published at [`/openapi/chatgpt-actions-v1.yaml`](https://yokaiba.scheimann.workers.dev/openapi/chatgpt-actions-v1.yaml). The repository sources are [public/openapi/v1.yaml](../public/openapi/v1.yaml) and [public/openapi/chatgpt-actions-v1.yaml](../public/openapi/chatgpt-actions-v1.yaml). The `/docs` page links to these specifications.
+The API root redirects to the [API documentation page](https://yokaiba.scheimann.workers.dev/docs), and the complete contract is published at [`/openapi/v1.yaml`](https://yokaiba.scheimann.workers.dev/openapi/v1.yaml). The UTCP manual served at `/utcp` describes selected operations as direct HTTP tools. A compact, ChatGPT Actions-oriented REST contract is also published at [`/openapi/chatgpt-actions-v1.yaml`](https://yokaiba.scheimann.workers.dev/openapi/chatgpt-actions-v1.yaml). The repository sources are [public/openapi/v1.yaml](../public/openapi/v1.yaml) and [public/openapi/chatgpt-actions-v1.yaml](../public/openapi/chatgpt-actions-v1.yaml). The `/docs` page links to these specifications.
 
 - `GET /healthz`
 - `GET /readyz`

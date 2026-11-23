@@ -67,7 +67,7 @@ This first result does not require secrets. Local answer verification and hints 
 ## Integrate with Yokaiba
 
 - **REST:** Start with the [API usage guide](docs/api-usage.md), [API documentation](https://yokaiba.scheimann.workers.dev/docs), or [full OpenAPI contract](https://yokaiba.scheimann.workers.dev/openapi/v1.yaml). The [ChatGPT Actions OpenAPI contract](https://yokaiba.scheimann.workers.dev/openapi/chatgpt-actions-v1.yaml) is a compact alternative.
-- **UTCP:** Fetch the [UTCP manual](https://yokaiba.scheimann.workers.dev/utcp) and configure a UTCP HTTP provider to call the listed REST endpoints. Tool calls use the public REST access policy and existing REST rate limits. See [UTCP setup](docs/operations-and-deployment.md#utcp-tool-discovery).
+- **UTCP:** Fetch the hosted API's `/utcp` manual and configure a UTCP HTTP provider to call the listed REST endpoints. Tool calls use the public REST access policy and existing REST rate limits. See [UTCP setup](docs/operations-and-deployment.md#utcp-tool-discovery).
 - **Difficulty:** Read how logical, semantic, and observed difficulty are measured in [difficulty and calibration](docs/difficulty-and-calibration.md).
 
 ## Develop and contribute

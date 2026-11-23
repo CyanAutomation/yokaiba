@@ -10,16 +10,13 @@ import { DEFAULT_PUZZLE_TOKEN_TTL_SECONDS, MAX_PUZZLE_TOKEN_TTL_SECONDS } from "
 import { emitDifficultyGeneration } from "./difficulty-telemetry.js";
 import { createPuzzleFeedbackSink, type D1DatabaseLike } from "./puzzle-feedback-storage.js";
 import {
-  asRateLimitDecision,
   createRateLimiter,
-  providerRateLimitDecision,
   restRateLimitConfiguration,
   restRateLimitDecision,
   type RateLimitDecision,
   type RateLimiter,
   type RateLimitStore,
 } from "./rate-limit.js";
-export { createRateLimiter } from "./rate-limit.js";
 export type { RateLimiter, RateLimitStore } from "./rate-limit.js";
 
 export interface Env {

@@ -9,12 +9,21 @@ const CategorySchema = z.object({
   ordered: z.boolean().optional(),
 });
 
-const ScenarioSchema = z.object({
+const PuzzleSpecSchema = z.object({
   id: z.string(),
   title: z.string(),
   baseCategory: z.string(),
   categories: z.array(CategorySchema),
   metadata: z.record(z.string(), z.unknown()).optional(),
+});
+
+const ScenarioSchema = PuzzleSpecSchema;
+
+const CandidateScoreRangeSchema = z.object({
+  minimum: z.number(),
+  maximum: z.number(),
+  complete: z.number().int(),
+  incomplete: z.number().int(),
 });
 
 const ErrorOutputSchema = z.object({
@@ -28,12 +37,7 @@ const ErrorOutputSchema = z.object({
     eligibleCandidates: z.number().int().min(0),
     reason: z.literal("no_candidate_in_band"),
     fallbackSeedsAttempted: z.number().int().min(0).optional(),
-    candidateScoreRange: z.object({
-      minimum: z.number(),
-      maximum: z.number(),
-      complete: z.number().int(),
-      incomplete: z.number().int(),
-    }).optional(),
+    candidateScoreRange: CandidateScoreRangeSchema.optional(),
   }).optional(),
 });
 
@@ -53,25 +57,14 @@ const PuzzleOutputSchema = z.object({
     eligibleCandidates: z.number().int().min(0),
     selectedScore: z.number().optional(),
     selectedRankDistance: z.number().optional(),
-    candidateScoreRange: z.object({
-      minimum: z.number(),
-      maximum: z.number(),
-      complete: z.number().int(),
-      incomplete: z.number().int(),
-    }).optional(),
+    candidateScoreRange: CandidateScoreRangeSchema.optional(),
   }).optional(),
   templateId: z.string(),
   generatorVersion: z.string(),
   solverVersion: z.string(),
   puzzleToken: z.string().optional(),
   puzzleFingerprint: z.string().regex(/^[a-f0-9]{64}$/).optional(),
-  spec: z.object({
-    id: z.string(),
-    title: z.string(),
-    baseCategory: z.string(),
-    categories: z.array(CategorySchema),
-    metadata: z.record(z.string(), z.unknown()).optional(),
-  }),
+  spec: PuzzleSpecSchema,
   clues: z.array(z.object({
     id: z.string(),
     constraint: z.record(z.string(), z.unknown()),

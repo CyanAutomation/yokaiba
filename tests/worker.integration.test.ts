@@ -3,7 +3,8 @@ import test from "node:test";
 import { generatePuzzle } from "../src/generation/generator.js";
 import { issuePuzzleToken } from "../src/api/puzzle-token.js";
 import { tournamentOrderTemplate } from "../src/templates/tournament-order.js";
-import worker, { createCachedPublicWorker, createRateLimiter, createWorker, GeneratedPuzzleCache } from "../worker/index.js";
+import worker, { createCachedPublicWorker, createWorker, GeneratedPuzzleCache } from "../worker/index.js";
+import { createRateLimiter } from "../worker/rate-limit.js";
 
 test("version and readiness expose deployed build and rate-limit configuration", async () => {
   const isolatedWorker = createWorker({ rateLimiter: () => false });
