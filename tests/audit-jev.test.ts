@@ -487,6 +487,71 @@ test("audit Markdown reports targeted delivery, fallbacks, confidence, and incom
   assert.match(markdown, /yokaiba-difficulty-v4/);
   assert.match(markdown, /probabilistic JEV assessments/);
   assert.match(markdown, /Clue count/);
+
+  const diagnosticLevel = {
+    ...report.targetedDifficultyAudit[0]!.levels[0]!,
+    generated: 0,
+    unavailable: 1,
+    fallback: { used: 0, maximumAttempt: 0, attempts: { p50: 0, p95: 0 } },
+    unavailableDiagnostics: {
+      samplesWithDiagnostics: 1,
+      strategiesAttempted: 12,
+      eligibleCandidates: 0,
+      fallbackSeedsAttempted: 3,
+      candidateScoreRange: { minimum: 50, maximum: 91, complete: 2, incomplete: 1 },
+      availableDifficultyCounts: [0, 1, 0, 2, ...Array<number>(8).fill(0)],
+    },
+  };
+  const diagnosticMarkdown = buildAuditMarkdown({
+    ...report,
+    targetedDifficultyAudit: [{
+      ...report.targetedDifficultyAudit[0]!,
+      levels: [diagnosticLevel],
+    }],
+  });
+  assert.match(diagnosticMarkdown, /1 diagnostic samples; 12 strategies; 0 eligible; scores 50\.0–91\.0, 2 complete \/ 1 incomplete; 3 fallback seeds; alternate levels 2 \(1\), 4 \(2\)/);
+
+  const firstClueId = partial.clueId;
+  const interactionClues = [
+    { ...partial, redundantWithClueIds: ["clue-2"] },
+    {
+      ...partial,
+      clueId: "clue-2",
+      redundantWithClueIds: [firstClueId],
+      jointlyEssentialClueSets: [[firstClueId, "clue-3"]],
+      higherOrderRemovalCandidateSets: 7,
+      higherOrderRemovalChecks: 5,
+      higherOrderRemovalChecksCapped: true,
+    },
+    {
+      ...partial,
+      clueId: "clue-3",
+      jointlyEssentialClueSets: [[firstClueId, "clue-2"]],
+      higherOrderRemovalCandidateSets: 6,
+      higherOrderRemovalChecks: 4,
+    },
+    {
+      ...partial,
+      templateId: "other-template",
+      seed: "other-seed",
+      clueId: "other-clue",
+      jointlyEssentialClueSets: [],
+      higherOrderRemovalCandidateSets: 2,
+      higherOrderRemovalChecks: 1,
+      higherOrderRemovalChecksCapped: false,
+    },
+  ];
+  const interactionMarkdown = buildAuditMarkdown({
+    ...report,
+    clueAudit: {
+      ...report.clueAudit,
+      sampledClues: interactionClues.length,
+      clues: interactionClues,
+    },
+  });
+  assert.match(interactionMarkdown, /Detected 1 jointly essential clue pairs/);
+  assert.match(interactionMarkdown, /Checked 6\/9 candidate triple removals across sampled puzzles; the cap was reached in 1 puzzles\. Detected 1 jointly essential triples/);
+
   const legacyReport: JevAuditReport = {
     ...report,
     targetedDifficultyAudit: report.targetedDifficultyAudit.map(template => ({

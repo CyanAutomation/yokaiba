@@ -17,6 +17,23 @@ interface FeedbackRow {
   smart_marking_enabled: number | null;
 }
 
+type ComparableFeedback = Pick<FeedbackRow,
+  | "puzzle_fingerprint"
+  | "template_id"
+  | "requested_level"
+  | "assessed_level"
+  | "difficulty_model_version"
+  | "generator_version"
+  | "generation_metadata"
+  | "rating"
+  | "reason"
+  | "outcome"
+  | "hints_used"
+  | "mistakes"
+  | "elapsed_ms"
+  | "smart_marking_enabled"
+>;
+
 interface D1StatementLike {
   bind(...values: unknown[]): D1StatementLike;
   run(): Promise<{ meta?: { changes?: number } }>;
@@ -49,21 +66,48 @@ function databaseValues(feedback: PuzzleFeedbackRecord): unknown[] {
   ];
 }
 
+function comparableStoredFeedback(row: FeedbackRow): ComparableFeedback {
+  return {
+    puzzle_fingerprint: row.puzzle_fingerprint,
+    template_id: row.template_id,
+    requested_level: row.requested_level,
+    assessed_level: row.assessed_level,
+    difficulty_model_version: row.difficulty_model_version,
+    generator_version: row.generator_version,
+    generation_metadata: row.generation_metadata,
+    rating: row.rating,
+    reason: row.reason,
+    outcome: row.outcome,
+    hints_used: row.hints_used,
+    mistakes: row.mistakes,
+    elapsed_ms: row.elapsed_ms,
+    smart_marking_enabled: row.smart_marking_enabled,
+  };
+}
+
+function comparableSubmittedFeedback(feedback: PuzzleFeedbackRecord): ComparableFeedback {
+  return {
+    puzzle_fingerprint: feedback.puzzleFingerprint,
+    template_id: feedback.templateId,
+    requested_level: feedback.requestedLevel,
+    assessed_level: feedback.assessedLevel,
+    difficulty_model_version: feedback.difficultyModelVersion,
+    generator_version: feedback.generatorVersion,
+    generation_metadata: JSON.stringify(feedback.generationMetadata),
+    rating: feedback.rating,
+    reason: feedback.reason,
+    outcome: feedback.outcome,
+    hints_used: feedback.hintsUsed,
+    mistakes: feedback.mistakes,
+    elapsed_ms: feedback.elapsedMs,
+    smart_marking_enabled: feedback.smartMarkingEnabled === null ? null : Number(feedback.smartMarkingEnabled),
+  };
+}
+
 function matchesExisting(row: FeedbackRow, feedback: PuzzleFeedbackRecord): boolean {
-  return row.puzzle_fingerprint === feedback.puzzleFingerprint
-    && row.template_id === feedback.templateId
-    && row.requested_level === feedback.requestedLevel
-    && row.assessed_level === feedback.assessedLevel
-    && row.difficulty_model_version === feedback.difficultyModelVersion
-    && row.generator_version === feedback.generatorVersion
-    && row.generation_metadata === JSON.stringify(feedback.generationMetadata)
-    && row.rating === feedback.rating
-    && row.reason === feedback.reason
-    && row.outcome === feedback.outcome
-    && row.hints_used === feedback.hintsUsed
-    && row.mistakes === feedback.mistakes
-    && row.elapsed_ms === feedback.elapsedMs
-    && row.smart_marking_enabled === (feedback.smartMarkingEnabled === null ? null : Number(feedback.smartMarkingEnabled));
+  const stored = comparableStoredFeedback(row);
+  const submitted = comparableSubmittedFeedback(feedback);
+  return (Object.keys(submitted) as Array<keyof ComparableFeedback>).every(key => stored[key] === submitted[key]);
 }
 
 /** Durable sink with unique idempotency keys; retries with changed payloads are conflicts. */

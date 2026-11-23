@@ -14,6 +14,40 @@ function targetedExactCount(row: TargetedDifficultyCorpusAudit["levels"][number]
   return row.assessedLevelCounts[row.requestedDifficultyLevel - 1] ?? 0;
 }
 
+function targetedUnavailableDetails(level: TargetedDifficultyCorpusAudit["levels"][number]): string {
+  const unavailable = level.unavailable ?? 0;
+  if (unavailable === 0) return "—";
+
+  const diagnostics = level.unavailableDiagnostics;
+  if (!diagnostics || diagnostics.samplesWithDiagnostics === 0) return "generation diagnostics not recorded";
+
+  const alternateLevels = diagnostics.availableDifficultyCounts
+    .flatMap((count, index) => count > 0 ? [`${index + 1} (${count})`] : [])
+    .join(", ");
+  const scoreRange = diagnostics.candidateScoreRange
+    ? `scores ${diagnostics.candidateScoreRange.minimum.toFixed(1)}–${diagnostics.candidateScoreRange.maximum.toFixed(1)}, ${diagnostics.candidateScoreRange.complete} complete / ${diagnostics.candidateScoreRange.incomplete} incomplete`
+    : "score range unavailable";
+  const evidence = [
+    `${diagnostics.samplesWithDiagnostics} diagnostic samples`,
+    `${diagnostics.strategiesAttempted} strategies`,
+    `${diagnostics.eligibleCandidates} eligible`,
+    scoreRange,
+    `${diagnostics.fallbackSeedsAttempted} fallback seeds`,
+  ];
+  if (alternateLevels) evidence.push(`alternate levels ${alternateLevels}`);
+  return evidence.join("; ");
+}
+
+function targetedDifficultyRow(
+  template: TargetedDifficultyCorpusAudit,
+  level: TargetedDifficultyCorpusAudit["levels"][number],
+): string {
+  const percentiles = level.fallback.attempts
+    ? `p50 ${level.fallback.attempts.p50}, p95 ${level.fallback.attempts.p95}`
+    : "p50 n/a, p95 n/a";
+  return `| ${template.templateId} | ${level.requestedDifficultyLevel} | ${targetedExactCount(level)}/${level.generated} | ${level.unavailable ?? 0}/${template.sampleSize} | ${level.humanTrace.complete}/${level.generated} | ${level.fallback.used}/${level.generated} | ${percentiles}, max ${level.fallback.maximumAttempt} | ${escapeTableCell(targetedUnavailableDetails(level))} |`;
+}
+
 function auditHeaderLines(report: JevAuditReport): string[] {
   const { clueAudit } = report;
   const resolvedModels = (phase: JevAuditReport["clueAudit"] | JevAuditReport["puzzleAudit"]) => {
@@ -70,25 +104,7 @@ function targetedDifficultyLines(report: JevAuditReport): string[] {
     "| Template | Level | Exact target | Unavailable / requested | No-guess trace | Fallback use | Fallback attempt p50 / p95 / max | Unavailable search evidence |",
     "| --- | ---: | ---: | ---: | ---: | ---: | ---: | --- |",
   ];
-  for (const template of report.targetedDifficultyAudit) {
-    for (const level of template.levels) {
-      const percentiles = level.fallback.attempts
-        ? `p50 ${level.fallback.attempts.p50}, p95 ${level.fallback.attempts.p95}`
-        : "p50 n/a, p95 n/a";
-      const unavailable = level.unavailable ?? 0;
-      const diagnostics = level.unavailableDiagnostics;
-      const alternateLevels = diagnostics?.availableDifficultyCounts
-        .flatMap((count, index) => count > 0 ? [`${index + 1} (${count})`] : [])
-        .join(", ") ?? "";
-      const scoreRange = diagnostics?.candidateScoreRange
-        ? `scores ${diagnostics.candidateScoreRange.minimum.toFixed(1)}–${diagnostics.candidateScoreRange.maximum.toFixed(1)}, ${diagnostics.candidateScoreRange.complete} complete / ${diagnostics.candidateScoreRange.incomplete} incomplete`
-        : "score range unavailable";
-      const unavailableDetails = unavailable === 0 ? "—" : !diagnostics || diagnostics.samplesWithDiagnostics === 0
-        ? "generation diagnostics not recorded"
-        : `${diagnostics.samplesWithDiagnostics} diagnostic samples; ${diagnostics.strategiesAttempted} strategies; ${diagnostics.eligibleCandidates} eligible; ${scoreRange}; ${diagnostics.fallbackSeedsAttempted} fallback seeds${alternateLevels ? `; alternate levels ${alternateLevels}` : ""}`;
-      lines.push(`| ${template.templateId} | ${level.requestedDifficultyLevel} | ${targetedExactCount(level)}/${level.generated} | ${unavailable}/${template.sampleSize} | ${level.humanTrace.complete}/${level.generated} | ${level.fallback.used}/${level.generated} | ${percentiles}, max ${level.fallback.maximumAttempt} | ${escapeTableCell(unavailableDetails)} |`);
-    }
-  }
+  lines.push(...report.targetedDifficultyAudit.flatMap(template => template.levels.map(level => targetedDifficultyRow(template, level))));
   if (report.targetedDifficultyAudit.length === 0) lines.push("No targeted difficulty results were collected.");
   lines.push("Fallback attempt percentiles include only seeds that required fallback and use the nearest-rank definition.");
   return lines;
@@ -101,26 +117,51 @@ function countContributionRole(
   return clues.filter(clue => clue.logicalContribution === role).length;
 }
 
-function summarizeHigherOrderInteractions(clues: readonly JevAuditReport["clueAudit"]["clues"][number][]) {
-  const interactions = new Set<string>();
-  const interactionSummaryByPuzzle = new Map<string, { candidates: number; checks: number; capped: boolean }>();
-  for (const clue of clues) {
-    const puzzleKey = JSON.stringify([clue.templateId, clue.seed]);
-    const current = interactionSummaryByPuzzle.get(puzzleKey);
-    interactionSummaryByPuzzle.set(puzzleKey, {
-      candidates: Math.max(current?.candidates ?? 0, clue.higherOrderRemovalCandidateSets ?? 0),
-      checks: Math.max(current?.checks ?? 0, clue.higherOrderRemovalChecks ?? 0),
-      capped: (current?.capped ?? false) || (clue.higherOrderRemovalChecksCapped ?? false),
-    });
-    for (const otherIds of clue.jointlyEssentialClueSets ?? []) {
-      interactions.add(JSON.stringify([clue.templateId, clue.seed, ...[clue.clueId, ...otherIds].sort()]));
-    }
+type PuzzleInteractionCounts = { candidates: number; checks: number; capped: boolean };
+
+interface HigherOrderInteractionSummary {
+  interactions: Set<string>;
+  countsByPuzzle: Map<string, PuzzleInteractionCounts>;
+}
+
+function puzzleKey(clue: JevAuditReport["clueAudit"]["clues"][number]): string {
+  return JSON.stringify([clue.templateId, clue.seed]);
+}
+
+function recordPuzzleInteractionCounts(
+  summary: HigherOrderInteractionSummary,
+  clue: JevAuditReport["clueAudit"]["clues"][number],
+): void {
+  const key = puzzleKey(clue);
+  const current = summary.countsByPuzzle.get(key) ?? { candidates: 0, checks: 0, capped: false };
+  summary.countsByPuzzle.set(key, {
+    candidates: Math.max(current.candidates, clue.higherOrderRemovalCandidateSets ?? 0),
+    checks: Math.max(current.checks, clue.higherOrderRemovalChecks ?? 0),
+    capped: current.capped || (clue.higherOrderRemovalChecksCapped ?? false),
+  });
+}
+
+function recordJointlyEssentialTriples(
+  interactions: Set<string>,
+  clue: JevAuditReport["clueAudit"]["clues"][number],
+): void {
+  for (const otherIds of clue.jointlyEssentialClueSets ?? []) {
+    interactions.add(JSON.stringify([clue.templateId, clue.seed, ...[clue.clueId, ...otherIds].sort()]));
   }
+}
+
+function summarizeHigherOrderInteractions(clues: readonly JevAuditReport["clueAudit"]["clues"][number][]) {
+  const summary: HigherOrderInteractionSummary = { interactions: new Set(), countsByPuzzle: new Map() };
+  for (const clue of clues) {
+    recordPuzzleInteractionCounts(summary, clue);
+    recordJointlyEssentialTriples(summary.interactions, clue);
+  }
+  const puzzleCounts = [...summary.countsByPuzzle.values()];
   return {
-    interactions,
-    candidates: [...interactionSummaryByPuzzle.values()].reduce((sum, row) => sum + row.candidates, 0),
-    checks: [...interactionSummaryByPuzzle.values()].reduce((sum, row) => sum + row.checks, 0),
-    cappedPuzzles: [...interactionSummaryByPuzzle.values()].filter(row => row.capped).length,
+    interactions: summary.interactions,
+    candidates: puzzleCounts.reduce((total, row) => total + row.candidates, 0),
+    checks: puzzleCounts.reduce((total, row) => total + row.checks, 0),
+    cappedPuzzles: puzzleCounts.filter(row => row.capped).length,
   };
 }
 

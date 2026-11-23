@@ -4,7 +4,7 @@ import type { Clue, PuzzleSpec } from "../domain/types.js";
 const COST: Record<Clue["constraint"]["kind"], number> = { matches: 1, notMatches: 1, before: 3, adjacent: 3, sameRow: 3, distance: 4 };
 
 type DirectConstraint = Extract<Clue["constraint"], { kind: "matches" | "notMatches" }>;
-type RelationalConstraint = Exclude<Clue["constraint"], DirectConstraint>;
+export type RelationalConstraint = Exclude<Clue["constraint"], DirectConstraint>;
 export type PossibleRows = Map<string, Array<Set<string>>>;
 
 export function deductionCost(clue: Clue): number {
@@ -52,7 +52,7 @@ function removeTermFromRows(categoryId: string, value: string, disallowedRows: S
   return changed;
 }
 
-function satisfiesRelationship(constraint: RelationalConstraint, left: number, right: number): boolean {
+export function satisfiesRelationship(constraint: RelationalConstraint, left: number, right: number): boolean {
   switch (constraint.kind) {
     case "before": return left < right;
     case "sameRow": return left === right;

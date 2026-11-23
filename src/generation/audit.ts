@@ -310,6 +310,68 @@ function auditCorpusWithGenerator(
 }
 
 /** Run one requested level independently so a caller can checkpoint between levels. */
+interface TargetedDifficultySampleCollection {
+  records: DifficultyAuditRecord[];
+  fallbackAttempts: number[];
+  unavailable: number;
+  unavailableDiagnostics: TargetedDifficultyUnavailableDiagnostics;
+  modelVersion?: string;
+}
+
+function emptyTargetedDifficultyDiagnostics(): TargetedDifficultyUnavailableDiagnostics {
+  return {
+    samplesWithDiagnostics: 0,
+    strategiesAttempted: 0,
+    eligibleCandidates: 0,
+    fallbackSeedsAttempted: 0,
+    availableDifficultyCounts: Array<number>(12).fill(0),
+  };
+}
+
+function mergeCandidateScoreRange(
+  current: TargetedDifficultyUnavailableDiagnostics["candidateScoreRange"],
+  incoming: NonNullable<TargetedDifficultyUnavailableDiagnostics["candidateScoreRange"]>,
+): NonNullable<TargetedDifficultyUnavailableDiagnostics["candidateScoreRange"]> {
+  if (!current) return { ...incoming };
+  return {
+    minimum: Math.min(current.minimum, incoming.minimum),
+    maximum: Math.max(current.maximum, incoming.maximum),
+    complete: current.complete + incoming.complete,
+    incomplete: current.incomplete + incoming.incomplete,
+  };
+}
+
+function recordUnavailableTargetedSample(
+  summary: TargetedDifficultySampleCollection,
+  error: DifficultyUnavailableError,
+): void {
+  for (const level of error.availableDifficultyLevels) {
+    if (!Number.isInteger(level) || level < 1 || level > 12) continue;
+    const levelIndex = level - 1;
+    summary.unavailableDiagnostics.availableDifficultyCounts[levelIndex] += 1;
+  }
+  const diagnostics = error.diagnostics;
+  if (!diagnostics) return;
+  const aggregate = summary.unavailableDiagnostics;
+  aggregate.samplesWithDiagnostics += 1;
+  aggregate.strategiesAttempted += diagnostics.strategiesAttempted;
+  aggregate.eligibleCandidates += diagnostics.eligibleCandidates;
+  aggregate.fallbackSeedsAttempted += diagnostics.fallbackSeedsAttempted ?? 0;
+  if (diagnostics.candidateScoreRange) {
+    aggregate.candidateScoreRange = mergeCandidateScoreRange(aggregate.candidateScoreRange, diagnostics.candidateScoreRange);
+  }
+}
+
+function recordGeneratedTargetedSample(summary: TargetedDifficultySampleCollection, puzzle: GeneratedPuzzle): void {
+  summary.modelVersion ??= puzzle.difficulty.modelVersion;
+  summary.records.push({
+    level: puzzle.difficulty.level,
+    humanTraceComplete: puzzle.difficulty.evidence.humanSolve.solved,
+    clueCount: puzzle.clues.length,
+  });
+  if (puzzle.seedFallbackAttempt !== undefined) summary.fallbackAttempts.push(puzzle.seedFallbackAttempt);
+}
+
 function collectTargetedDifficultySamples(
   template: PuzzleTemplate,
   requestedDifficultyLevel: Difficulty["level"],
@@ -317,54 +379,25 @@ function collectTargetedDifficultySamples(
   seedPrefix: string,
   onProgress?: DifficultyAuditProgressCallback,
   generateTargeted: TargetedPuzzleGenerator = (candidateTemplate, seed, level) => generatePuzzleForRequest(candidateTemplate, seed, level, true),
-): { records: DifficultyAuditRecord[]; fallbackAttempts: number[]; unavailable: number; unavailableDiagnostics: TargetedDifficultyUnavailableDiagnostics; modelVersion: string } {
-  const records: DifficultyAuditRecord[] = [];
-  const fallbackAttempts: number[] = [];
-  const unavailableDiagnostics: TargetedDifficultyUnavailableDiagnostics = {
-    samplesWithDiagnostics: 0,
-    strategiesAttempted: 0,
-    eligibleCandidates: 0,
-    fallbackSeedsAttempted: 0,
-    availableDifficultyCounts: Array<number>(12).fill(0),
+): TargetedDifficultySampleCollection & { modelVersion: string } {
+  const summary: TargetedDifficultySampleCollection = {
+    records: [],
+    fallbackAttempts: [],
+    unavailable: 0,
+    unavailableDiagnostics: emptyTargetedDifficultyDiagnostics(),
   };
-  let unavailable = 0;
-  let modelVersion: string | undefined;
   for (let index = 0; index < sampleSize; index += 1) {
     try {
       const puzzle = generateTargeted(template, `${seedPrefix}-${requestedDifficultyLevel}-${index}`, requestedDifficultyLevel);
-      modelVersion ??= puzzle.difficulty.modelVersion;
-      records.push({ level: puzzle.difficulty.level, humanTraceComplete: puzzle.difficulty.evidence.humanSolve.solved, clueCount: puzzle.clues.length });
-      if (puzzle.seedFallbackAttempt !== undefined) fallbackAttempts.push(puzzle.seedFallbackAttempt);
+      recordGeneratedTargetedSample(summary, puzzle);
     } catch (error) {
       if (!(error instanceof DifficultyUnavailableError)) throw error;
-      unavailable += 1;
-      for (const level of error.availableDifficultyLevels) {
-        if (Number.isInteger(level) && level >= 1 && level <= 12) {
-          unavailableDiagnostics.availableDifficultyCounts[level - 1] += 1;
-        }
-      }
-      if (error.diagnostics) {
-        const diagnostics = error.diagnostics;
-        unavailableDiagnostics.samplesWithDiagnostics += 1;
-        unavailableDiagnostics.strategiesAttempted += diagnostics.strategiesAttempted;
-        unavailableDiagnostics.eligibleCandidates += diagnostics.eligibleCandidates;
-        unavailableDiagnostics.fallbackSeedsAttempted += diagnostics.fallbackSeedsAttempted ?? 0;
-        if (diagnostics.candidateScoreRange) {
-          const current = unavailableDiagnostics.candidateScoreRange;
-          unavailableDiagnostics.candidateScoreRange = current === undefined
-            ? { ...diagnostics.candidateScoreRange }
-            : {
-              minimum: Math.min(current.minimum, diagnostics.candidateScoreRange.minimum),
-              maximum: Math.max(current.maximum, diagnostics.candidateScoreRange.maximum),
-              complete: current.complete + diagnostics.candidateScoreRange.complete,
-              incomplete: current.incomplete + diagnostics.candidateScoreRange.incomplete,
-            };
-        }
-      }
+      summary.unavailable += 1;
+      recordUnavailableTargetedSample(summary, error);
     }
     onProgress?.({ phase: "targeted", templateId: template.id, requestedDifficultyLevel, completed: index + 1, total: sampleSize });
   }
-  return { records, fallbackAttempts, unavailable, unavailableDiagnostics, modelVersion: modelVersion ?? DEFAULT_DIFFICULTY_MODEL_VERSION };
+  return { ...summary, modelVersion: summary.modelVersion ?? DEFAULT_DIFFICULTY_MODEL_VERSION };
 }
 
 export type TargetedPuzzleGenerator = (template: PuzzleTemplate, seed: string, level: Difficulty["level"]) => GeneratedPuzzle;

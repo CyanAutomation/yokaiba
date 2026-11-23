@@ -40,5 +40,7 @@ jobs:
       - run: npm run typecheck
       - run: npm run build
       - run: npm run test:coverage
+      - name: Report TypeScript health with coverage
+        run: npm run fallow:health -- --coverage coverage/coverage-final.json
       - name: Audit changed code with Fallow
         run: npm run fallow:audit -- --coverage coverage/coverage-final.json --format compact --quiet

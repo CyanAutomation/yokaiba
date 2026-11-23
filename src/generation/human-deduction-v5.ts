@@ -1,6 +1,6 @@
 import type { Clue, ClueConstraint, ClueTerm, PuzzleSpec } from "../domain/types.js";
-import type { PossibleRows } from "./human-deduction-rules.js";
-import { createDeductionPossibilities } from "./human-deduction-rules.js";
+import type { PossibleRows, RelationalConstraint } from "./human-deduction-rules.js";
+import { createDeductionPossibilities, satisfiesRelationship as relationHolds } from "./human-deduction-rules.js";
 
 export type HumanDeductionRuleV5 = "direct-fact" | "simple-elimination" | "single-candidate" | "constraint-propagation";
 export type HumanDeductionStrategyV5 = "direct-fact" | "elimination" | "single-candidate" | "relational" | "ordering" | "adjacency" | "same-row" | "distance" | "cross-category" | "multi-step-chain";
@@ -62,15 +62,6 @@ function termRows(term: Term, baseCategory: string, baseValues: readonly string[
   return (possible.get(term.category) ?? []).flatMap((cell, row) => cell.has(term.value) ? [row] : []);
 }
 
-function relationHolds(constraint: Exclude<ClueConstraint, { kind: "matches" | "notMatches" }>, left: number, right: number): boolean {
-  switch (constraint.kind) {
-    case "before": return left < right;
-    case "sameRow": return left === right;
-    case "distance": return Math.abs(left - right) === constraint.distance;
-    case "adjacent": return Math.abs(left - right) === 1;
-  }
-}
-
 function strategyFor(constraint: ClueConstraint, baseCategory: string, depth: number): HumanDeductionStrategyV5[] {
   const tags = new Set<HumanDeductionStrategyV5>();
   if (constraint.kind === "matches") tags.add("direct-fact");
@@ -89,7 +80,7 @@ function strategyFor(constraint: ClueConstraint, baseCategory: string, depth: nu
 }
 
 function requiredParentsForRelation(
-  constraint: Exclude<ClueConstraint, { kind: "matches" | "notMatches" }>,
+  constraint: RelationalConstraint,
   side: "left" | "right",
   candidateRow: number,
   baseCategory: string,
@@ -120,7 +111,6 @@ function requiredParentsForRelation(
  * hidden solution is never accepted as input or consulted by this evaluator.
  */
 type DirectConstraint = Extract<ClueConstraint, { kind: "matches" | "notMatches" }>;
-type RelationConstraint = Exclude<ClueConstraint, { kind: "matches" | "notMatches" }>;
 
 interface DeductionTraceState {
   baseCategory: string;
@@ -276,6 +266,37 @@ function recordDeduction(state: DeductionTraceState, input: RecordDeductionInput
   return step;
 }
 
+function directClueEliminations(constraint: DirectConstraint, possibleValues: ReadonlySet<string>): string[] {
+  if (constraint.kind === "matches") return [...possibleValues].filter(value => value !== constraint.value);
+  return possibleValues.has(constraint.value) ? [constraint.value] : [];
+}
+
+function directClueDependencies(
+  state: DeductionTraceState,
+  constraint: DirectConstraint,
+  row: number,
+  possibleValues: ReadonlySet<string>,
+  eliminatedValues: readonly string[],
+): string[] {
+  if (constraint.kind !== "notMatches" || possibleValues.size !== eliminatedValues.length + 1) return [];
+  return [...possibleValues]
+    .filter(value => value !== constraint.value)
+    .map(value => state.reasonByElimination.get(termKey(constraint.category, row, value))?.deductionId)
+    .filter((id): id is string => id !== undefined);
+}
+
+function directCluePlacements(
+  constraint: DirectConstraint,
+  row: number,
+  possibleValues: ReadonlySet<string>,
+): DeductionPlacementV5[] {
+  if (constraint.kind === "matches" && possibleValues.has(constraint.value)) {
+    return [{ category: constraint.category, row, value: constraint.value }];
+  }
+  if (possibleValues.size !== 1) return [];
+  return [{ category: constraint.category, row, value: [...possibleValues][0]! }];
+}
+
 function applyDirectClue(state: DeductionTraceState, clue: Clue & { constraint: DirectConstraint }): boolean {
   const constraint = clue.constraint;
   const row = state.baseValues.indexOf(constraint.subject);
@@ -283,30 +304,19 @@ function applyDirectClue(state: DeductionTraceState, clue: Clue & { constraint: 
   if (row < 0 || !cells?.[row]) return false;
 
   const before = cells[row]!;
-  const removed = constraint.kind === "matches"
-    ? [...before].filter(value => value !== constraint.value)
-    : before.has(constraint.value) ? [constraint.value] : [];
+  const removed = directClueEliminations(constraint, before);
   if (removed.length === 0) return false;
 
   const workingMemoryDemand = relevantPossibilities(state, [constraint.category]);
-  const dependsOn = constraint.kind === "notMatches" && before.size === removed.length + 1
-    ? [...before].filter(value => value !== constraint.value)
-      .map(value => state.reasonByElimination.get(termKey(constraint.category, row, value))?.deductionId)
-      .filter((id): id is string => id !== undefined)
-    : [];
+  const dependsOn = directClueDependencies(state, constraint, row, before, removed);
   for (const value of removed) before.delete(value);
-  const placements = constraint.kind === "matches" && before.has(constraint.value)
-    ? [{ category: constraint.category, row, value: constraint.value }]
-    : before.size === 1
-      ? [{ category: constraint.category, row, value: [...before][0]! }]
-      : [];
   recordDeduction(state, {
     rule: constraint.kind === "matches" ? "direct-fact" : "simple-elimination",
     clueIds: [clue.id],
     categories: [state.baseCategory, constraint.category],
     dependsOn,
     eliminatedPossibilities: removed.map(value => ({ category: constraint.category, row, value })),
-    placements,
+    placements: directCluePlacements(constraint, row, before),
     workingMemoryDemand,
   });
   return true;
@@ -324,7 +334,7 @@ function singletonTerms(state: DeductionTraceState, categories: readonly string[
 
 function eliminateUnsupportedRelationTerms(
   state: DeductionTraceState,
-  relation: RelationConstraint,
+  relation: RelationalConstraint,
   side: "left" | "right",
   sourceRows: readonly number[],
   otherRows: readonly number[],
@@ -366,7 +376,7 @@ function placementsCreatedByRelation(
   });
 }
 
-function applyRelationClue(state: DeductionTraceState, clue: Clue & { constraint: RelationConstraint }): boolean {
+function applyRelationClue(state: DeductionTraceState, clue: Clue & { constraint: RelationalConstraint }): boolean {
   const relation = clue.constraint;
   const categories = [...new Set([relation.left.category, relation.right.category])].sort();
   const workingMemoryDemand = relevantPossibilities(state, nonBaseCategories(relation, state.baseCategory));
@@ -395,7 +405,7 @@ function applyClue(state: DeductionTraceState, clue: Clue): boolean {
   if (clue.constraint.kind === "matches" || clue.constraint.kind === "notMatches") {
     return applyDirectClue(state, clue as Clue & { constraint: DirectConstraint });
   }
-  return applyRelationClue(state, clue as Clue & { constraint: RelationConstraint });
+  return applyRelationClue(state, clue as Clue & { constraint: RelationalConstraint });
 }
 
 function propagateAssignedValue(state: DeductionTraceState, category: string, cells: readonly Set<string>[], row: number, value: string): boolean {

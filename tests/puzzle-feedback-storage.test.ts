@@ -81,3 +81,34 @@ test("D1 feedback retries are idempotent and changed payloads conflict", async (
   assert.equal(database.prepare("SELECT COUNT(*) AS count FROM puzzle_feedback").get()?.count, 1);
   database.close();
 });
+
+test("D1 feedback idempotency compares every persisted field, including nullable values", async () => {
+  const { database, binding } = createLocalD1();
+  const save = createPuzzleFeedbackSink(binding);
+  const initial = feedback({ requestedLevel: null, reason: null, elapsedMs: null, smartMarkingEnabled: null });
+  assert.equal(await save(initial), "inserted");
+  assert.equal(await save({ ...initial }), "duplicate");
+
+  const changedPayloads: Array<Partial<PuzzleFeedbackRecord>> = [
+    { puzzleFingerprint: "b".repeat(64) },
+    { templateId: "other-template" },
+    { requestedLevel: 3 },
+    { assessedLevel: 4 },
+    { difficultyModelVersion: "yokaiba-difficulty-v4" },
+    { generatorVersion: "yokaiba-generator-v5" },
+    { generationMetadata: { ...initial.generationMetadata, seed: "changed-seed" } },
+    { rating: "just_right" },
+    { reason: "too_many_deductions" },
+    { outcome: "completed" },
+    { hintsUsed: 2 },
+    { mistakes: 1 },
+    { elapsedMs: 1 },
+    { smartMarkingEnabled: false },
+  ];
+  for (const changes of changedPayloads) {
+    assert.equal(await save({ ...initial, ...changes }), "conflict", `changed fields: ${Object.keys(changes).join(", ")}`);
+  }
+
+  assert.equal(database.prepare("SELECT COUNT(*) AS count FROM puzzle_feedback").get()?.count, 1);
+  database.close();
+});
