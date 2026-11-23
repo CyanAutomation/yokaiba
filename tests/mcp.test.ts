@@ -86,6 +86,10 @@ test("MCP preserves explicit comparison-model profiles and candidate diagnostics
   assert.equal(puzzle.difficultyModel, "compare");
   assert.equal(puzzle.difficulty.modelVersion, "yokaiba-difficulty-v4");
   assert.equal(puzzle.difficultyProfile.logical.modelVersion, "yokaiba-difficulty-v5");
+  assert.equal(puzzle.difficultyProfile.logical.trace.status, "solved");
+  assert.equal(typeof puzzle.difficultyProfile.logical.trace.maximumDependencyDepth, "number");
+  assert.equal("steps" in puzzle.difficultyProfile.logical.trace, false);
+  assert.equal("unresolvedPossibilities" in puzzle.difficultyProfile.logical.trace, false);
   assert.equal("solution" in puzzle, false);
 
   const selected = structuredContent(await callTool(handler, 2, "generate_puzzle", {

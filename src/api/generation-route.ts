@@ -3,6 +3,7 @@ import { DEFAULT_PUZZLE_TOKEN_TTL_SECONDS, issuePuzzleTokenWithIdentity } from "
 import { json } from "./json-response.js";
 import type { GeneratedPuzzle, PuzzleTemplate } from "../domain/types.js";
 import { normalizeGenerationParameters } from "./generation-parameters.js";
+import { publicPuzzleFields } from "./public-puzzle.js";
 import { parseGenerationQuery } from "./generation-query.js";
 import { badRequest, readJsonBody } from "./request-utils.js";
 import type { RestRouterOptions } from "./router-options.js";
@@ -19,15 +20,14 @@ export function generatedPuzzleCacheControl(puzzleTokenSecret?: string, puzzleTo
 }
 
 async function publicPuzzle(puzzle: GeneratedPuzzle, options: RestRouterOptions) {
-  const { solution: _solution, spec, ...rest } = puzzle;
+  const safePuzzle = publicPuzzleFields(puzzle);
   const issuedToken = options.puzzleTokenSecret
     ? await issuePuzzleTokenWithIdentity(puzzle, options.puzzleTokenSecret, {
       ttlSeconds: options.puzzleTokenTtlSeconds ?? DEFAULT_PUZZLE_TOKEN_TTL_SECONDS,
     })
     : undefined;
   return {
-    ...rest,
-    spec,
+    ...safePuzzle,
     ...(issuedToken ? { puzzleToken: issuedToken.token, puzzleFingerprint: issuedToken.puzzleFingerprint } : {}),
   };
 }

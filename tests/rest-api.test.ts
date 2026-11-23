@@ -97,6 +97,12 @@ function assertCoreOpenApiSchemas(schemas: OpenApiObject): void {
   assert.ok(schemas.Clue.properties.phraseVariant);
   assert.ok(schemas.GeneratedPuzzle.properties.generationStrategy);
   assert.ok(schemas.GeneratedPuzzle.properties.difficultyProfile);
+  const publicTraceRef = schemas.DifficultyProfile.properties.logical.properties.trace.$ref;
+  assert.equal(publicTraceRef, "#/components/schemas/PublicDifficultyTrace");
+  const publicTrace = schemas.PublicDifficultyTrace;
+  assert.equal(publicTrace.additionalProperties, false, "public difficulty traces must use an explicit summary schema");
+  assert.equal(publicTrace.properties.steps, undefined, "public difficulty traces must not expose answer-bearing deductions");
+  assert.equal(publicTrace.properties.unresolvedPossibilities, undefined);
   assert.deepEqual(schemas.GenerationRequest.properties.difficultyModel.enum, ["v4", "v5", "compare"]);
   assert.ok(schemas.Readiness.properties.mcpPuzzleActionRateLimitProvider);
   assert.ok(schemas.Readiness.properties.generateRateLimitProvider);
@@ -182,8 +188,13 @@ test("the ChatGPT Actions contract is a small, self-contained OpenAPI surface", 
   assert.deepEqual(Object.keys(specification.paths), ["/v1/scenarios", "/v1/puzzles/generate", "/v1/puzzles/verify", "/v1/puzzles/hint"]);
   const generationRequest = resolveLocalRef(specification, specification.paths["/v1/puzzles/generate"].post.requestBody.content["application/json"].schema);
   const hintRequest = resolveLocalRef(specification, specification.paths["/v1/puzzles/hint"].post.requestBody.content["application/json"].schema);
+  const generatedPuzzleSchema = resolveLocalRef(specification, specification.paths["/v1/puzzles/generate"].post.responses["200"].content["application/json"].schema);
+  const publicProfile = resolveLocalRef(specification, generatedPuzzleSchema.properties.difficultyProfile);
+  const publicTrace = resolveLocalRef(specification, publicProfile.properties.logical.properties.trace);
   assert.equal(generationRequest.required.includes("seed"), false);
   assert.equal(hintRequest.properties.kind.enum.includes("placement"), false);
+  assert.equal(publicTrace.additionalProperties, false);
+  assert.equal(publicTrace.properties.steps, undefined, "the Actions contract must not expose answer-bearing deduction steps");
   assert.equal(specification.paths["/v1/events"], undefined, "telemetry ingestion should not be exposed as an assistant action");
 
   const operationIds = (Object.values(specification.paths) as OpenApiObject[]).flatMap(pathItem =>
@@ -219,16 +230,27 @@ test("REST defaults to v5 and comparison mode retains explicit v4/v5 profiles", 
   const base = "https://yokaiba.test/v1/puzzles/generate?templateId=tournament-order-v1&seed=difficulty-model-contract";
   const defaultResponse = await route(new Request(base));
   const compareResponse = await route(new Request(`${base}&difficultyModel=compare`));
-  const defaultPuzzle = await defaultResponse.json() as { id: string; difficultyModel?: string; difficultyProfile?: unknown; difficulty: { modelVersion: string } };
-  const compared = await compareResponse.json() as { id: string; difficultyModel?: string; difficultyProfile?: { logical: { modelVersion: string }; legacy: { modelVersion: string } }; difficulty: { modelVersion: string } };
+  type TraceSummary = { status: string; maximumDependencyDepth: number; steps?: unknown; unresolvedPossibilities?: unknown };
+  type ProfileSummary = { logical: { modelVersion: string; trace: TraceSummary }; legacy: { modelVersion: string } };
+  type PuzzleSummary = { id: string; difficultyModel?: string; difficultyProfile?: ProfileSummary; difficulty: { modelVersion: string }; solution?: unknown };
+  const defaultPuzzle = await defaultResponse.json() as PuzzleSummary;
+  const compared = await compareResponse.json() as PuzzleSummary;
 
   assert.equal(defaultPuzzle.difficultyModel, "v5");
   assert.ok(defaultPuzzle.difficultyProfile);
   assert.equal(defaultPuzzle.difficulty.modelVersion, "yokaiba-difficulty-v5");
+  assert.equal(defaultPuzzle.difficultyProfile.logical.trace.status, "solved");
+  assert.equal(typeof defaultPuzzle.difficultyProfile.logical.trace.maximumDependencyDepth, "number");
+  assert.equal("steps" in defaultPuzzle.difficultyProfile.logical.trace, false);
+  assert.equal("unresolvedPossibilities" in defaultPuzzle.difficultyProfile.logical.trace, false);
+  assert.equal("solution" in defaultPuzzle, false);
   assert.equal(compared.difficultyModel, "compare");
   assert.equal(compared.difficulty.modelVersion, "yokaiba-difficulty-v4");
   assert.equal(compared.difficultyProfile?.legacy.modelVersion, "yokaiba-difficulty-v4");
   assert.equal(compared.difficultyProfile?.logical.modelVersion, "yokaiba-difficulty-v5");
+  assert.equal(compared.difficultyProfile?.logical.trace.status, "solved");
+  assert.equal("steps" in compared.difficultyProfile.logical.trace, false);
+  assert.equal("solution" in compared, false);
   const explicitV4 = await route(new Request(`${base}&difficultyModel=v4`));
   const v4Puzzle = await explicitV4.json() as { id: string; difficultyModel?: string; difficulty: { modelVersion: string } };
   assert.equal(v4Puzzle.difficultyModel, "v4");
