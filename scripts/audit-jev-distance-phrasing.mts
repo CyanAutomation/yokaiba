@@ -10,7 +10,7 @@ import {
   accumulateResponseUsage,
   applyJevAnswers,
   buildLatestClueDecisionPayload,
-  readJevAuditReport,
+  parseJevAuditReport,
   requestJevDecisionBatch,
   JEV_REQUESTED_MODEL,
   type AuditedClue,
@@ -24,6 +24,7 @@ import {
   type DistanceComparisonMetric,
 } from "./audit-jev-distance-phrasing-support.js";
 import {
+  assertDistanceComparisonOutputPaths,
   assertDistanceComparisonConfiguration,
   hasDistanceComparisonMetrics,
   isDistanceComparisonPairComplete,
@@ -48,7 +49,7 @@ const apiKey = process.env.OPENROUTER_API_KEY;
 if (!apiKey) throw new Error("OPENROUTER_API_KEY is not set; the distance wording comparison was not run.");
 const sourcePath = resolve(args.report);
 const sourceText = await readFile(sourcePath, "utf8");
-const source = await readJevAuditReport(sourcePath);
+const source = parseJevAuditReport(sourceText, sourcePath);
 if (source.configuration.generationModelVersion !== "yokaiba-difficulty-v5") {
   throw new Error(`source report must use v5, found ${source.configuration.generationModelVersion}`);
 }
@@ -59,7 +60,7 @@ const endpoint = source.configuration.endpoint || ENDPOINT;
 const outputBase = resolve(args.outputBase);
 const outputPath = resolve(`${args.outputBase}.json`);
 const markdownPath = resolve(`${args.outputBase}.md`);
-if (outputPath === sourcePath) throw new Error("--out must identify a different report file from --report");
+assertDistanceComparisonOutputPaths(sourcePath, [outputPath, markdownPath]);
 const checkpointPath = `${outputBase}.checkpoint.json`;
 const checkpointConfiguration = {
   sourceReport: sourcePath,

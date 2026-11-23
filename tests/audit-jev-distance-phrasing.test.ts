@@ -5,6 +5,7 @@ import { tmpdir } from "node:os";
 import test from "node:test";
 import type { AuditedClue } from "../scripts/audit-jev-support.js";
 import {
+  assertDistanceComparisonOutputPaths,
   assertDistanceComparisonConfiguration,
   isDistanceComparisonPairComplete,
   parseDistanceComparisonArguments,
@@ -50,6 +51,16 @@ test("distance comparison CLI requires stable output for resume and rejects dupl
   assert.throws(() => parseDistanceComparisonArguments(["--report", "source.json", "--out", "out", "--resume", "--resume"]), /duplicate option --resume/);
   assert.throws(() => parseDistanceComparisonArguments(["--report"]), /--report requires a value/);
   assert.throws(() => parseDistanceComparisonArguments(["--unknown"]), /unknown option/);
+});
+
+test("distance comparison rejects either output file colliding with its source report", () => {
+  for (const sourcePath of ["/reports/source.json", "/reports/source.md"]) {
+    assert.throws(
+      () => assertDistanceComparisonOutputPaths(sourcePath, ["/reports/source.json", "/reports/source.md"]),
+      /files different from --report/,
+    );
+  }
+  assert.doesNotThrow(() => assertDistanceComparisonOutputPaths("/reports/source.md", ["/reports/result.json", "/reports/result.md"]));
 });
 
 test("distance comparison checkpoints round-trip and reject configuration drift", async () => {

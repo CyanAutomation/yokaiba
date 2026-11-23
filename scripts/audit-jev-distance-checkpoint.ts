@@ -48,6 +48,10 @@ export function parseDistanceComparisonArguments(argv: readonly string[]) {
   return { report, outputBase, batchSize, resume };
 }
 
+export function assertDistanceComparisonOutputPaths(sourcePath: string, outputPaths: readonly string[]): void {
+  if (outputPaths.includes(sourcePath)) throw new Error("--out must identify files different from --report");
+}
+
 const comparisonMetrics: Array<keyof Pick<AuditedClue, "faithful" | "readability" | "relationshipExplicitness" | "misunderstandingRisk" | "ambiguous">> = [
   "faithful", "readability", "relationshipExplicitness", "misunderstandingRisk", "ambiguous",
 ];

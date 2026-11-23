@@ -35,6 +35,7 @@ import {
   readJevDecisionResponse,
   readAuditCheckpoint,
   readJevAuditReport,
+  parseJevAuditReport,
   removeCompletedAuditCheckpoint,
   requestJevDecisionBatch,
   SEMANTIC_ASSESSMENT_SCHEMA_VERSION,
@@ -731,8 +732,10 @@ test("older JEV reports can be loaded for follow-up puzzle review", async () => 
     puzzleAudit: { enabled: false, sampledPuzzles: 0, completePuzzles: 0, incompletePuzzles: 0, unavailablePuzzles: 0, flaggedPuzzles: [], puzzles: [] },
   };
   try {
-    await writeFile(reportPath, `${JSON.stringify(source)}\n`);
+    const sourceText = `${JSON.stringify(source)}\n`;
+    await writeFile(reportPath, sourceText);
     const report = await readJevAuditReport(reportPath);
+    assert.deepEqual(parseJevAuditReport(sourceText, reportPath), report);
     assert.deepEqual(report.productionDifficultyAudit, []);
     assert.deepEqual(report.clueAudit.clues, []);
     assert.deepEqual(report.clueAudit.models, ["test-model"]);

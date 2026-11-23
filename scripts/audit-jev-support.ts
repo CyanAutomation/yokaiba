@@ -926,13 +926,13 @@ export async function readAuditCheckpoint(path: string): Promise<AuditCheckpoint
   return normalizeAuditCheckpoint(checkpoint, path);
 }
 
-/** Read current or pre-production-path JEV reports for reusable puzzle review. */
-export async function readJevAuditReport(path: string): Promise<JevAuditReport> {
-  const report = JSON.parse(await readFile(path, "utf8")) as Partial<JevAuditReport>;
+/** Parse current or pre-production-path JEV report text for reusable puzzle review. */
+export function parseJevAuditReport(sourceText: string, sourceName: string): JevAuditReport {
+  const report = JSON.parse(sourceText) as Partial<JevAuditReport>;
   if (!report || typeof report.startedAt !== "string" || !report.configuration || !Array.isArray(report.difficultyAudit)
     || !Array.isArray(report.targetedDifficultyAudit) || !Array.isArray(report.semanticCalibrationEvidence)
     || !report.clueAudit || !Array.isArray(report.clueAudit.clues) || !report.puzzleAudit) {
-    throw new Error(`invalid JEV audit report: ${path}`);
+    throw new Error(`invalid JEV audit report: ${sourceName}`);
   }
   const legacyResolvedModel = typeof report.configuration.resolvedModel === "string" ? report.configuration.resolvedModel : null;
   const rawClueAudit = report.clueAudit as JevAuditReport["clueAudit"];
@@ -958,6 +958,11 @@ export async function readJevAuditReport(path: string): Promise<JevAuditReport> 
     difficultyAudit: normalizeDifficultyAuditRows(report.difficultyAudit),
     productionDifficultyAudit: normalizeDifficultyAuditRows(report.productionDifficultyAudit),
   } as JevAuditReport;
+}
+
+/** Read and parse a JEV audit report. */
+export async function readJevAuditReport(path: string): Promise<JevAuditReport> {
+  return parseJevAuditReport(await readFile(path, "utf8"), path);
 }
 
 /** Rebuild puzzle-level review inputs from a report's paired semantic clue sample. */
