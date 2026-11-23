@@ -3,7 +3,7 @@ import { DEFAULT_PUZZLE_TOKEN_TTL_SECONDS, issuePuzzleTokenWithIdentity } from "
 import { json } from "./json-response.js";
 import type { GeneratedPuzzle, PuzzleTemplate } from "../domain/types.js";
 import { normalizeGenerationParameters } from "./generation-parameters.js";
-import { publicPuzzleFields } from "./public-puzzle.js";
+import { publicPuzzleFields, publicSelectionDiagnostics } from "./public-puzzle.js";
 import { parseGenerationQuery } from "./generation-query.js";
 import { badRequest, readJsonBody } from "./request-utils.js";
 import type { RestRouterOptions } from "./router-options.js";
@@ -65,7 +65,7 @@ export async function generationRoute(
       templateId: error.templateId,
       ...(error.requestedDifficultyLevel === undefined ? {} : { requestedDifficultyLevel: error.requestedDifficultyLevel }),
       availableDifficultyLevels: error.availableDifficultyLevels,
-      ...(error.diagnostics ? { selectionDiagnostics: error.diagnostics } : {}),
+      ...(error.diagnostics ? { selectionDiagnostics: publicSelectionDiagnostics(error.diagnostics) } : {}),
     }, 422, request.method === "GET" ? { "cache-control": "public, max-age=300, s-maxage=300, must-revalidate" } : undefined);
     return json({ error: { code: "generation_failed", message: "puzzle generation failed" } }, 500);
   }

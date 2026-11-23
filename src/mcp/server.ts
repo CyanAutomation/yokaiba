@@ -8,7 +8,7 @@ import { puzzleFromToken } from "../api/puzzle-from-token.js";
 import { puzzleHint } from "../api/puzzle-hints.js";
 import { PuzzleActionError } from "../api/puzzle-action-error.js";
 import { verifyPuzzleAnswer } from "../api/puzzle-answer.js";
-import { publicPuzzleFields } from "../api/public-puzzle.js";
+import { publicPuzzleFields, publicSelectionDiagnostics } from "../api/public-puzzle.js";
 
 export interface YokaibaMcpOptions {
   puzzleTokenSecret?: string;
@@ -100,7 +100,7 @@ const DifficultyProfileOutputSchema = z.object({
     metrics: z.record(z.string(), z.unknown()),
     reviewFlags: z.array(z.string()),
   }).strict(),
-  calibrationStatus: z.literal("provisional"),
+  calibrationStatus: z.string(),
 }).strict();
 
 const PuzzleOutputSchema = z.object({
@@ -173,7 +173,7 @@ function generationErrorResult(error: unknown) {
       templateId: error.templateId,
       ...(error.requestedDifficultyLevel === undefined ? {} : { requestedDifficultyLevel: error.requestedDifficultyLevel }),
       availableDifficultyLevels: error.availableDifficultyLevels,
-      ...(error.diagnostics ? { selectionDiagnostics: error.diagnostics } : {}),
+      ...(error.diagnostics ? { selectionDiagnostics: publicSelectionDiagnostics(error.diagnostics) } : {}),
     });
   }
   return errorResult("generation_failed", "puzzle generation failed");

@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { generatePuzzle } from "../src/generation/generator.js";
 import { createYokaibaMcpHandler } from "../src/mcp/server.js";
+import { championshipCircuitTemplate } from "../src/templates/championship-circuit.js";
 import { tournamentOrderV2Template } from "../src/templates/tournament-order-v2.js";
 import { createRestRouter } from "../src/api/router.js";
 import type { PuzzleTemplate } from "../src/domain/types.js";
@@ -47,6 +48,18 @@ test("MCP advertises build version and structured schemas for each available too
   assert.ok(tools.length >= 2);
   assert.ok(tools.every(tool => tool.outputSchema && typeof tool.outputSchema === "object"), "all tools should declare an output schema");
   assert.deepEqual(tools.map(tool => tool.name).sort(), ["generate_puzzle", "list_scenarios"]);
+});
+
+test("MCP difficulty profile schema accepts any calibration status string", async () => {
+  const handler = createYokaibaMcpHandler([tournamentOrderV2Template]);
+  const listed = await rpc(handler, 1, "tools/list");
+  const tools = listed.result?.tools as Array<Record<string, any>>;
+  const generateTool = tools.find(tool => tool.name === "generate_puzzle");
+  assert.ok(generateTool);
+  const outputSchema = generateTool.outputSchema as Record<string, any>;
+  const puzzleSchema = outputSchema.anyOf.find((branch: Record<string, any>) => branch.properties?.difficultyProfile);
+
+  assert.deepEqual(puzzleSchema.properties.difficultyProfile.properties.calibrationStatus, { type: "string" });
 });
 
 test("MCP puzzle generation matches REST, preserves a token, and never exposes the solution", async () => {
@@ -100,6 +113,28 @@ test("MCP preserves explicit comparison-model profiles and candidate diagnostics
   }));
   assert.equal(selected.difficultyModel, "v5");
   assert.ok(selected.selectionDiagnostics.candidateScoreRange.complete > 0);
+});
+
+test("MCP failure diagnostics use the public allowlist", async () => {
+  const handler = createYokaibaMcpHandler([championshipCircuitTemplate]);
+  const result = await callTool(handler, 1, "generate_puzzle", {
+    templateId: championshipCircuitTemplate.id,
+    seed: "difficulty-v5-audit-target-championship-circuit-v2-12-0",
+    difficultyLevel: 12,
+    difficultyModel: "v5",
+  });
+  const output = structuredContent(result);
+  const diagnostics = output.selectionDiagnostics as Record<string, unknown>;
+
+  assert.equal(result.isError, true);
+  assert.equal(diagnostics.reason, "no_candidate_in_band");
+  assert.deepEqual(Object.keys(diagnostics).sort(), [
+    "candidateScoreRange",
+    "eligibleCandidates",
+    "modelVersion",
+    "reason",
+    "strategiesAttempted",
+  ]);
 });
 
 test("MCP verifies answers and advances through spoiler-safe clue hints", async () => {

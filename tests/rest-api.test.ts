@@ -373,7 +373,16 @@ test("REST reports unavailable difficulty, reachable alternatives, and keeps the
       const path = `https://yokaiba.test/v1/puzzles/generate?templateId=${template.id}&seed=level-picker&difficultyLevel=${level}`;
       const first = await route(new Request(path));
       assert.ok([200, 422].includes(first.status));
-      const firstBody = await first.json() as { seed?: string; requestedSeed?: string; templateId?: string; requestedDifficultyLevel?: number; difficulty?: { level: number }; error?: { code: string }; availableDifficultyLevels?: number[] };
+      const firstBody = await first.json() as {
+        seed?: string;
+        requestedSeed?: string;
+        templateId?: string;
+        requestedDifficultyLevel?: number;
+        difficulty?: { level: number };
+        error?: { code: string };
+        availableDifficultyLevels?: number[];
+        selectionDiagnostics?: { modelVersion: string; reason: string; strategiesAttempted: number; eligibleCandidates: number };
+      };
       if (first.status === 200) {
         assert.equal(firstBody.seed, "level-picker");
         assert.equal(firstBody.requestedSeed, "level-picker");
@@ -385,6 +394,8 @@ test("REST reports unavailable difficulty, reachable alternatives, and keeps the
         assert.equal(first.headers.get("cache-control"), "public, max-age=300, s-maxage=300, must-revalidate");
         assert.ok(firstBody.availableDifficultyLevels?.every(available => available >= minimumLevel && available <= maximumLevel));
         assert.equal(firstBody.availableDifficultyLevels?.includes(level), false);
+        assert.equal(firstBody.selectionDiagnostics?.reason, "no_candidate_in_band");
+        assert.equal(typeof firstBody.selectionDiagnostics?.modelVersion, "string");
       }
     }
   }

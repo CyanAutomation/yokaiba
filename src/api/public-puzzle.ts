@@ -1,4 +1,5 @@
 import type { Difficulty, GeneratedPuzzle } from "../domain/types.js";
+import type { DifficultyUnavailableError } from "../generation/generator.js";
 import type { DifficultyAssessmentV5, DifficultyMetricV5, DifficultyProfileV1 } from "../generation/difficulty-profile.js";
 import type { HumanDeductionTraceV5 } from "../generation/human-deduction-v5.js";
 
@@ -56,14 +57,18 @@ function publicLegacyDifficulty(difficulty: Difficulty): Difficulty {
   };
 }
 
-function publicSelectionDiagnostics(diagnostics: NonNullable<GeneratedPuzzle["selectionDiagnostics"]>): NonNullable<GeneratedPuzzle["selectionDiagnostics"]> {
-  return {
+type GeneratedSelectionDiagnostics = NonNullable<GeneratedPuzzle["selectionDiagnostics"]>;
+type UnavailableSelectionDiagnostics = NonNullable<DifficultyUnavailableError["diagnostics"]>;
+
+export function publicSelectionDiagnostics(diagnostics: GeneratedSelectionDiagnostics): GeneratedSelectionDiagnostics;
+export function publicSelectionDiagnostics(diagnostics: UnavailableSelectionDiagnostics): UnavailableSelectionDiagnostics;
+export function publicSelectionDiagnostics(
+  diagnostics: GeneratedSelectionDiagnostics | UnavailableSelectionDiagnostics,
+): GeneratedSelectionDiagnostics | UnavailableSelectionDiagnostics {
+  const common = {
     modelVersion: diagnostics.modelVersion,
-    strategyBudget: diagnostics.strategyBudget,
     strategiesAttempted: diagnostics.strategiesAttempted,
     eligibleCandidates: diagnostics.eligibleCandidates,
-    ...(diagnostics.selectedScore === undefined ? {} : { selectedScore: diagnostics.selectedScore }),
-    ...(diagnostics.selectedRankDistance === undefined ? {} : { selectedRankDistance: diagnostics.selectedRankDistance }),
     ...(diagnostics.candidateScoreRange ? {
       candidateScoreRange: {
         minimum: diagnostics.candidateScoreRange.minimum,
@@ -72,6 +77,21 @@ function publicSelectionDiagnostics(diagnostics: NonNullable<GeneratedPuzzle["se
         incomplete: diagnostics.candidateScoreRange.incomplete,
       },
     } : {}),
+  };
+
+  if ("strategyBudget" in diagnostics) {
+    return {
+      ...common,
+      strategyBudget: diagnostics.strategyBudget,
+      ...(diagnostics.selectedScore === undefined ? {} : { selectedScore: diagnostics.selectedScore }),
+      ...(diagnostics.selectedRankDistance === undefined ? {} : { selectedRankDistance: diagnostics.selectedRankDistance }),
+    };
+  }
+
+  return {
+    ...common,
+    reason: diagnostics.reason,
+    ...(diagnostics.fallbackSeedsAttempted === undefined ? {} : { fallbackSeedsAttempted: diagnostics.fallbackSeedsAttempted }),
   };
 }
 
