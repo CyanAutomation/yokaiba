@@ -8,6 +8,7 @@ import { puzzleFromToken } from "../api/puzzle-from-token.js";
 import { puzzleHint } from "../api/puzzle-hints.js";
 import { PuzzleActionError } from "../api/puzzle-action-error.js";
 import { verifyPuzzleAnswer } from "../api/puzzle-answer.js";
+import { publicPuzzleFields, publicSelectionDiagnostics } from "../api/public-puzzle.js";
 
 export interface YokaibaMcpOptions {
   puzzleTokenSecret?: string;
@@ -48,6 +49,60 @@ const ScenarioOutputSchema = z.object({
 
 const ListScenariosOutputSchema = z.object({ scenarios: z.array(ScenarioOutputSchema) });
 
+const PublicDifficultyTraceSchema = z.object({
+  solved: z.boolean(),
+  usedGuessing: z.literal(false),
+  status: z.enum(["solved", "stalled", "contradiction"]),
+  maximumDependencyDepth: z.number().int().nonnegative(),
+  startingDeductions: z.number().int().nonnegative(),
+  automaticPropagationSteps: z.number().int().nonnegative(),
+  crossCategorySteps: z.number().int().nonnegative(),
+}).strict();
+
+const DifficultyMetricOutputSchema = z.object({
+  score: z.number(),
+  direction: z.enum(["higher_is_harder", "higher_is_easier"]),
+  raw: z.record(z.string(), z.union([z.number(), z.array(z.number())])),
+  interpretation: z.string(),
+}).strict();
+
+const DifficultyProfileOutputSchema = z.object({
+  profileVersion: z.literal("yokaiba-difficulty-profile-v1"),
+  logical: z.object({
+    modelVersion: z.literal("yokaiba-difficulty-v5"),
+    score: z.number().min(0).max(100),
+    level: z.number().int().min(1).max(12),
+    inDifficultyBand: z.boolean(),
+    band: z.object({ minimumScore: z.number(), maximumScore: z.number() }).strict(),
+    status: z.enum(["complete", "incomplete", "contradiction"]),
+    metrics: z.object({
+      reasoningDependencyDepth: DifficultyMetricOutputSchema,
+      deductionComplexity: DifficultyMetricOutputSchema,
+      workingMemoryDemand: DifficultyMetricOutputSchema,
+      crossCategoryReasoning: DifficultyMetricOutputSchema,
+      startingAccessibility: DifficultyMetricOutputSchema,
+      automaticCascadeBehaviour: DifficultyMetricOutputSchema,
+      residualLogicalComplexity: DifficultyMetricOutputSchema,
+    }).strict(),
+    trace: PublicDifficultyTraceSchema,
+  }).strict(),
+  legacy: z.object({
+    level: z.number().int().min(1).max(12),
+    label: z.string(),
+    modelVersion: z.string(),
+    evidence: z.record(z.string(), z.unknown()),
+  }).strict(),
+  semantic: z.object({
+    schemaVersion: z.literal("yokaiba-jev-semantic-v2"),
+    model: z.literal("~typesafe/jev-latest"),
+    resolvedModel: z.string().nullable(),
+    status: z.literal("not_assessed"),
+    metrics: z.record(z.string(), z.unknown()),
+    reviewFlags: z.array(z.string()),
+  }).strict(),
+  calibrationStatus: z.string(),
+}).strict();
+
 const PuzzleOutputSchema = z.object({
   id: z.string(),
   requestedSeed: z.string(),
@@ -56,7 +111,7 @@ const PuzzleOutputSchema = z.object({
   seedFallbackAttempt: z.number().int().min(1).optional(),
   generationStrategy: z.number().int().min(0).optional(),
   difficultyModel: z.enum(["v4", "v5", "compare"]).optional(),
-  difficultyProfile: z.record(z.string(), z.unknown()).optional(),
+  difficultyProfile: DifficultyProfileOutputSchema.optional(),
   selectionDiagnostics: z.object({
     modelVersion: z.string(),
     strategyBudget: z.number().int().min(1),
@@ -109,8 +164,7 @@ function errorResult(code: string, message: string, extra: Record<string, unknow
 }
 
 function puzzleOutput(puzzle: GeneratedPuzzle, issuedToken?: { token: string; puzzleFingerprint: string }) {
-  const { solution: _solution, ...publicPuzzle } = puzzle;
-  return { ...publicPuzzle, ...(issuedToken ? { puzzleToken: issuedToken.token, puzzleFingerprint: issuedToken.puzzleFingerprint } : {}) };
+  return { ...publicPuzzleFields(puzzle), ...(issuedToken ? { puzzleToken: issuedToken.token, puzzleFingerprint: issuedToken.puzzleFingerprint } : {}) };
 }
 
 function generationErrorResult(error: unknown) {
@@ -119,7 +173,7 @@ function generationErrorResult(error: unknown) {
       templateId: error.templateId,
       ...(error.requestedDifficultyLevel === undefined ? {} : { requestedDifficultyLevel: error.requestedDifficultyLevel }),
       availableDifficultyLevels: error.availableDifficultyLevels,
-      ...(error.diagnostics ? { selectionDiagnostics: error.diagnostics } : {}),
+      ...(error.diagnostics ? { selectionDiagnostics: publicSelectionDiagnostics(error.diagnostics) } : {}),
     });
   }
   return errorResult("generation_failed", "puzzle generation failed");

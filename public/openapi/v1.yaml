@@ -677,16 +677,49 @@ components:
             humanSolve: { type: object, additionalProperties: true }
             clueStructure: { type: object, additionalProperties: true }
             solver: { type: object, additionalProperties: true }
+    PublicDifficultyTrace:
+      type: object
+      required: [solved, usedGuessing, status, maximumDependencyDepth, startingDeductions, automaticPropagationSteps, crossCategorySteps]
+      additionalProperties: false
+      properties:
+        solved: { type: boolean }
+        usedGuessing: { type: boolean, const: false }
+        status: { type: string, enum: [solved, stalled, contradiction] }
+        maximumDependencyDepth: { type: integer, minimum: 0 }
+        startingDeductions: { type: integer, minimum: 0 }
+        automaticPropagationSteps: { type: integer, minimum: 0 }
+        crossCategorySteps: { type: integer, minimum: 0 }
     DifficultyProfile:
       type: object
       required: [profileVersion, logical, legacy, semantic, calibrationStatus]
+      additionalProperties: false
       properties:
         profileVersion: { type: string, const: yokaiba-difficulty-profile-v1 }
-        logical: { type: object, additionalProperties: true, description: Deterministic v5 score, normalized metrics, and no-guess deduction trace. }
+        logical:
+          type: object
+          required: [modelVersion, score, level, inDifficultyBand, band, status, metrics, trace]
+          additionalProperties: false
+          description: Deterministic v5 score and normalized metrics. The public trace contains summary counts; per-step deduction data is not part of the response.
+          properties:
+            modelVersion: { type: string, const: yokaiba-difficulty-v5 }
+            score: { type: number, minimum: 0, maximum: 100 }
+            level: { type: integer, minimum: 1, maximum: 12 }
+            inDifficultyBand: { type: boolean }
+            band:
+              type: object
+              required: [minimumScore, maximumScore]
+              additionalProperties: false
+              properties:
+                minimumScore: { type: number }
+                maximumScore: { type: number }
+            status: { type: string, enum: [complete, incomplete, contradiction] }
+            metrics: { type: object, additionalProperties: true }
+            trace: { $ref: '#/components/schemas/PublicDifficultyTrace' }
         legacy: { $ref: '#/components/schemas/Difficulty' }
         semantic:
           type: object
           required: [schemaVersion, model, resolvedModel, status, metrics, reviewFlags]
+          additionalProperties: false
           properties:
             schemaVersion: { type: string, const: yokaiba-jev-semantic-v2 }
             model: { type: string, const: '~typesafe/jev-latest' }

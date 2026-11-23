@@ -45,7 +45,7 @@ clues: 8
 solution: not returned
 ```
 
-The response includes the puzzle specification and clues, plus replay metadata. The hidden solution is not returned. Answer verification and hints require a configured `PUZZLE_TOKEN_SECRET`; see [operations and deployment](docs/operations-and-deployment.md#browser-cors-and-abuse-controls) for setup and token limitations.
+The response includes the puzzle specification and clues, plus replay metadata and a summary of the difficulty assessment. The generator uses full traces internally for scoring; public APIs and saved audit reports contain aggregate summaries. Answer verification and hints require a configured `PUZZLE_TOKEN_SECRET`; see [operations and deployment](docs/operations-and-deployment.md#browser-cors-and-abuse-controls) for setup and token limitations.
 
 ## Run locally
 
