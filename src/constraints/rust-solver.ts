@@ -80,6 +80,7 @@ function encodeRequest(spec: PuzzleSpec, clues: readonly Clue[], limit: number):
 
   const isUnlimited = limit === Number.POSITIVE_INFINITY;
   const limitMode = isUnlimited ? 0 : 1;
+  // Match solveWithTelemetry: non-positive and NaN limits produce no solutions.
   const limitCount = !isUnlimited && limit > 0
     ? Math.min(MAX_U32, Math.ceil(limit))
     : 0;
@@ -147,6 +148,7 @@ export function createRustPuzzleSolver(exports: RustSolverWasmExports): PuzzleSo
       if (outputPointer === 0) throw new Error(`Rust solver rejected its input (error ${outputLength})`);
 
       try {
+        // decodeSolutions copies strings into JS-owned values; never return this view beyond release_words.
         const output = new Uint32Array(exports.memory.buffer, outputPointer, outputLength);
         return decodeSolutions(spec, output);
       } finally {

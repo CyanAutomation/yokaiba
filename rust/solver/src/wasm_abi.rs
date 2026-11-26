@@ -12,7 +12,7 @@ pub extern "C" fn allocate_words(length: u32) -> u32 {
 
 #[no_mangle]
 pub extern "C" fn release_words(pointer: u32, length: u32) {
-    if pointer == 0 || length == 0 {
+    if pointer == 0 {
         return;
     }
     let raw_slice = ptr::slice_from_raw_parts_mut(pointer as *mut u32, length as usize);

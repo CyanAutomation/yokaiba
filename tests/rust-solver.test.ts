@@ -57,6 +57,12 @@ test("Rust solver preserves solution limits, including zero and unlimited", () =
   }
 });
 
+test("Rust solver matches TypeScript for negative and NaN limits", () => {
+  for (const limit of [-1, Number.NaN]) {
+    assert.deepEqual(rustSolver.solve(twoRowSpec, [], limit), solveTypeScript(twoRowSpec, [], limit), `limit ${limit}`);
+  }
+});
+
 test("Rust solver supports a base-only puzzle and the maximum grid size", () => {
   const baseOnly: PuzzleTemplate = {
     id: "rust-parity-base-only",
