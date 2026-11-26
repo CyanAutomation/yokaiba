@@ -88,6 +88,8 @@ const MAX_PUZZLE_TOKEN_NAMESPACE_DIGESTS = 10;
 const puzzleTokenNamespaceDigests = new Map<string | undefined, Promise<string>>();
 
 export interface GeneratedPuzzleCacheKeyDependencies {
+  /** Solver identity prevents cached responses from crossing backend rollouts. */
+  solverVersion?: string;
   /** An isolated cache and digest are useful for deterministic cache-key tests. */
   digestCache?: Map<string | undefined, Promise<string>>;
   digest?: (algorithm: AlgorithmIdentifier, data: BufferSource) => Promise<ArrayBuffer>;
@@ -148,7 +150,7 @@ export async function generatedPuzzleCacheKey(
     const { templateId, seed, difficultyLevel, allowSeedFallback, difficultyModel } = parseGenerationQuery(new URL(request.url));
     // A positional tuple gives the identity a fixed ordering and makes explicit
     // that an absent fallback has the same semantics as `false`.
-    return JSON.stringify([templateId, seed, difficultyLevel ?? null, allowSeedFallback ?? false, difficultyModel ?? "v5", await puzzleTokenNamespace(puzzleTokenSecret, dependencies)]);
+    return JSON.stringify([templateId, seed, difficultyLevel ?? null, allowSeedFallback ?? false, difficultyModel ?? "v5", dependencies.solverVersion ?? "yokaiba-exhaustive-v1", await puzzleTokenNamespace(puzzleTokenSecret, dependencies)]);
   } catch {
     // Invalid generation requests are routed normally so the router can return
     // its canonical 400 response; they are not eligible for memoization.

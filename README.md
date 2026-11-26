@@ -49,7 +49,7 @@ The response includes the puzzle specification and clues, plus replay metadata a
 
 ## Run locally
 
-Requirements: Node.js 26.x and npm. The repository pins the Node.js major version in `.nvmrc`. From the repository root:
+Requirements: Node.js 26.x, Rust 1.100.0 with the `wasm32-unknown-unknown` target, and npm. The repository pins Node in `.nvmrc` and Rust in `rust-toolchain.toml`. From the repository root:
 
 ```sh
 npm ci

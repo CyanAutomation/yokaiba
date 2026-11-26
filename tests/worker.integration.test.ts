@@ -1,6 +1,8 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { generatePuzzle } from "../src/generation/generator.js";
+import { exhaustivePuzzleSolver } from "../src/constraints/solver.js";
+import { RUST_WASM_SOLVER_VERSION } from "../src/constraints/rust-solver.js";
 import { issuePuzzleToken } from "../src/api/puzzle-token.js";
 import { tournamentOrderTemplate } from "../src/templates/tournament-order.js";
 import worker, { createCachedPublicWorker, createWorker, GeneratedPuzzleCache } from "../worker/index.js";
@@ -26,6 +28,39 @@ test("version and readiness expose deployed build and rate-limit configuration",
     outcomeTelemetryProvider: "configured",
   });
   assert.equal(ready.headers.get("cache-control"), "no-store");
+});
+
+test("worker selects the injected Rust solver for generation and reports its version", async () => {
+  let loaderCalls = 0;
+  let solverCalls = 0;
+  const rustSolver = {
+    ...exhaustivePuzzleSolver,
+    version: RUST_WASM_SOLVER_VERSION,
+    countSolutions(spec: Parameters<typeof exhaustivePuzzleSolver.countSolutions>[0], clues: Parameters<typeof exhaustivePuzzleSolver.countSolutions>[1], limit?: number) {
+      solverCalls += 1;
+      return exhaustivePuzzleSolver.countSolutions(spec, clues, limit);
+    },
+  };
+  const isolatedWorker = createWorker({
+    rustSolverLoader: async () => {
+      loaderCalls += 1;
+      return rustSolver;
+    },
+  });
+  const env = {
+    SOLVER_BACKEND: "rust",
+    REST_GENERATE_RATE_LIMITER: { limit: async () => ({ success: true }) },
+  };
+
+  const response = await isolatedWorker.fetch(new Request("https://yokaiba.test/v1/puzzles/generate?templateId=tournament-order-v1&seed=rust-worker-switch"), env, {} as ExecutionContext);
+  const puzzle = await response.json() as { solverVersion: string };
+  assert.equal(response.status, 200);
+  assert.equal(puzzle.solverVersion, RUST_WASM_SOLVER_VERSION);
+  assert.equal(loaderCalls, 1);
+  assert.ok(solverCalls > 0);
+
+  const version = await isolatedWorker.fetch(new Request("https://yokaiba.test/v1/version"), env, {} as ExecutionContext);
+  assert.equal((await version.json() as { solverVersion: string }).solverVersion, RUST_WASM_SOLVER_VERSION);
 });
 
 test("worker rejects malformed URLs without throwing", async () => {

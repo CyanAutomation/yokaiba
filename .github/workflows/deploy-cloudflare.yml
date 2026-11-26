@@ -36,6 +36,12 @@ jobs:
           node-version-file: .nvmrc
           cache: npm
 
+      - uses: actions-rust-lang/setup-rust-toolchain@166cdcfd11aee3cb47222f9ddb555ce30ddb9659 # v1
+        with:
+          toolchain: 1.100.0
+          target: wasm32-unknown-unknown
+          components: rustfmt,clippy
+
       - run: npm ci
 
       - name: Read package version
@@ -63,6 +69,7 @@ jobs:
           BUILD_VERSION: ${{ steps.build.outputs.version }}
           BUILD_SHA: ${{ github.sha }}
         run: |
+          npm run solver:rust:build
           npx wrangler deploy --var "BUILD_VERSION:$BUILD_VERSION" --var "BUILD_SHA:$BUILD_SHA"
           npm run deployment:record-output
       - name: Probe direct Worker deployment

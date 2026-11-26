@@ -6,11 +6,14 @@
   "scripts": {
     "build": "tsc -p tsconfig.json",
     "typecheck": "tsc -p tsconfig.json --noEmit && tsc -p tsconfig.scripts.json --noEmit",
-    "test": "node --import tsx --test tests/*.test.ts",
+    "solver:rust:test": "cargo test --manifest-path rust/solver/Cargo.toml",
+    "solver:rust:build": "cargo build --manifest-path rust/solver/Cargo.toml --release --target wasm32-unknown-unknown",
+    "solver:rust:check": "cargo fmt --manifest-path rust/solver/Cargo.toml -- --check && cargo clippy --manifest-path rust/solver/Cargo.toml --target wasm32-unknown-unknown -- -D warnings && npm run solver:rust:test && npm run solver:rust:build",
+    "test": "npm run solver:rust:check && node --import tsx --test tests/*.test.ts",
     "docs:check": "markdownlint-cli2 README.md \"docs/**/*.md\" \".github/skills/**/*.md\" && node --import tsx scripts/check-docs.ts",
     "docs:links": "tsx scripts/check-external-doc-links.ts",
-    "test:coverage": "c8 --reporter=json --reports-dir=coverage node --import tsx --test tests/*.test.ts",
-    "dev": "wrangler dev",
+    "test:coverage": "npm run solver:rust:check && c8 --reporter=json --reports-dir=coverage node --import tsx --test tests/*.test.ts",
+    "dev": "npm run solver:rust:build && wrangler dev",
     "audit:difficulty": "tsx scripts/audit-difficulty.mts",
     "audit:difficulty:v5": "tsx scripts/audit-difficulty-v5.mts",
     "audit:difficulty:targeted": "tsx scripts/audit-targeted-difficulty.mts",
@@ -24,7 +27,7 @@
     "fallow:health": "fallow health --report-only",
     "fallow:audit": "fallow audit --gate new-only",
     "fallow:policy": "fallow dead-code --config .github/fallow/policy-config.json --policy-violations --format compact --quiet",
-    "deploy": "wrangler deploy"
+    "deploy": "npm run solver:rust:build && wrangler deploy"
   },
   "dependencies": {
     "zod": "^4.6.7"

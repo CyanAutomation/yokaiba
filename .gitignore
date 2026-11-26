@@ -2,5 +2,6 @@ node_modules/
 build/
 coverage/
 .wrangler/
+rust/solver/target/
 .dev.vars
 reports/jev-audit-*.checkpoint.json

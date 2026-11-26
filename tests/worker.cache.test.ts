@@ -211,6 +211,16 @@ test("generated puzzle cache keys distinguish difficulty models and normalize th
   assert.notEqual(await key("compare"), await key("v5"));
 });
 
+test("generated puzzle cache keys separate solver backends", async () => {
+  const request = new Request("https://example.com/v1/puzzles/generate?templateId=template&seed=seed");
+  const typescriptKey = await generatedPuzzleCacheKey(request, undefined, { solverVersion: "yokaiba-exhaustive-v1" });
+  const rustKey = await generatedPuzzleCacheKey(request, undefined, { solverVersion: "yokaiba-rust-wasm-v1" });
+
+  assert.ok(typescriptKey);
+  assert.ok(rustKey);
+  assert.notEqual(typescriptKey, rustKey);
+});
+
 test("generated puzzle cache keys namespace secrets without exposing them", async () => {
   const request = new Request("https://example.com/v1/puzzles/generate?templateId=template&seed=seed");
   const firstSecret = "first-private-signing-secret";
