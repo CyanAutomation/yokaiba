@@ -3,7 +3,7 @@
 ## Prerequisites
 
 - Node.js 26.x. The supported range is declared in `package.json`, and `.nvmrc` supplies the version used by CI and local version managers.
-- Rust 1.100.0 with the `wasm32-unknown-unknown` target. `rust-toolchain.toml` pins the compiler, target, formatter, and linter used for the optional Rust solver.
+- Rust 1.100.0 with the `wasm32-unknown-unknown` target. `rust-toolchain.toml` pins the compiler, target, formatter, and linter used by the Worker solver.
 - npm, which is bundled with Node.js.
 
 Install and start the local Cloudflare Worker:
@@ -44,7 +44,7 @@ The weekly external-link workflow checks the README's linked destinations with `
 - `worker/main.ts` is the Cloudflare Worker entry point. It keeps the default gateway uncached and exports a dedicated `CachedPublic` entrypoint for reusable public GET responses. `worker/index.ts` contains routing, rate limiting, local generation caching, and response handling.
 - `src/api/` contains REST routing and request handlers. `src/utcp/` builds the versioned manual that maps selected tools directly to those routes.
 - `src/generation/` builds deterministic puzzles and difficulty evidence. `src/constraints/` and `src/domain/` provide the solver and puzzle model used by generation and answer actions.
-- `rust/solver/` contains the deterministic Rust search core. `src/constraints/rust-solver.ts` packs the existing string-based puzzle model into a compact integer protocol, and `rust-solver-runtime.ts` loads its WebAssembly build for the Worker. TypeScript remains the default backend; `SOLVER_BACKEND=rust` opts into the Rust implementation.
+- `rust/solver/` contains the deterministic Rust search core. `src/constraints/rust-solver.ts` packs the existing string-based puzzle model into a compact integer protocol, and `rust-solver-runtime.ts` loads its WebAssembly build for the Worker. The checked-in Wrangler configuration selects Rust; `SOLVER_BACKEND=typescript` selects the TypeScript reference backend.
 - `public/openapi/` contains the REST contracts served through the Worker asset binding.
 
 ## Solver internals
@@ -53,9 +53,9 @@ Generation and quality evaluation depend on the internal `PuzzleSolver` contract
 
 `solveWithTelemetry(spec, clues, limit)` supports local profiling and returns the normal solutions with visited permutation nodes, evaluated ready constraints, and elapsed milliseconds. Telemetry is diagnostic-only. Profiling tools and tests can provide a fourth `now` function when deterministic elapsed timing is required.
 
-`npm run solver:rust:check` formats and lints the Rust crate, runs its native unit tests, and builds the release WebAssembly module. `npm test` and `npm run test:coverage` run that check before the TypeScript suite. `npm run dev` and `npm run deploy` build the module before Wrangler starts. The Rust backend is opt-in while its Worker CPU results are being compared; leave `SOLVER_BACKEND` unset for the TypeScript reference backend.
+`npm run solver:rust:check` formats and lints the Rust crate, runs its native unit tests, and builds the release WebAssembly module. `npm test` and `npm run test:coverage` run that check before the TypeScript suite. `npm run dev` and `npm run deploy` build the module before Wrangler starts. Wrangler enables the Rust backend for local and deployed Workers through `SOLVER_BACKEND=rust` in `wrangler.toml`.
 
-For a local Worker comparison, add `SOLVER_BACKEND=rust` to the ignored `.dev.vars` file, run `npm run dev`, and request the same seed against both backends. Remove the variable to return to TypeScript. The `/v1/version` endpoint reports the active solver version.
+To compare with the TypeScript reference backend locally, add `SOLVER_BACKEND=typescript` to the ignored `.dev.vars` file and run `npm run dev`. The `/v1/version` endpoint reports the active solver version.
 
 ## Contributions and support
 

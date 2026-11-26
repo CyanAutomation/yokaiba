@@ -33,7 +33,7 @@ export interface Env {
   PUZZLE_TOKEN_PREVIOUS_SECRETS?: string;
   /** Token lifetime in seconds; defaults to seven days and is capped at 30 days. */
   PUZZLE_TOKEN_TTL_SECONDS?: string;
-  /** Opt in to the Rust/Wasm solver for generation. Defaults to TypeScript. */
+  /** Solver used for generation. Wrangler selects Rust/Wasm; unset values use TypeScript. */
   SOLVER_BACKEND?: string;
   /** Deployment-time package version and immutable revision, injected by CI. */
   BUILD_VERSION?: string;

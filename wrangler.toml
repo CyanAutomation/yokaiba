@@ -39,7 +39,8 @@ run_worker_first = ["/docs", "/docs/", "/utcp", "/openapi/*"]
 [vars]
 # Canonical origin used in UTCP HTTP call templates. Override for a custom domain.
 PUBLIC_API_BASE_URL = "https://yokaiba.scheimann.workers.dev"
-# SOLVER_BACKEND may be set to "rust" for a local or canary comparison; TypeScript is the default.
+# Rust/Wasm is the Worker backend; set to "typescript" to use the reference solver.
+SOLVER_BACKEND = "rust"
 
 [[d1_databases]]
 binding = "PUZZLE_FEEDBACK"

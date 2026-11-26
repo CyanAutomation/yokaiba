@@ -322,6 +322,12 @@ test("shared validation and Cloudflare deployment set up the Rust WebAssembly ta
   assert.match(getRunStep(deploy, "deploy", "Deploy Worker"), /npm run solver:rust:build[\s\S]*npx wrangler deploy/);
 });
 
+test("Wrangler enables the Rust solver backend by default", () => {
+  const wrangler = readFileSync(new URL("../wrangler.toml", import.meta.url), "utf8");
+  const variables = wrangler.split(/^\[vars\]\s*$/m)[1]?.split(/^\[/m)[0] ?? "";
+  assert.match(variables, /^SOLVER_BACKEND = "rust"$/m);
+});
+
 test("shared validation audits changed code after collecting test coverage", () => {
   const shared = readWorkflow("validate-reusable.yml");
   const steps = getJob(shared, "validate").steps as Workflow[];
