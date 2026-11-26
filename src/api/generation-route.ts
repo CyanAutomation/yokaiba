@@ -57,7 +57,7 @@ export async function generationRoute(
   if (!template) return json({ error: { code: "not_found", message: "unknown templateId" } }, 404);
 
   try {
-    return json(await publicPuzzle(generatePuzzleForRequest(template, seed, difficultyLevel, allowSeedFallback, undefined, difficultyModel ?? "v5"), options), 200,
+    return json(await publicPuzzle(generatePuzzleForRequest(template, seed, difficultyLevel, allowSeedFallback, options.solver, difficultyModel ?? "v5"), options), 200,
       request.method === "GET" ? { "cache-control": generatedPuzzleCacheControl(options.puzzleTokenSecret, options.puzzleTokenTtlSeconds) } : undefined);
   } catch (error) {
     if (error instanceof DifficultyUnavailableError) return json({

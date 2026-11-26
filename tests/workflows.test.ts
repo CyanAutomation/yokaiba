@@ -305,6 +305,29 @@ test("shared validation runs the production TypeScript build", () => {
   assert.ok(steps.some(step => step.run === "npm run build"));
 });
 
+test("shared validation and Cloudflare deployment set up the Rust WebAssembly target", () => {
+  const validation = readWorkflow("validate-reusable.yml");
+  const deploy = readWorkflow("deploy-cloudflare.yml");
+  for (const [workflow, jobName] of [[validation, "validate"], [deploy, "deploy"]] as const) {
+    const steps = getJob(workflow, jobName).steps as Workflow[];
+    const setupIndex = steps.findIndex(step => String(step.uses).startsWith("actions-rust-lang/setup-rust-toolchain@"));
+    assert.ok(setupIndex >= 0, `${jobName} must install the Rust toolchain`);
+    const setup = steps[setupIndex]!;
+    assert.match(String(setup.uses), /@[a-f0-9]{40}/, `${jobName} must pin the Rust setup action`);
+    assert.equal(setup.with?.toolchain, "1.100.0");
+    assert.equal(setup.with?.target, "wasm32-unknown-unknown");
+    assert.ok(setupIndex < steps.findIndex(step => step.run === "npm ci"), `${jobName} must install Rust before running solver scripts`);
+  }
+
+  assert.match(getRunStep(deploy, "deploy", "Deploy Worker"), /npm run solver:rust:build[\s\S]*npx wrangler deploy/);
+});
+
+test("Wrangler enables the Rust solver backend by default", () => {
+  const wrangler = readFileSync(new URL("../wrangler.toml", import.meta.url), "utf8");
+  const variables = wrangler.split(/^\[vars\]\s*$/m)[1]?.split(/^\[/m)[0] ?? "";
+  assert.match(variables, /^SOLVER_BACKEND = "rust"$/m);
+});
+
 test("shared validation audits changed code after collecting test coverage", () => {
   const shared = readWorkflow("validate-reusable.yml");
   const steps = getJob(shared, "validate").steps as Workflow[];

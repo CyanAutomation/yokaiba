@@ -1,4 +1,7 @@
 import { createRestRouter } from "../src/api/router.js";
+import type { PuzzleSolver } from "../src/domain/puzzle-solver.js";
+import { SOLVER_VERSION } from "../src/generation/generator.js";
+import { RUST_WASM_SOLVER_VERSION } from "../src/constraints/rust-solver.js";
 import { createUtcpManual, DEFAULT_PUBLIC_API_BASE_URL } from "../src/utcp/manual.js";
 import { tournamentOrderTemplate } from "../src/templates/tournament-order.js";
 import { tournamentOrderV2Template } from "../src/templates/tournament-order-v2.js";
@@ -30,6 +33,8 @@ export interface Env {
   PUZZLE_TOKEN_PREVIOUS_SECRETS?: string;
   /** Token lifetime in seconds; defaults to seven days and is capped at 30 days. */
   PUZZLE_TOKEN_TTL_SECONDS?: string;
+  /** Solver used for generation. Wrangler selects Rust/Wasm; unset values use TypeScript. */
+  SOLVER_BACKEND?: string;
   /** Deployment-time package version and immutable revision, injected by CI. */
   BUILD_VERSION?: string;
   BUILD_SHA?: string;
@@ -140,6 +145,8 @@ export interface WorkerOptions {
   generatedPuzzleCache?: GeneratedPuzzleCache;
   cacheKeyBuilder?: typeof generatedPuzzleCacheKey;
   generatePuzzleResponse?: (request: Request) => Response | Promise<Response>;
+  /** Injected loader keeps Rust/Wasm selection testable without changing the default backend. */
+  rustSolverLoader?: () => Promise<PuzzleSolver>;
   cachedPublicFetch?: (request: Request, ctx: ExecutionContext) => Promise<Response>;
 }
 import { GeneratedPuzzleCache, generatedPuzzleCacheKey, cachedGeneratedPuzzle, cacheGeneratedPuzzle, cachePublicGet } from "./cache.js";
@@ -227,6 +234,27 @@ interface RequestContext {
 
 function buildInfo(env: Env) {
   return { serviceVersion: env.BUILD_VERSION ?? "0.1.0", buildSha: env.BUILD_SHA ?? "local" };
+}
+
+function configuredSolverVersion(env: Env): string {
+  if (env.SOLVER_BACKEND === undefined || env.SOLVER_BACKEND === "typescript") return SOLVER_VERSION;
+  if (env.SOLVER_BACKEND === "rust") return RUST_WASM_SOLVER_VERSION;
+  throw new Error("SOLVER_BACKEND must be typescript or rust");
+}
+
+function solverVersionForPath(path: string, env: Env): string {
+  return path === "/v1/puzzles/generate" ? configuredSolverVersion(env) : SOLVER_VERSION;
+}
+
+async function loadGenerationSolver(
+  path: string,
+  solverVersion: string,
+  options: WorkerOptions,
+): Promise<PuzzleSolver | undefined> {
+  if (path !== "/v1/puzzles/generate" || solverVersion !== RUST_WASM_SOLVER_VERSION) return undefined;
+  if (options.rustSolverLoader) return options.rustSolverLoader();
+  const runtime = await import("../src/constraints/rust-solver-runtime.js");
+  return runtime.rustWasmPuzzleSolver;
 }
 
 function configuredRestLimit(path: string, env: Env): string {
@@ -373,10 +401,14 @@ async function generateRestResponse(
   if (path === "/v1/puzzles/generate" && dependencies.options.generatePuzzleResponse) {
     return dependencies.options.generatePuzzleResponse(request);
   }
+  const solverVersion = configuredSolverVersion(env);
+  const solver = await loadGenerationSolver(path, solverVersion, dependencies.options);
   const router = createRestRouter(templates, {
     puzzleTokenSecret: env.PUZZLE_TOKEN_SECRET,
     puzzleTokenPreviousSecrets: env.PUZZLE_TOKEN_SECRET ? previousPuzzleTokenSecrets(env) : [],
     puzzleTokenTtlSeconds: puzzleTokenTtlSeconds(env),
+    solverVersion,
+    ...(solver ? { solver } : {}),
     ...dependencies.build,
     ...(env.PUZZLE_OUTCOMES ? { recordOutcome: event => {
       try { writePuzzleOutcome(env.PUZZLE_OUTCOMES!, event); }
@@ -388,8 +420,9 @@ async function generateRestResponse(
 }
 
 async function routeRestRequest(request: Request, path: string, env: Env, ctx: ExecutionContext, dependencies: RestRequestDependencies): Promise<Response> {
+  const solverVersion = solverVersionForPath(path, env);
   const cacheKey = request.method === "GET" && path === "/v1/puzzles/generate"
-    ? await (dependencies.options.cacheKeyBuilder ?? generatedPuzzleCacheKey)(request, env.PUZZLE_TOKEN_SECRET)
+    ? await (dependencies.options.cacheKeyBuilder ?? generatedPuzzleCacheKey)(request, env.PUZZLE_TOKEN_SECRET, { solverVersion })
     : undefined;
   let response: Response;
   if (!cacheKey) {

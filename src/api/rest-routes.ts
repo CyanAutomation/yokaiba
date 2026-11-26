@@ -42,7 +42,7 @@ export function createRestRoutes(templates: readonly PuzzleTemplate[], options: 
     ["GET /v1/capabilities", async () => json({
       ...publicCapabilities(templates, options.puzzleTokenSecret, Boolean(options.recordOutcome), Boolean(options.recordFeedback)),
     }, 200, { "cache-control": SCENARIOS_CACHE_CONTROL })],
-    ["GET /v1/version", async () => json({ serviceVersion: options.serviceVersion ?? "0.1.0", buildSha: options.buildSha ?? "local", generatorVersion: GENERATOR_VERSION, solverVersion: SOLVER_VERSION }, 200, { "cache-control": VERSION_CACHE_CONTROL })],
+    ["GET /v1/version", async () => json({ serviceVersion: options.serviceVersion ?? "0.1.0", buildSha: options.buildSha ?? "local", generatorVersion: GENERATOR_VERSION, solverVersion: options.solverVersion ?? options.solver?.version ?? SOLVER_VERSION }, 200, { "cache-control": VERSION_CACHE_CONTROL })],
     ["POST /v1/events", request => outcomeRoute(request, byId, options.recordOutcome, protectedSecrets)],
     ["POST /v1/feedback", request => feedbackRoute(request, byId, protectedSecrets, options.recordFeedback)],
     ["POST /v1/puzzles/hint", request => hintRoute(request, byId, protectedSecrets)],
